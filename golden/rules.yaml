@@ -833,17 +833,39 @@ rules:
   - id: DATUM-TYPE-UNKNOWN-HOISTED
     status: active
     expires: 2027-06-30
-    # PINNED at 251, measured 2026-08-01 on a frozen /tmp snapshot. golden/README.md's 253 is an
-    # earlier snapshot and is superseded.
+    # RE-PINNED 2026-08-07 from 251 to 253, measured on a full run of this tree. The previous 251
+    # never described the tree it shipped with: `git log --diff-filter=A -- golden/rules.yaml` shows
+    # this file was ADDED by 6d5e9af already carrying 251, and its own note dated that number to a
+    # frozen /tmp snapshot taken four days earlier. golden/README.md's 253 was therefore right all
+    # along, and the claim that it was "superseded" was wrong -- the README was reporting a measured
+    # count while this rule carried a derived one, which is exactly the mistake golden/README.md
+    # warns against ("pin a count only when you know its stream has finished landing, and pin it
+    # from a run you did yourself"). Nothing later broke this rule; it arrived already off by two.
     #
-    # THE ARITHMETIC, because this is the one TBD rule with no predicted count written anywhere and
-    # so the one whose pin needed its own derivation. 347 changed PAIR rows carry a `t0*/*` or
-    # `t*0/*` key: 251 land here, 16 are claimed earlier by FAILCLOSED-UNCHECKED-ISE-REPLACED, and
-    # 80 are UNEXPLAINED. The 16 are NOT lost to an ordering accident -- every one is a status
-    # change (IllegalStateException -> ProjectionException) and the `expect` clause below does not
-    # set allow_status_change, so this rule declines them wherever it sits in the file. Checked on
-    # the frozen report rather than inferred.
-    expected_rows: 251
+    # THE ARITHMETIC, re-derived on this tree rather than bumped. 349 changed PAIR rows carry a
+    # `t0*/*` or `t*0/*` key: 253 land here, 16 are claimed earlier by
+    # FAILCLOSED-UNCHECKED-ISE-REPLACED, and 80 are UNEXPLAINED. Only the candidate total and this
+    # rule's share moved -- the 16 and the 80 are unchanged from the earlier derivation, which is
+    # what shows the two extra rows are new arrivals in the glob and not a re-shuffle between rules.
+    # The 16 are NOT lost to an ordering accident -- every one is a status change
+    # (IllegalStateException -> ProjectionException) and the `expect` clause below does not set
+    # allow_status_change, so this rule declines them wherever it sits in the file.
+    #
+    # THE TWO EXTRA ROWS, named so the next re-pin can tell drift from a real change:
+    #   PAIR t00/epsg:4024>epsg:2163 probe 0    fx,ix,iy   0x1.0p-29   OK -> OK
+    #   PAIR t10/epsg:4173>epsg:2163 probe 0    fx,ix,iy   0x1.0p-29   OK -> OK
+    # These are probe 0 of two pairs whose probes 2 and 3 this rule ALREADY claimed, so they are the
+    # same pairs with the same signature reaching one more probe -- not a new failure mode. Both
+    # target epsg:2163, and epsg:4024 has no datum while epsg:4173 carries +towgs84, which is what
+    # puts them at t00/ and t10/ respectively. Neither uses +nadgrids, so the conus grid that
+    # re-pinned DATUM-ISEQUAL-SELF-COMPARISON below is not involved here. This rule sets no
+    # magnitude bound, so a 2^-29 move is within its contract.
+    #
+    # WHAT WAS RULED OUT, so nobody re-runs it: 29abf8e (FastStrictTrig in LAEA and Landsat) looked
+    # like the cause because its message quotes 1.86e-9 m and 0x1.0p-29 is 1.8626e-9. Coincidence --
+    # reverting exactly the two files it touched and re-running produces a BYTE-IDENTICAL golden
+    # report, both 253. 2^-29 is just a natural binary value.
+    expected_rows: 253
     reason: |
       BasicCoordinateTransform.java:198-205 nests the TYPE_UNKNOWN early-return INSIDE an
       ellipsoid-equality guard, so it is only consulted when the ellipsoids already match. The file

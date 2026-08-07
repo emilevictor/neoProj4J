@@ -382,7 +382,7 @@ in `reason`.
 > | `PARSE-RF-IN-WORLD-DICTIONARY` | 5 | rule header comment |
 > | `PARSE-FIRST-MATCH-WINS` | 71 | rule header comment |
 > | `FAILCLOSED-UNCHECKED-ISE-REPLACED` | 37 | NAD27 rule predicts "lands at 37" |
-> | `DATUM-TYPE-UNKNOWN-HOISTED` | 251 | derived here: 347 candidate PAIR rows = 251 + 16 + 80 |
+> | `DATUM-TYPE-UNKNOWN-HOISTED` | 251 | derived here: 347 candidate PAIR rows = 251 + 16 + 80 — **wrong, see below** |
 > | `DATUM-ISEQUAL-SELF-COMPARISON` | 284 | NAD27 rule predicts `332 -> 284` |
 > | `NUM-PHI2-CONVERGES-ON-EXTREME-ELLIPSOIDS` | 6 | rule header comment |
 > | `PROJ-INVERSE-CORRECTED-ROUND-TRIP-NOW-EXACT` | 48 | rule header comment, per-key breakdown |
@@ -393,6 +393,16 @@ in `reason`.
 >
 > `DATUM-TYPE-UNKNOWN-HOISTED` is the only one with no pre-existing prediction anywhere, which is
 > why its derivation is written out in the rule's header rather than just its number.
+>
+> **Correction, 2026-08-07.** That derivation was measured on a frozen `/tmp` snapshot four days
+> before `rules.yaml` was committed, and it was already stale when the file landed: the candidate
+> total is **349**, not 347, and this rule's share is **253**, not 251. The gate has been printing
+> `COUNT_MISMATCH DATUM-TYPE-UNKNOWN-HOISTED expected_rows=251 but matched 253` ever since, unnoticed
+> because golden was de-scoped from the PR and push checks sixteen minutes later. The `16` and the
+> `80` in the split above were both correct and are unchanged. The rule is now pinned at 253 from a
+> full run of the tree, with the two rows named in its header. **The lesson is the one this section
+> already states and this row broke:** the "observed today" table below said 253 at the time, and the
+> measured number was the right one to pin.
 
 Seven rules ship. **Only `PARSE-VUNITS-ACCEPTED` has a pinned `expected_rows`**; the rest are `TBD`,
 because the working tree is mid-flight across six concurrent streams and any number pinned today
