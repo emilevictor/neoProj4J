@@ -96,9 +96,21 @@ public class Registry {
             Ellipsoid.AIRY,
             Ellipsoid.MOD_AIRY,
             new Ellipsoid("APL4.9", 6378137.0, 0.0, 298.25, "Appl. Physics. 1965"),
-            new Ellipsoid("NWL9D", 6378145.0, 298.25, 0.0, "Naval Weapons Lab., 1965"),
-            new Ellipsoid("andrae", 6377104.43, 300.0, 0.0, "Andrae 1876 (Den., Iclnd.)"),
+            // Referenced rather than re-declared. Both were re-declared here with the inverse
+            // flattening in the poleRadius slot -- new Ellipsoid("NWL9D", 6378145.0, 298.25, 0.0)
+            // and new Ellipsoid("andrae", 6377104.43, 300.0, 0.0) -- which selects the
+            // 1 - (b*b)/(a*a) branch of the constructor and takes 298.25 metres literally as the
+            // pole radius, giving e = 0.999999998906693 against GRS80's 0.0818. Every transform
+            // through +ellps=NWL9D or +ellps=andrae was computed on a near-flat disc.
+            Ellipsoid.NWL9D,
+            Ellipsoid.ANDRAE,
             new Ellipsoid("aust_SA", 6378160.0, 0.0, 298.25, "Australian Natl & S. Amer. 1969"),
+            // Not a PROJ name -- PROJ 9.8.1's ellps.cpp has aust_SA and no "australian". This is a
+            // proj4j extra, and it is listed here so that +ellps=australian resolves to the
+            // Ellipsoid.AUSTRALIAN that this library has always defined instead of failing lookup.
+            // Numerically identical to aust_SA above: both are a=6378160.0, 1/f=298.25, and
+            // AUSTRALIAN's poleRadius is ignored because reciprocalFlattening takes precedence.
+            Ellipsoid.AUSTRALIAN,
             new Ellipsoid("GRS67", 6378160.0, 0.0, 298.2471674270, "GRS 67 (IUGG 1967)"),
             Ellipsoid.BESSEL,
             new Ellipsoid("bess_nam", 6377483.865, 0.0, 299.1528128, "Bessel 1841 (Namibia)"),

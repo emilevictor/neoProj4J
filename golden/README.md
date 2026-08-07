@@ -384,7 +384,7 @@ in `reason`.
 > | `FAILCLOSED-UNCHECKED-ISE-REPLACED` | 37 | NAD27 rule predicts "lands at 37" |
 > | `DATUM-TYPE-UNKNOWN-HOISTED` | 251 | derived here: 347 candidate PAIR rows = 251 + 16 + 80 — **wrong, see below** |
 > | `DATUM-ISEQUAL-SELF-COMPARISON` | 284 | NAD27 rule predicts `332 -> 284` |
-> | `NUM-PHI2-CONVERGES-ON-EXTREME-ELLIPSOIDS` | 6 | rule header comment |
+> | `NUM-PHI2-CONVERGES-ON-EXTREME-ELLIPSOIDS` | 6 | rule header comment — **renamed and re-pinned, see below** |
 > | `PROJ-INVERSE-CORRECTED-ROUND-TRIP-NOW-EXACT` | 48 | rule header comment, per-key breakdown |
 > | `PROJ-INVERSE-CORRECTED-ROUND-TRIP-NOW-EXACT-FWD-ALSO` | 45 | rule header comment |
 > | `PROJ-EQC-EQDC-SINU-REGISTRY-ROWS` | 67 | rule header comment: `82 − 15` |
@@ -1194,7 +1194,7 @@ that stops being taken.
 | `PROJ-OMERC-ALPHA-90-NO-LONGER-REJECTED` | 20 | **yes** | `+alpha=90` was rejected as `Obl 1`; upstream's azimuth branch validates nothing |
 | `PROJ-OMERC-TWO-POINT-FORM-REWRITTEN` | 5 | **yes** | `fwd: Infinite longitude` on the `+lat_1`/`+lat_2` form |
 | `PROJ-NZMG-NONCONVERGENCE-TYPED` | 11 | **yes** | `InvalidValueException` → `ConvergenceFailureException`; the input was never invalid |
-| `NUM-PHI2-CONVERGES-ON-EXTREME-ELLIPSOIDS` | 6 | TBD | the Karney `phi2.cpp` rewrite converges where a 15-trip fixed point did not |
+| `NUM-PHI2-CONVERGES-ON-EXTREME-ELLIPSOIDS` | 6 | TBD | the Karney `phi2.cpp` rewrite converges where a 15-trip fixed point did not — **the mechanism was wrong; renamed and re-pinned, see below** |
 | `PROJ-INVERSE-CORRECTED-ROUND-TRIP-NOW-EXACT` | 48 | TBD | **`dimensions: [ix, iy, iz]`** — the forward is bit-identical, so no forward regression can hide |
 | `PROJ-INVERSE-CORRECTED-ROUND-TRIP-NOW-EXACT-FWD-ALSO` | 45 | TBD | 9 keys whose forward also moved, each change named with its arithmetic |
 | `PROJ-EQC-EQDC-SINU-REGISTRY-ROWS` | 67 | TBD | the registry/CSV consequence of the same three forward defects |
@@ -1504,3 +1504,85 @@ Two notes for whoever wires this in:
 * Do **not** make this job `continue-on-error` to get past the current 2,729 unexplained rows. Use
   `status: pending` rules, which are visible in the diff and self-correcting; a `continue-on-error` job
   is neither.
+
+## Four wrong answers fixed, and what the rule set said about each — 2026-08-07
+
+This one is not a triage. Nothing was reclassified out of the backlog; the backlog is exactly where
+it was. Four defects that produced **wrong numbers** were fixed in `core`, and this section records
+what the gate did in response, because in two places it did something more useful than the fix
+itself.
+
+**What changed in `core`.**
+
+* `Registry.java` re-declared `NWL9D` and `andrae` with the inverse flattening in the `poleRadius`
+  slot — `new Ellipsoid("NWL9D", 6378145.0, 298.25, 0.0, ...)`. That form selects the
+  `1 − (b·b)/(a·a)` branch of the `Ellipsoid` constructor, which takes `298.25` literally as a pole
+  radius in metres and yields `e = 0.999999998906693` against GRS80's `0.0818`. Every transform
+  through `+ellps=NWL9D` or `+ellps=andrae` was computed on a near-flat disc. Both entries now
+  reference the already-correct `Ellipsoid.NWL9D` and `Ellipsoid.ANDRAE` constants instead of
+  re-declaring them.
+* `+ellps=australian` failed lookup although `Ellipsoid.AUSTRALIAN` has always existed. It is now
+  listed. It is not a PROJ name — 9.8.1's `ellps.cpp` has `aust_SA` and no `australian` — so it is a
+  proj4j extra, and it is numerically identical to `aust_SA`.
+* `RectangularPolyconicProjection.project` read a private `phi0` field that the class declared and
+  never assigned, so `+lat_0` was silently dropped. It now reads the inherited
+  `projectionLatitude`, the same field `PolyconicProjection` reads.
+* The same class's `initialize()` had its whole body commented out under a `FIXME` because it called
+  `pj_param`, which this library does not have. `+lat_ts` is reachable without it — upstream's
+  `"rlat_ts"` is radians, which is the unit `trueScaleLatitude` already holds — and `P->es = 0` was
+  missing entirely.
+
+**The rename: `NUM-PHI2-CONVERGES-ON-EXTREME-ELLIPSOIDS` → `NUM-NWL9D-ANDRAE-POLE-RADIUS-TRANSPOSED`,
+6 → 10.** The old rule was right about which rows moved and wrong about why, in a way that would have
+kept a defect hidden. It said NWL9D and andrae are "the two most eccentric entries of `ellps.cpp`"
+and that the Karney `phi2.cpp` rewrite converges on them where the old fixed point did not. Neither
+half survives contact with the numbers: at `1/f` of 298.25 and 300.0 both ellipsoids are entirely
+ordinary, `e ≈ 0.0818`, and the eccentricity the rule was describing was the transposition bug, not
+the ellipsoid. A rule that explains a defect as a property of the input is a rule that will keep
+explaining it after someone tries to fix it.
+
+**The count moved because four rows crossed between rules, and the arithmetic is closed.**
+`NUM-KARNEY-LATITUDE-CORE` went 19324 → 19320 and the renamed rule went 6 → 10. They are the same
+four rows: `ellps/NWL9D` probe 0 and `ellps/andrae` probes 0–2, which were `EXC → EXC` before the fix
+and are `EXC → OK` after it. `NUM-KARNEY-LATITUDE-CORE` does not set `allow_status_change`, and that
+refusal is what made the defect visible at all — a rule willing to absorb a status change would have
+swallowed all four.
+
+**`FAILCLOSED-NO-INVERSE-FOR-FORWARD-ONLY`: 65 → 60, and the near-miss that caused it.** `proj/rpoly`
+was one of this rule's 13 keys, and it left for a reason none of the others share: it is still
+forward-only and its inverse still refuses, but its *forward* moved 5,009 km. The rule declines to
+set a magnitude band, on the stated and correct grounds that its rows' moved dimensions are all-NaN
+inverse columns with no meaningful magnitude — which does nothing to stop a forward change landing in
+the same row and being claimed silently. Stashing only the rpoly file and re-running showed it
+directly: `moved=ix,iy,iz,status mag=-` before, `moved=fy,ix,iy,iz,status mag=0x1.31bf8457c1093p22`
+after. `proj/rpoly` now has its own rule, `PROJ-RPOLY-LAT0-NOW-APPLIED`, pinned at 5 with a band of
+5.0e6 .. 5.1e6 around the arithmetic that predicts it: the probe's `+lat_0` is 45°, and
+`0.7853981633974483 × 6378137 = 5,009,377.08 m`.
+
+That is the general lesson, and it is worth stating separately from this rule: **"no magnitude band"
+is not a neutral choice.** It is a decision to accept any numeric movement in every row the rule
+claims. It is right when the rule's rows have no numeric content, and it stops being right the moment
+one of those rows grows some.
+
+**`NUM-ELLIPSOID-AUSTRALIAN-ALIAS-ADDED`, deliberately not folded into
+`NUM-ELLIPSOID-FOUR-NAMES-ADDED`.** The obvious move was to widen the existing rule from 20 to 25
+rows. The load-bearing sentence in its reason is "All four ship in 9.8.1 `src/ellps.cpp`," and
+`australian` does not. Widening it would have made that sentence false to buy one fewer rule.
+
+**Correction to "Scoping the first rule by `status_to` alone would have been wrong," above.** That
+paragraph's `FAILCLOSED-NO-INVERSE-FOR-FORWARD-ONLY (65)` was correct when measured and is now 60.
+The 105-row total it derives is unchanged in kind — the five rpoly rows still reach
+`EXC:CrsTransformException` without a NAD27 datum — they are just claimed by
+`PROJ-RPOLY-LAT0-NOW-APPLIED` now. The point the paragraph makes about `datums: [NAD27]` is
+unaffected.
+
+**What the run says.** `core` at 1917 tests, 0 failures, 1 skipped. `golden` with zero
+`COUNT_MISMATCH`, zero `DEAD_RULE`, zero `EXPIRED_RULE` and zero `PENDING_RULE_FIRED`, and
+`UNEXPLAINED 2291` — the baseline, unchanged. The report differs from master's on exactly 35 lines,
+all four intended key groups and nothing else: 10 NWL9D/andrae rows re-attributed, 5 `ellps/australian`
+newly claimed, and rpoly's 5 leaving one rule for another.
+
+**What this change has no coverage for, stated so nobody assumes otherwise.** The `+lat_ts` branch of
+rpoly and the `es = 0` assignment move no row in this suite, because no probe in the input set passes
+`+lat_ts` to `+proj=rpoly` and rpoly's ellipsoid was already unused by its formulae. Both were
+verified by reading 9.8.1 `src/projections/rpoly.cpp`, not by this gate.

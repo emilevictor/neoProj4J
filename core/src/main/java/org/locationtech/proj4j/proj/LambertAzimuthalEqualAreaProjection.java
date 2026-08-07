@@ -91,12 +91,31 @@ public class LambertAzimuthalEqualAreaProjection extends Projection {
 		this( false );
 	}
 
+	/**
+	 * @param south ignored; see the deprecation note.
+	 * @deprecated The {@code south} argument has never had any effect, and this constructor is
+	 *     exactly equivalent to {@link #LambertAzimuthalEqualAreaProjection()}. Its body was
+	 *     commented out before the first release and read:
+	 *     <pre>
+	 *     projectionLatitude1 = south ? -QUARTERPI : QUARTERPI;
+	 *     projectionLatitude2 = south ? -HALFPI    : HALFPI;
+	 *     </pre>
+	 *     {@code projectionLatitude1} and {@code projectionLatitude2} are Lambert <em>Conformal
+	 *     Conic</em> parameters ({@code +lat_1}/{@code +lat_2}), which this projection does not
+	 *     read at all — it takes its aspect from {@code projectionLatitude} ({@code +lat_0}). So
+	 *     the block could not have worked as written even if it were restored, and it is left
+	 *     commented rather than repaired because its intent cannot be recovered.
+	 *     <p>
+	 *     The aspect is selected from {@code +lat_0} in {@link #initialize()}: ±90° gives the
+	 *     polar aspects, 0° the equatorial, anything else oblique. For a south polar aspect use
+	 *     {@code +lat_0=-90}, or {@link #setProjectionLatitude(double)} with {@code -PI/2}.
+	 *     <p>
+	 *     Retained only because it is public API. It is not removed, and its behaviour is not
+	 *     changed, because either would break callers that pass {@code false} — which today is
+	 *     every caller, since {@code true} and {@code false} do the same thing.
+	 */
+	@Deprecated
 	public LambertAzimuthalEqualAreaProjection( boolean south ) {
-		//minLatitude = Math.toRadians(0);
-		//maxLatitude = Math.toRadians(90);
-		//projectionLatitude1 = south ? -ProjectionMath.QUARTERPI : ProjectionMath.QUARTERPI;
-		//projectionLatitude2 = south ? -ProjectionMath.HALFPI : ProjectionMath.HALFPI;
-		//initialize();
 	}
 
 	 public void initialize() {

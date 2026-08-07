@@ -61,10 +61,13 @@ import java.util.TreeSet;
  *     defect ({@code Proj4Parser.createParameterMap} uses a {@code HashMap} and keeps the
  *     <em>last</em> occurrence; PROJ keeps the <em>first</em>).</li>
  * <li><b>{@code ellps/<name>}</b> — all 46 of PROJ 9.8.1's {@code ellps.cpp} names plus
- *     {@code NAD27}, {@code NAD83} and {@code australian}. {@code australian} throws today although
- *     {@code Ellipsoid.AUSTRALIAN} exists, and {@code NWL9D}/{@code andrae} are silently degenerate
- *     ({@code Registry.java:71-72} passes the flattening in the {@code poleRadius} slot, giving
- *     {@code e} &asymp; 1); all three have a row here.</li>
+ *     {@code NAD27}, {@code NAD83} and {@code australian}. The last three are proj4j extras that
+ *     {@code ellps.cpp} does not carry, and they are here because all three were broken and the rows
+ *     are what caught it: {@code australian} threw {@code InvalidValueException} although
+ *     {@code Ellipsoid.AUSTRALIAN} existed, and {@code NWL9D}/{@code andrae} were silently degenerate
+ *     because {@code Registry} re-declared them with the inverse flattening in the {@code poleRadius}
+ *     slot, giving {@code e} &asymp; 1 instead of 0.0818. All three are fixed at
+ *     {@code Registry.java:99-113}; the rows stay so that a revert shows up.</li>
  * </ol>
  */
 public final class InputSet {
