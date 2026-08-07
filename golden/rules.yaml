@@ -710,8 +710,26 @@ rules:
   - id: FAILCLOSED-NO-INVERSE-FOR-FORWARD-ONLY
     status: active
     expires: 2027-06-30
-    # PINNED at 65 = 13 forward-only projections x 5 probes. Was 85 = 17 x 5, and 90 = 18 x 5
-    # before that.
+    # PINNED at 60 = 12 forward-only projections x 5 probes. Was 65 = 13 x 5, 85 = 17 x 5, and
+    # 90 = 18 x 5 before that.
+    #
+    # `proj/rpoly` LEFT THIS RULE FOR A REASON NONE OF THE OTHERS DID, AND IT IS THE ONE CASE THIS
+    # RULE COULD HAVE SWALLOWED. Every previous departure -- lagrng, aitoff, hammer, nsper, wintri
+    # -- left because the projection stopped being forward-only. rpoly is still forward-only and
+    # still belongs here on that count. It was moved out because its FORWARD moved: `+lat_0` is now
+    # applied (it was read from a field that was declared and never assigned, so it was silently
+    # dropped), and the five rows went from `moved=ix,iy,iz,status mag=-` to
+    # `moved=fy,ix,iy,iz,status mag=0x1.31bf8457c1093p22` -- 5,009,377 m, which is exactly
+    # `+lat_0=45` in radians times the GRS80 semi-major axis.
+    #
+    # This rule would have absorbed all five silently, because its reason says "no magnitude band
+    # is meaningful" and means it: the sentence is about the INVERSE columns, which are NaN by
+    # construction, and nothing here distinguishes a NaN inverse column from a forward column that
+    # moved 5,000 km. That is the same failure the enumerated key list exists to prevent, one level
+    # down -- enumerating keys stops the wrong ROW being claimed, and it does nothing about the
+    # wrong DIMENSION inside a row this rule is right to claim. rpoly's rows are now
+    # PROJ-RPOLY-LAT0-NOW-APPLIED's, which restates the fail-closed inverse verbatim and adds the
+    # magnitude band this rule cannot carry.
     #
     # THE TRIPWIRE FIRED A SECOND TIME, AND WAS RIGHT A SECOND TIME. On the 2026-08-01 late
     # triage this rule reported `COUNT_MISMATCH expected_rows=85 but matched 65`, and the four
@@ -751,12 +769,12 @@ rules:
     # `NoInverseGateTest.baseProjectInverseRaisesForForwardOnlyProjections:96` asserts "Lagrange
     # must declare no inverse for this test to mean anything" and fails on the frozen tree. Two
     # streams disagree about lagrng; upstream sides with the one that gave it an inverse.
-    expected_rows: 65
+    expected_rows: 60
     reason: |
       THIS RULE RECORDS A FIX, NOT AN ADDED EXCEPTION, AND THE NUMBER THAT PROVES IT IS 75.
 
       Of the 90 rows this rule claimed when it was first written, **75 were `OK` in the 1.4.3
-      baseline** (the row set is now 65; the argument is unchanged and the 75 is kept because it
+      baseline** (the row set is now 60; the argument is unchanged and the 75 is kept because it
       is the measurement that made it). That is direct
       measured proof of the defect: `Projection.projectInverse` was an unconditional identity
       (`dst.x = x; dst.y = y;`), `hasInverse()` was declared 66 times across 102 classes and read
@@ -771,11 +789,12 @@ rules:
       keys on status_to and leaves status_from open: the two histories converge on the same correct
       current behaviour.
 
-      The 13 projections, each `SYN proj/<name>` and each 5 probes:
-        airy august boggs denoy larr lask nicol rpoly tcc wag7
+      The 12 projections, each `SYN proj/<name>` and each 5 probes:
+        airy august boggs denoy larr lask nicol tcc wag7
         adams_hemi adams_ws1 guyou
       (`lagrng`, `aitoff`, `hammer`, `nsper` and `wintri` were on this list and are no longer
-      forward-only -- see the expected_rows note, which names the upstream line for each.)
+      forward-only -- see the expected_rows note, which names the upstream line for each.
+      `rpoly` is still forward-only and left for a different reason, also in that note.)
 
       WHY THE KEYS ARE ENUMERATED RATHER THAN GLOBBED, AND WHY NO CRS CODE IS IN THE LIST. The gate
       that produces these errors (`BasicCoordinateTransform.inverseAvailable`) deliberately does NOT
@@ -800,7 +819,7 @@ rules:
       sections: [SYN]
       keys: ["proj/airy", "proj/august", "proj/boggs", "proj/denoy",
              "proj/larr", "proj/lask", "proj/nicol",
-             "proj/rpoly", "proj/tcc", "proj/wag7",
+             "proj/tcc", "proj/wag7",
              "proj/adams_hemi", "proj/adams_ws1", "proj/guyou"]
       status_to: "EXC:org.locationtech.proj4j.CrsTransformException"
     expect:
@@ -808,6 +827,69 @@ rules:
       allow_status_change: true
       allow_inside_change: true
       allow_nonfinite: true
+
+  # ---------------------------------------------------------------------------------------------
+  - id: PROJ-RPOLY-LAT0-NOW-APPLIED
+    status: active
+    expires: 2027-06-30
+    # PINNED at 5 = 1 projection x 5 probes. Structural: `proj/rpoly` is one synthetic key and the
+    # sweep gives every key five probes, so this count can only move if rpoly leaves the matrix.
+    #
+    # SPLIT OUT OF FAILCLOSED-NO-INVERSE-FOR-FORWARD-ONLY, WHICH STILL DESCRIBES HALF OF IT. See
+    # that rule's expected_rows note for why: it declares no magnitude band, on the correct
+    # grounds that its rows' moved dimensions are all-NaN inverse columns, and rpoly's rows now
+    # also carry a 5,009,377 m forward change that the same absent band would have hidden.
+    expected_rows: 5
+    reason: |
+      `SYN proj/rpoly`, all five probes: `moved=fy,ix,iy,iz,status`, `OK` ->
+      `EXC:CrsTransformException`.
+
+      TWO INDEPENDENT CHANGES SHARE THESE FIVE ROWS. They are stated separately because a future
+      revert of either must be visible, and only one of them is new.
+
+      1. THE INVERSE, unchanged from FAILCLOSED-NO-INVERSE-FOR-FORWARD-ONLY and claimed on exactly
+      the same grounds. `9.8.1:src/projections/rpoly.cpp` declares itself `"Conic, Sph, no inv"`
+      and its `PJ_PROJECTION(rpoly)` assigns only `P->fwd`; there is no `P->inv`. So `ix`, `iy`,
+      `iz` and the status are the fail-closed gate refusing an inverse that upstream does not
+      have, which is the fix 75 rows of that rule record.
+
+      2. THE FORWARD, WHICH IS NEW AND IS WHY THIS RULE EXISTS. `+lat_0` was being dropped.
+      `RectangularPolyconicProjection` declared a private `phi0` field, never assigned it, and read
+      it twice in `project()` -- so both reads returned a constant `0.0` and every rpoly definition
+      was computed as though it were centred on the equator. Upstream's `P->phi0` is plain
+      `+lat_0` in radians (`9.8.1:src/init.cpp:651`, `PIN->phi0 = pj_param(ctx, start,
+      "rlat_0").f`), and the field this library fills from `+lat_0` is the inherited
+      `projectionLatitude` -- the same one `PolyconicProjection.project` reads, since the
+      projection subtracts the central parallel itself and the base class does not pre-subtract.
+
+      THE MAGNITUDE IS THE PROOF AND IS PINNED FOR THAT REASON. `CANONICAL` carries `+lat_0=45`,
+      and 45 degrees in radians times GRS80's semi-major axis is
+      0.7853981633974483 x 6378137 = 5,009,377.08 m. The observed magnitude is
+      `0x1.31bf8457c1093p22` = 5,009,377.085, on probe 0, with the other four probes one ULP below
+      it. So the whole of the forward movement is the central parallel arriving, and the band below
+      is tight enough that any OTHER change to the rpoly forward -- including the `+lat_ts` path
+      described next -- fails this rule instead of hiding in it.
+
+      WHAT IS NOT VISIBLE HERE, STATED SO THE SILENCE IS NOT MISREAD AS COVERAGE. The same commit
+      restores rpoly's `+lat_ts` handling, which had been commented out under a `FIXME` because it
+      called `pj_param`, and assigns `es = 0` as `rpoly.cpp:57` does. Neither shows up in this
+      matrix: `+lat_ts` is a MODIFIERS entry but rpoly is not one of the six HOSTS, `CANONICAL`
+      does not carry `+lat_ts`, so `mode` stays false on every row here and the restored branch is
+      never entered. `es = 0` moves nothing because rpoly's forward reads neither `es`, `e` nor
+      `spherical`. Both are covered by `core`, not by golden. If rpoly is ever added to HOSTS these
+      five rows are unaffected and new `mod/rpoly/*` rows appear, which is the correct shape.
+    match:
+      classifications: [CHANGED]
+      sections: [SYN]
+      keys: ["proj/rpoly"]
+      status_from: "OK"
+      status_to: "EXC:org.locationtech.proj4j.CrsTransformException"
+    expect:
+      dimensions: [fx, fy, fz, ix, iy, iz]
+      allow_status_change: true
+      allow_inside_change: true
+      allow_nonfinite: true
+      magnitude: {min: 5.0e+6, max: 5.1e+6}
 
   # FAILCLOSED-POLE-OVERSHOOT-REJECTED WAS HERE AND HAS BEEN DELETED, 2026-08-01.
   #
@@ -1226,40 +1308,72 @@ rules:
       allow_nonfinite: true
 
   # ---------------------------------------------------------------------------------------------
-  - id: NUM-PHI2-CONVERGES-ON-EXTREME-ELLIPSOIDS
+  - id: NUM-NWL9D-ANDRAE-POLE-RADIUS-TRANSPOSED
     status: active
     expires: 2027-06-30
-    # PINNED at 6, measured 2026-08-01 on a frozen /tmp snapshot: `ellps/NWL9D` probes 1..4 and
-    # `ellps/andrae` probes 3..4. The split is 4 + 2 rather than 5 + 5 because the other probes of
-    # those two keys converged in 1.4.3 too.
+    # PINNED at 10 = 2 ellipsoid names x 5 probes. Structural now; it was not before, and the
+    # change from data-driven to structural is the whole story of this rule.
     #
-    # THE COUNT IS DATA-DRIVEN, NOT STRUCTURAL -- it depends on where the iteration happened to fall
-    # short, so any further change to the auxiliary-latitude core moves it. That was the stated
-    # reason for leaving it TBD, and it is exactly backwards: a count that moves for reasons nobody
-    # predicted is the count most worth pinning. When the numerical core next changes this rule will
-    # fail with a COUNT_MISMATCH naming itself, which is a two-line re-pin and a sentence of
-    # explanation -- against a TBD, which would have said nothing at all.
-    expected_rows: 6
+    # RENAMED FROM NUM-PHI2-CONVERGES-ON-EXTREME-ELLIPSOIDS, WHOSE PREMISE WAS FALSE TWICE. That
+    # rule said 1.4.3's 15-trip phi2 "ran out of trips" "on the two most eccentric entries of
+    # `ellps.cpp`". NWL9D and andrae are not the two most eccentric entries of `ellps.cpp`; they
+    # are entirely ordinary, at rf 298.25 and 300.0, giving e = 0.0818 and 0.0816 against GRS80's
+    # 0.081819. Nothing in `ellps.cpp` was extreme. The extreme eccentricity was manufactured HERE:
+    # `Registry.ellipsoids` re-declared both names with the inverse flattening in the `poleRadius`
+    # slot -- `new Ellipsoid("NWL9D", 6378145.0, 298.25, 0.0, ...)` -- which selects the
+    # `1 - (b*b)/(a*a)` branch of the constructor and takes 298.25 METRES literally as the polar
+    # semi-axis. e came out 0.999999998906693. phi2 was being asked to invert a flat disc, and it
+    # is to its credit that it only failed on six of the ten rows.
+    #
+    # AND THE SECOND FALSE CLAIM, WHICH IS WHY THE COUNT MOVED: "The split is 4 + 2 rather than
+    # 5 + 5 because the other probes of those two keys converged in 1.4.3 too." They did not
+    # converge in 1.4.3. Those four rows -- `ellps/NWL9D` probe 0 and `ellps/andrae` probes 0..2 --
+    # were `EXC:ConvergenceFailureException` on BOTH sides, so they were not status changes and
+    # NUM-KARNEY-LATITUDE-CORE claimed them as ordinary sub-ULP drift on `fy` alone. The
+    # transposition fix is what turns them into `OK`. The two counts moved by the same four rows in
+    # opposite directions, 6 -> 10 here and 19324 -> 19320 there, and that conservation is the
+    # check that nothing else moved with them.
+    #
+    # THE MAGNITUDES ARE THE OTHER HALF OF THE PROOF, and they are the reason this could not stay a
+    # re-pin. Under the old rule these six rows moved by 0x1.8c871adp-31 to 0x1.284492cp-29 -- one
+    # to two nanometres, the signature of a numerical-core rewrite. They now move by 0x1.27p22 to
+    # 0x1.87p22, 4.8 to 6.4 million metres. That is not phi2 converging better. That is the answer
+    # arriving from a different ellipsoid, which is what a 6,356,760 m error in the polar
+    # semi-axis buys.
+    expected_rows: 10
     reason: |
+      `SYN ellps/{NWL9D, andrae}`, all five probes each:
       `EXC:ConvergenceFailureException: inv: Computation of phi2 failed to converage after 15
       iterations` -> `OK`. (The baseline message's spelling is upstream-of-us and reproduced
       verbatim, as this suite reproduces every baseline string.)
 
-      1.4.3's `phi2` was a fixed-point iteration capped at 15 trips with no error-term acceleration,
-      and on the two most eccentric entries of `ellps.cpp` it ran out of trips. 9.8.1's rewritten
-      `src/phi2.cpp` -- the Karney formulation this project ports, measured at 4,145 nm -> 2.1 nm at
-      GRS80, see NUM-KARNEY-LATITUDE-CORE -- converges there.
+      Two changes converge on these ten rows and both are needed to explain them.
 
-      WHY THIS IS A SEPARATE RULE FROM NUM-KARNEY-LATITUDE-CORE, which is the rule that would
-      otherwise own the phi2 work: that rule refuses status changes and non-finite endpoints on
-      purpose, so it cannot claim a row whose baseline side is an exception, and it should not be
-      loosened to do so -- its whole value is that it can only absorb sub-microscopic drift. These
-      six rows are the same code change observed at its most visible, and they need their own
-      statement.
+      The first is `Registry.ellipsoids` no longer re-declaring NWL9D and andrae with the inverse
+      flattening in the `poleRadius` slot. Both entries now reference the correct
+      `Ellipsoid.NWL9D` and `Ellipsoid.ANDRAE`, which carry `rf` in the `rf` slot. Measured after
+      the fix: NWL9D b = 6356759.769489, e = 0.081820179996060; andrae b = 6355847.415233,
+      e = 0.081581588336803. Before it, both b values were the inverse flattening itself and both
+      e values were 0.99999999890. Every transform through `+ellps=NWL9D` or `+ellps=andrae` was
+      computed on a near-flat disc, in every release this library has ever made.
 
-      Kept off `NUM-` band semantics for the same reason: the baseline is all-NaN, so a magnitude
-      band would be meaningless. Scoped to the two keys because a convergence failure disappearing
-      is exactly the kind of good news that should not silently license the next one.
+      The second is the phi2 rewrite that the old name credited with the whole effect. It is real
+      and it is why four of these rows converge at all -- see NUM-KARNEY-LATITUDE-CORE, 4,145 nm
+      -> 2.1 nm at GRS80 -- but on its own it fixed six rows and left four failing, and it never
+      touched the figure of the ellipsoid. Naming the rule after it hid a wrong answer behind a
+      right one for the length of a release.
+
+      WHY THIS IS A SEPARATE RULE FROM NUM-KARNEY-LATITUDE-CORE, unchanged from the original and
+      still correct: that rule refuses status changes and non-finite endpoints on purpose, so it
+      cannot claim a row whose baseline side is an exception, and it should not be loosened to do
+      so -- its whole value is that it can only absorb sub-microscopic drift. It is precisely
+      because it refuses status changes that the four rows moved out of it on their own when the
+      ellipsoid was fixed, which is how the transposition was caught.
+
+      No magnitude band, for the reason the original gave and which still holds: the baseline side
+      is all-NaN, so there is nothing to take a magnitude against. Scoped to the two keys because a
+      convergence failure disappearing is exactly the kind of good news that should not silently
+      license the next one.
     match:
       classifications: [CHANGED]
       sections: [SYN]
@@ -1718,6 +1832,66 @@ rules:
       allow_nonfinite: true
 
   # ---------------------------------------------------------------------------------------------
+  - id: NUM-ELLIPSOID-AUSTRALIAN-ALIAS-ADDED
+    status: active
+    expires: 2027-06-30
+    # PINNED at 5 = 1 ellipsoid name x 5 probes. Structural.
+    #
+    # DELIBERATELY NOT FOLDED INTO NUM-ELLIPSOID-FOUR-NAMES-ADDED ABOVE, WHICH IT OTHERWISE MATCHES
+    # EXACTLY -- same section, same `EXC:InvalidValueException` -> `OK`, same all-NaN baseline, same
+    # `-` -> `F` on `inside`, same expect clause. Extending that rule to five keys would have been a
+    # two-word edit and it would have made the rule lie: its reason's load-bearing sentence is "All
+    # four ship in 9.8.1:src/ellps.cpp", quoted line by line from the table, and `australian` is the
+    # one name here of which that is not true. A name PROJ has and a name PROJ does not have are
+    # different claims about the world and they get different rules, on the same grounds
+    # DATUM-LEGACY-CARTHAGE-ELLIPSOID and its sibling are kept apart: a future revert of either must
+    # show up as its own COUNT_MISMATCH.
+    expected_rows: 5
+    reason: |
+      `SYN ellps/australian`, all five probes:
+      `EXC:InvalidValueException: crs-tgt: Unknown ellipsoid: australian` -> `OK`.
+
+      A MISSING ALIAS, NOT A MISSING ELLIPSOID, and the distinction is the whole content of the
+      fix. `Ellipsoid.AUSTRALIAN` has been defined in this library for as long as the class has
+      existed. It was simply absent from `Registry.ellipsoids`, which is the table `+ellps=` is
+      resolved against, so the name failed lookup while the object it names sat one file away. The
+      fix adds the existing constant to the table; it defines no new figure and computes no new
+      number.
+
+      `australian` IS NOT A PROJ NAME AND THIS RULE IS NOT A PARITY CLAIM. PROJ 9.8.1's
+      `src/ellps.cpp` has `aust_SA` and nothing called `australian`, so `+ellps=australian` is a
+      proj4j extension that upstream would reject. It is kept, and registered, because it is
+      long-standing published API and removing it would break callers for no gain.
+
+      NUMERICALLY IT IS `aust_SA` UNDER ANOTHER NAME, which is what makes the five new rows safe to
+      accept without a per-probe argument. Both are a = 6378160.0 and 1/f = 298.25.
+      `Ellipsoid.AUSTRALIAN` also carries a `poleRadius` of 6356774.7, and it is the only entry
+      anywhere in the library with both `poleRadius` and `rf` non-zero -- but the constructor gives
+      `reciprocalFlattening` precedence, so that value is discarded and b is recomputed as
+      6356774.719195. Measured after the fix, `aust_SA` and `australian` agree to the bit:
+      b = 6356774.719195, e = 0.081820179996060. The declared pole radius is 0.019 m off and has
+      never been read.
+
+      NOTE WHAT THIS RULE IS NOT CLAIMING, given the company it keeps. NWL9D and andrae were in
+      this same table with the SAME class of defect and a very different outcome -- see
+      NUM-NWL9D-ANDRAE-POLE-RADIUS-TRANSPOSED, where the flattening was in the `poleRadius` slot
+      and the transforms ran on a disc. `australian` never produced a wrong answer, because it
+      never produced an answer at all; it threw. The baseline side of all five rows is all-NaN by
+      construction, so nothing numeric is absorbed here and no regression can hide. `inside` moves
+      `-` -> `F` for the reason PROJ-MOD-STER-GS50-DOMAIN-REFUSED spells out.
+    match:
+      classifications: [CHANGED]
+      sections: [SYN]
+      keys: ["ellps/australian"]
+      status_from: "EXC:org.locationtech.proj4j.InvalidValueException"
+      status_to: "OK"
+    expect:
+      dimensions: [fx, fy, fz, ix, iy, iz]
+      allow_status_change: true
+      allow_inside_change: true
+      allow_nonfinite: true
+
+  # ---------------------------------------------------------------------------------------------
   - id: PROJ-AITOFF-HAMMER-WINTRI-INVERSES-LANDED
     status: active
     expires: 2027-06-30
@@ -2166,7 +2340,18 @@ rules:
     # module, has no other copy on its classpath). Measured on a frozen /tmp A/B whose two
     # trees differ in exactly one byte-bearing file, the grid itself. -12, likewise enumerable: `SYN mod/{lcc,longlat}/nadgrids_conus`, 5 probes each, plus 2 more of
     # the same family. Claimed by GRIDS-EPSG-CONUS-SYN-REFUSED.
-    expected_rows: 19324
+    # RE-PINNED 2026-08-07, -4, and this one is worth reading because it is the rule working. The
+    # four rows are `SYN ellps/NWL9D` probe 0 and `SYN ellps/andrae` probes 0..2. They sat here
+    # because they were `EXC:ConvergenceFailureException` on BOTH sides -- no status change, `fy`
+    # the only moved dimension, magnitude 0x1.8ad014ep-30 and neighbours, which is exactly the
+    # sub-ULP drift this rule is for. They were also, unknown to anyone, four transforms computed
+    # on an ellipsoid with e = 0.99999999890, because `Registry` had NWL9D's and andrae's inverse
+    # flattening in the `poleRadius` slot. Fixing that gave all four a real answer, so they became
+    # status changes, so this rule -- which refuses status changes on purpose -- let go of them and
+    # they surfaced next door. See NUM-NWL9D-ANDRAE-POLE-RADIUS-TRANSPOSED, which went 6 -> 10 by
+    # the same four rows. THE REFUSAL TO ABSORB STATUS CHANGES IS WHAT MADE THE DEFECT VISIBLE;
+    # a looser rule here would have kept all ten rows and reported nothing.
+    expected_rows: 19320
     reason: |
       PROVISIONAL AND NOT OWNED BY THIS MODULE. Placeholder for the sub-microscopic movement caused by
       wiring in PROJ 9.4-9.6's Karney auxiliary-latitude core (9.8.1:src/latitudes.cpp, and the
