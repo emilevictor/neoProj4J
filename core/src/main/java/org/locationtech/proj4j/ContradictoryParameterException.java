@@ -17,26 +17,34 @@ package org.locationtech.proj4j;
 
 /**
  * Signals that a CRS definition supplies two or more parameters that contradict each other, or
- * that specify the same quantity inconsistently — {@code +ellps=GRS80 +rf=300},
- * {@code +rf=298.257 +f=0.00335}, {@code +datum=NAD83 +towgs84=…}.
+ * that specify the same quantity inconsistently.
  *
- * <p>PROJ's equivalent is {@code PROJ_ERR_INVALID_OP_MUTUALLY_EXCLUSIVE_ARGS}. Note that PROJ
- * deliberately treats several combinations Proj4J might call contradictory as
- * <em>modifiers</em> instead — {@code ell_set.cpp} accepts {@code +ellps=GRS80 +rf=300} and lets
- * the later shape parameter win — so this exception is raised only where a definition cannot be
- * given a single coherent reading, and, for the PROJ-compatible parse mode, only where PROJ
- * itself refuses.
+ * <p><b>Nothing in this library throws it.</b> No main-source path constructs it, so a
+ * {@code catch} clause naming this class is a branch that can never be entered. The live
+ * contradiction path throws {@link org.locationtech.proj4j.pipeline.PipelineDefinitionException} instead — a sibling that also
+ * extends {@link InvalidValueException} and also reports
+ * {@link ErrorCause#CONTRADICTORY_PARAMS} — from {@code AxisSwapOperator} and
+ * {@code DeformationOperator}. Catch {@link InvalidValueException}, or switch on
+ * {@link ErrorCause#CONTRADICTORY_PARAMS}, and both are covered.
  *
- * <p><b>Why it extends {@link InvalidValueException}.</b> Code that already catches the natural
- * exception for a bad {@code +rf} keeps working when Proj4J starts rejecting contradictions
- * rather than silently computing a negative squared eccentricity from them. The narrower type is
- * additive: a caller that wants to distinguish "this value is out of range" from "these two
- * values disagree" can catch this class or switch on
- * {@link ErrorCause#CONTRADICTORY_PARAMS}; a caller that does not, does not have to change.
+ * <p>Earlier versions of this Javadoc offered {@code +ellps=GRS80 +rf=300} and
+ * {@code +rf=298.257 +f=0.00335} as examples. They were the wrong examples: this library
+ * deliberately accepts both, following PROJ's {@code ell_set.cpp}, and lets the later shape
+ * parameter win. That is recorded at {@code StepEllipsoid} and in {@code Proj4Parser}'s
+ * ellipsoid handling. So the two combinations most likely to be reached for as a test of this
+ * exception are combinations that raise nothing at all.
+ *
+ * <p>PROJ's equivalent condition is {@code PROJ_ERR_INVALID_OP_MUTUALLY_EXCLUSIVE_ARGS}.
  *
  * @see ErrorCause#CONTRADICTORY_PARAMS
+ * @see org.locationtech.proj4j.pipeline.PipelineDefinitionException
  * @since 1.5.0
+ * @deprecated Never thrown by this library. It is kept because
+ *     {@code org.locationtech.proj4j} is an exported package and removing a public class is a
+ *     binary break, and because out-of-tree code may throw it itself. Catch
+ *     {@link InvalidValueException} for the condition it names.
  */
+@Deprecated
 public class ContradictoryParameterException extends InvalidValueException {
 
     private static final long serialVersionUID = -532824264813230743L;

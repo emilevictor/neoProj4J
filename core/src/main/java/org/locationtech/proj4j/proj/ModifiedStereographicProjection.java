@@ -85,11 +85,13 @@ import org.locationtech.proj4j.util.ProjectionMath;
  * {@code C[0]} is present but always {@code (0,0)} — so {@code gs50}'s ten-element table is
  * {@code n = 9}, exactly as {@code mod_ster.cpp} says.
  *
- * <p><b>This is not {@code ModStereoProjection.java}.</b> That file still sits in this package with
- * its class declaration inside a block comment, so it compiles to a bare {@code package}
- * statement. It is a PROJ-4-era transcription — {@code MAX_ITER = 10}, {@code LOOP_TOL = 1e-7} —
- * and both numbers are wrong for 9.8.1, which runs two 20-trip loops at {@code 1e-12}. It should
- * be deleted; it is left alone here only because it is a pre-existing file.
+ * <p><b>This class replaced {@code ModStereoProjection.java}</b>, which sat in this package with
+ * its whole class declaration inside a block comment, so it compiled to a bare {@code package}
+ * statement and produced no {@code .class} file at all. It was a PROJ-4-era transcription —
+ * {@code MAX_ITER = 10}, {@code LOOP_TOL = 1e-7} — and both numbers were wrong for 9.8.1, which
+ * runs two 20-trip loops at {@code 1e-12}. It is deleted. Its five {@code ENTRY0} names all
+ * resolve here instead: {@code mil_os}, {@code lee_os}, {@code gs48}, {@code gs50} and
+ * {@code alsk}.
  *
  * @since 1.5.0
  */

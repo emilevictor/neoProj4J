@@ -180,6 +180,21 @@ public final class Ellipsoid implements Cloneable, java.io.Serializable {
     public final static Ellipsoid HOUGH = new Ellipsoid("hough", 6378270.0, 0.0,
             297.0, "Hough");
 
+    /**
+     * An exact duplicate of {@link #INTERNATIONAL} — same short name {@code "intl"}, same
+     * 6378388.0, same inverse flattening 297.0, same display name — declared a second time here.
+     * Two distinct objects with equal state, so {@code INTERNATIONAL.equals(INTL)} is true and
+     * {@code INTERNATIONAL == INTL} is false.
+     *
+     * <p>Until 2.0.1 the {@link #ellipsoids} table below held this constant while
+     * {@code Registry.ellipsoids} held {@link #INTERNATIONAL}, so {@code +ellps=intl} and the WKT
+     * writer's reverse lookup returned different objects for the same ellipsoid. The table now
+     * holds {@link #INTERNATIONAL} and this constant has no reference anywhere in the library.
+     *
+     * @deprecated Use {@link #INTERNATIONAL}. Retained because {@code org.locationtech.proj4j.datum}
+     *     is an exported package and removing a public constant is a binary break.
+     */
+    @Deprecated
     public final static Ellipsoid INTL = new Ellipsoid("intl", 6378388.0, 0.0,
             297.0, "International 1909 (Hayford)");
 
@@ -270,7 +285,7 @@ public final class Ellipsoid implements Cloneable, java.io.Serializable {
             FSCHR68,
             HELMERT,
             HOUGH,
-            INTL,
+            INTERNATIONAL,
             KAULA,
             LERCH,
             MPRTS,

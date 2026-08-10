@@ -20,22 +20,26 @@ import org.locationtech.proj4j.units.Units;
 
 /**
  * A "projection" for geodetic coordinates in Decimal Degrees.
+ *
+ * <p>It declares no {@code project}/{@code projectInverse} of its own, and does not need to. Both
+ * are already the identity in the base class: {@link Projection#project(double, double,
+ * org.locationtech.proj4j.ProjCoordinate)} copies its arguments through, and
+ * {@link Projection#projectInverse(double, double, org.locationtech.proj4j.ProjCoordinate)} does
+ * the same behind a gate written for exactly this class — {@code !hasInverse() && !isGeographic()},
+ * so a geographic CRS reaches the identity although {@code hasInverse()} is the inherited
+ * {@code false}. The degree/radian handling is likewise in the base, keyed off the
+ * {@link Units#DEGREES} that {@link #initialize()} assigns.
+ *
+ * <p>A stale {@code TODO} asking for those methods to be written, and a commented-out
+ * {@code transformRadians(Point2D.Double, Point2D.Double)} beneath it, stood here until 2.0.1. The
+ * commented method overrode nothing — {@code java.awt.geom.Point2D} is not imported by this class
+ * and has not been part of this signature for years — which is the same trap recorded against
+ * {@code LandsatProjection} in {@link Projection}'s Javadoc.
  */
 public class LongLatProjection extends Projection
 {
 
     private static final long serialVersionUID = 4367262992647079905L;
-
-    // TODO: implement projection methods (which are basically just no-ops)
-    /*
-
-      public Point2D.Double transformRadians( Point2D.Double src, Point2D.Double dst ) {
-      dst.x = src.x;
-      dst.y = src.y;
-      return dst;
-      }
-
-    */
 
     public String toString() {
         return "LongLat";
