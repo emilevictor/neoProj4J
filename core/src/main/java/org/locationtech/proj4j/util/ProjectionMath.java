@@ -511,20 +511,6 @@ public class ProjectionMath {
         return angle;
     }
 
-/*
-	public static void latLongToXYZ(Point2D.Double ll, Point3D xyz) {
-		double c = Math.cos(ll.y);
-		xyz.x = c * Math.cos(ll.x);
-		xyz.y = c * Math.sin(ll.x);
-		xyz.z = Math.sin(ll.y);
-	}
-
-	public static void xyzToLatLong(Point3D xyz, Point2D.Double ll) {
-		ll.y = MapMath.asin(xyz.z);
-		ll.x = MapMath.atan2(xyz.y, xyz.x);
-	}
-*/
-
     public static double greatCircleDistance(double lon1, double lat1, double lon2, double lat2) {
         double dlat = Math.sin((lat2 - lat1) / 2);
         double dlon = Math.sin((lon2 - lon1) / 2);
@@ -543,14 +529,25 @@ public class ProjectionMath {
         );
     }
 
+    /**
+     * True when {@code a} and {@code b} have the same sign, counting zero as positive.
+     *
+     * <p>This and the three methods below have no caller anywhere in this library. They are
+     * JHLabs-era sign helpers, and the only code that ever used them was the commented-out
+     * {@code java.awt.geom.Point2D} segment-intersection block that stood beneath them until
+     * 2.0.1. They are kept because {@code org.locationtech.proj4j.util} is an exported package and
+     * removing a public static method is a binary break.
+     */
     public static boolean sameSigns(double a, double b) {
         return a < 0 == b < 0;
     }
 
+    /** The {@code int} overload of {@link #sameSigns(double, double)}. */
     public static boolean sameSigns(int a, int b) {
         return a < 0 == b < 0;
     }
 
+    /** {@code |a|} carrying the sign of {@code b}, counting zero as positive. No in-tree caller. */
     public static double takeSign(double a, double b) {
         a = Math.abs(a);
         if (b < 0)
@@ -558,97 +555,13 @@ public class ProjectionMath {
         return a;
     }
 
+    /** The {@code int} overload of {@link #takeSign(double, double)}. No in-tree caller. */
     public static int takeSign(int a, int b) {
         a = Math.abs(a);
         if (b < 0)
             return -a;
         return a;
     }
-/*
-  public static double distance(Point2D.Double a, Point2D.Double b) {
-    return distance(a.x-b.x, a.y-b.y);
-  }
-
-	public final static int DONT_INTERSECT = 0;
-	public final static int DO_INTERSECT = 1;
-	public final static int COLLINEAR = 2;
-
-	public static int intersectSegments(Point2D.Double aStart, Point2D.Double aEnd, Point2D.Double bStart, Point2D.Double bEnd, Point2D.Double p) {
-		double a1, a2, b1, b2, c1, c2;
-		double r1, r2, r3, r4;
-		double denom, offset, num;
-
-		a1 = aEnd.y-aStart.y;
-		b1 = aStart.x-aEnd.x;
-		c1 = aEnd.x*aStart.y - aStart.x*aEnd.y;
-		r3 = a1*bStart.x + b1*bStart.y + c1;
-		r4 = a1*bEnd.x + b1*bEnd.y + c1;
-
-		if (r3 != 0 && r4 != 0 && sameSigns(r3, r4))
-			return DONT_INTERSECT;
-
-		a2 = bEnd.y-bStart.y;
-		b2 = bStart.x-bEnd.x;
-		c2 = bEnd.x*bStart.y-bStart.x*bEnd.y;
-		r1 = a2*aStart.x + b2*aStart.y + c2;
-		r2 = a2*aEnd.x + b2*aEnd.y + c2;
-
-		if (r1 != 0 && r2 != 0 && sameSigns(r1, r2))
-			return DONT_INTERSECT;
-
-		denom = a1*b2 - a2*b1;
-		if (denom == 0)
-			return COLLINEAR;
-
-		offset = denom < 0 ? -denom/2 : denom/2;
-
-		num = b1*c2 - b2*c1;
-		p.x = (num < 0 ? num-offset : num+offset) / denom;
-
-		num = a2*c1 - a1*c2;
-		p.y = (num < 0 ? num-offset : num+offset) / denom;
-
-		return DO_INTERSECT;
-	}
-
-  /*
-	public static double dot(Point2D.Double a, Point2D.Double b) {
-		return a.x*b.x + a.y*b.y;
-	}
-	
-	public static Point2D.Double perpendicular(Point2D.Double a) {
-		return new Point2D.Double(-a.y, a.x);
-	}
-	
-	public static Point2D.Double add(Point2D.Double a, Point2D.Double b) {
-		return new Point2D.Double(a.x+b.x, a.y+b.y);
-	}
-	
-	public static Point2D.Double subtract(Point2D.Double a, Point2D.Double b) {
-		return new Point2D.Double(a.x-b.x, a.y-b.y);
-	}
-	
-	public static Point2D.Double multiply(Point2D.Double a, Point2D.Double b) {
-		return new Point2D.Double(a.x*b.x, a.y*b.y);
-	}
-	
-	public static double cross(Point2D.Double a, Point2D.Double b) {
-		return a.x*b.y - b.x*a.y;
-	}
-  
-  public static void normalize(Point2D.Double a) {
-    double d = distance(a.x, a.y);
-    a.x /= d;
-    a.y /= d;
-  }
-  
-  public static void negate(Point2D.Double a) {
-    a.x = -a.x;
-    a.y = -a.y;
-  }
-  
-
-*/
 
     public static double cross(double x1, double y1, double x2, double y2) {
         return x1 * y2 - x2 * y1;

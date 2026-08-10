@@ -181,12 +181,32 @@ hand-synchronised and have drifted.
 constants rather than re-declaring them inline. The fix for the ellipsoid list is a pattern already
 established in the same file.
 
-#### 3. `Ellipsoid.INTERNATIONAL` and `Ellipsoid.INTL` are the same ellipsoid, twice, under the same key
+#### 3. `Ellipsoid.INTERNATIONAL` and `Ellipsoid.INTL` are the same ellipsoid, declared twice
 
 `datum/Ellipsoid.java:70` and `:183` are identical in all five constructor arguments — shortName
-`"intl"`, 6378388.0, 0.0, 297.0, `"International 1909 (Hayford)"`. Both are listed in
-`Ellipsoid.ellipsoids`, so that array contains the same entry twice under the same lookup key.
-Harmless today because lookup takes the first match; deleting one is bit-for-bit safe.
+`"intl"`, 6378388.0, 0.0, 297.0, `"International 1909 (Hayford)"`. Two distinct objects with equal
+state, so `INTERNATIONAL.equals(INTL)` is true (`Ellipsoid.equals` at `:407-420` compares by value)
+while `INTERNATIONAL == INTL` is false.
+
+**Correction, 2026-08-10.** As first written this finding said both constants were listed in
+`Ellipsoid.ellipsoids` and that "deleting one is bit-for-bit safe." Both halves were wrong, and the
+second one dangerously so.
+
+The array held **only `INTL`**; `Registry.ellipsoids` (`Registry.java:132`) held **only
+`INTERNATIONAL`**. There was no duplicate array entry — there were two tables disagreeing about
+which object represents the same ellipsoid, so `+ellps=intl` and the WKT writer's reverse lookup
+returned different objects for it.
+
+And deleting `INTL` from the array would have **moved bits**. It was the array's only member with
+`a = 6378388.0, rf = 297.0`, so `WktNames.projEllipsoidCode` (`WktNames.java:271-295`), which scans
+numerically and keeps the smallest `rf` delta, would have returned `null` and the writer would have
+emitted explicit `+a=`/`+rf=` in place of `+ellps=intl`.
+
+What was done instead, in the dead-code change: the array entry was changed from `INTL` to
+`INTERNATIONAL`, and `INTL` was deprecated in place rather than removed — `datum` is an exported
+package. That swap **is** bit-identical, because both the WKT reverse lookup and
+`GieEllipsoidResolver` (`:181-183`) key off `shortName`, which is `"intl"` either way. `HOUGH`
+shares `rf = 297.0` but has `a = 6378270.0`, so there is no tie-break sensitivity to worry about.
 
 #### 4. `+proj=rpoly` constructs successfully and then silently ignores both its parameters
 
@@ -234,6 +254,19 @@ writes a branch that can never be taken. Note that the *cause* is live —
 `pipeline/PipelineErrorCode.java:44` maps `MUTUALLY_EXCLUSIVE_ARGS` to
 `ErrorCause.CONTRADICTORY_PARAMS` — but it is reported through a different exception type. So this
 is either a missing throw site or an exception that should not exist.
+
+**Resolved in 2.0.1: deprecated as never thrown**, since it cannot be removed from an exported
+package. The type that is actually raised is `PipelineDefinitionException`, a *sibling* — it extends
+`InvalidValueException` too, and carries the same cause — thrown from exactly two places,
+`AxisSwapOperator.java:67-68` and `DeformationOperator.java:148-149`. A caller who wants the
+condition should catch `InvalidValueException` or switch on the cause.
+
+Worse than the dead type was what its Javadoc offered as examples. It named `+ellps=GRS80 +rf=300`
+and `+rf=298.257 +f=0.00335`, and `ErrorCause.java:106` repeated the first. **The library
+deliberately accepts both**, following PROJ's `ell_set.cpp` and letting the later shape parameter
+win — recorded at `StepEllipsoid.java:50-53` and `Proj4Parser.java:885-887`. So the two definitions
+a reader was most likely to try, on the strength of that Javadoc, were the two guaranteed to raise
+nothing at all. Both examples are corrected.
 
 #### 7. `Proj4FileReader` reads files in the platform default charset
 
@@ -351,10 +384,17 @@ Six blocks of five lines or more. Two are load-bearing (findings 4 and 5 above).
   commented class ends with `public String toString() { return "Nell"; }` — the wrong projection
   name, so it was already a broken copy-paste when it was disabled. It is referenced only from a
   Javadoc disclaimer at `ModifiedStereographicProjection.java:88` that points at its continued
-  existence.
+  existence. **Deleted in 2.0.1.** It produced no `.class` file, and its five `ENTRY0` names all
+  resolve to live classes registered elsewhere: `mil_os`, `lee_os`, `gs48`, `gs50` and `alsk`.
 - `util/ProjectionMath.java:567-651` — 85 lines: `distance`, intersection helpers, `negate`.
+  **Deleted in 2.0.1.** The four public `sameSigns`/`takeSign` overloads it was the only caller of
+  are still there, now documented as having no caller — they are public statics in an exported
+  package, so removing them is a binary break.
 - `util/ProjectionMath.java:514-526` — 13 lines referencing a `MapMath` class that no longer exists.
+  **Deleted in 2.0.1.**
 - `proj/LongLatProjection.java:30-38` — a dead `transformRadians` using `java.awt.geom.Point2D`.
+  **Deleted in 2.0.1**, along with the `TODO` above it asking for methods that the base class has
+  already supplied since before the fork.
 
 ## Reachability from the public API to the backend
 
@@ -381,13 +421,16 @@ hand.
 | `resource.DirectoryResourceResolver` | **Correct.** Ten main-source references, all Javadoc — the library documents it extensively and never instantiates it, because the user does. Well covered: 11 test files. |
 | `gie.GieTolerance` | **Correct-ish.** Published API used by 7 test files and referenced from main only in a `@param` tag. A utility for consumers of the `gie` package. |
 | `proj.EqualAreaAzimuthalProjection` | **Deliberate.** `AzimuthalProjection.java:63` explicitly calls it "unregistered." Absent from `Registry`, so unreachable via `+proj=`, reachable as API. |
-| `proj.LinearProjection` | **Worth a decision.** A concrete `public class` with no subclasses, absent from `Registry`, referenced from main only in two Javadoc tables. Reachable as API, unreachable via any `+proj=` string. |
-| `ContradictoryParameterException` | **A genuine dead end.** See finding 6. |
-| `util.ProjectionUtil` | **Dead in main.** A 4-line class whose only method is `toString(ProjCoordinate)`. Zero main-source references, **zero JaCoCo instruction coverage**, and used only by two test helpers (`ProjectionGridRoundTripper`, `MetaCRSTestCase`) for `System.out.println`. It is in an exported package, so deleting it is an API break. |
+| `proj.LinearProjection` | **Worth a decision.** A concrete `public class` with no subclasses, absent from `Registry`, referenced from main only in two Javadoc tables. Reachable as API, unreachable via any `+proj=` string. **Kept and documented in 2.0.1** — `NoInverseGateTest` constructs it as the one in-tree projection whose real inverse is the base-class identity, which is why the no-inverse gate has to consult `hasInverse()`. Three of its five methods, it turns out, override nothing: `project(ProjCoordinate, ProjCoordinate)`, `transform(double[]…)` and `inverseTransform(double[]…)` are JHLabs signatures the base class dropped. That is now said in its Javadoc. |
+| `ContradictoryParameterException` | **A genuine dead end.** See finding 6. **Deprecated in 2.0.1** as never thrown. |
+| `util.ProjectionUtil` | **Dead in main.** A 4-line class whose only method is `toString(ProjCoordinate)`. Zero main-source references, **zero JaCoCo instruction coverage**, and used only by two test helpers (`ProjectionGridRoundTripper`, `MetaCRSTestCase`) for `System.out.println`. It is in an exported package, so deleting it is an API break. **Kept and documented in 2.0.1**, pointing new callers at `ProjCoordinate.toString()`, which does not drop `z`. |
 
 So the answer to the question as asked is: **no dead path from the public API into the backend, with
 two exceptions** — `ContradictoryParameterException`, which the API documents and the backend never
-raises, and `util.ProjectionUtil`, which the API exports and nothing in the library uses.
+raises, and `util.ProjectionUtil`, which the API exports and nothing in the library uses. Neither
+could be deleted, both being in exported packages; in 2.0.1 the first is deprecated and the second
+is documented, so in each case reading the Javadoc now tells a caller what the reachability walk had
+to be run to discover.
 
 ### Dead ends: paths that are reachable but lead nowhere
 
@@ -451,7 +494,7 @@ What is genuinely worth consolidating, split by whether it can move a bit.
 | Convergence-failure message | The identical message string is built in seven projection classes. Note the text is asserted in tests, so a shared formatter must reproduce it exactly, including the space before `rad`. | 7 copies |
 | `lon1`/`lat1`/`lon2`/`lat2` accessors | `TwoPointEquidistantProjection.java:100-137` vs `ObliqueCylindricalEqualAreaProjection.java:88-125` — byte-identical apart from one Javadoc word. Blocked only by unrelated superclasses. | ~40 lines |
 | `ProjectionMath.distance` → `MathHelpers.norm2` | Byte-identical bodies (`Math.sqrt(a*a + b*b)`). | 1 method |
-| Dead utilities | `util/ProjectionMath.java:546 sameSigns`, `:554` and `:561 takeSign` — zero main callers. | 3 methods |
+| Dead utilities | `util/ProjectionMath.java:546` and `:550 sameSigns`, `:554` and `:561 takeSign` — zero main callers. Four overloads, not the three an earlier count gave; the `int` overload of `sameSigns` was missed. | 4 methods |
 
 ### Not safe — reported as candidates and deliberately not changed
 
@@ -571,9 +614,25 @@ code. That was wrong: its own header explains the extension, because it compiles
 **conformance** module's test classes and core is a dependency *of* conformance, not the reverse, so
 it cannot be a `.java` in core without a dependency cycle. It has a `main()` and no assertions.
 
-Its header does contain a stale number: it quotes a "7,845-assertion corpus" while
+The dependency argument was sound and the conclusion drawn from it was not. The file did not have to
+be parked; it had to be **in the other module**. In 2.0.1 it moved to
+`conformance/src/test/java/org/locationtech/proj4j/conformance/tools/Decompose.java`, where the
+classes it calls are on the compile path and it builds with everything else. Surefire does not pick
+it up — no `@Test`, and the class name matches none of the default include patterns — so it stays a
+hand-run tool, but a compiler now checks it against the APIs it calls instead of nobody checking it
+at all.
+
+Two other things went wrong in the same file and were fixed by the move. Its build recipe could
+never have worked as written: **its first 39 lines were raw English prose, uncommented**, so the
+`javac` invocation it documented would have failed on line 1. And the recipe was a transcript of one
+machine — a hardcoded `/Library/Java/JavaVirtualMachines/temurin-21.jdk` `JAVA_HOME`, an
+`/opt/homebrew/bin` `PATH`, a `-Dmaven.repo.local=/tmp/m2-btail`, an absolute `cd` into the
+checkout. All of that is gone; the prose is class Javadoc.
+
+Its header also contained a stale number: it quoted a "7,845-assertion corpus" while
 `gie-corpus-index.tsv` holds 7,931 and `conformance/pom.xml:127` says 8,017 — three numbers in three
-places.
+places. The figure was dropped rather than replaced, since a fourth guess would not help. Reconciling
+the remaining three is a documentation item.
 
 ## Documentation
 
@@ -770,6 +829,10 @@ requests after this document.
    are not load-bearing, `ModStereoProjection.java`, and a decision on
    `ContradictoryParameterException`, `util.ProjectionUtil` and `LinearProjection` — all three of
    which are exported, so removal is an API break and the alternative is to document or wire them up.
+   The decision taken was to keep all three and say why in the Javadoc: the exception is
+   `@Deprecated` as never thrown, and the other two are documented in place. `Projection.geocentric`
+   — a `protected` field nothing assigns and nothing reads — is `@Deprecated` on the same grounds.
+   `Decompose.java.txt` moved into the conformance module and compiles.
 3. **Redundancy.** The safe table above, and nothing from the unsafe one.
 4. **Tests and documentation.** Pin core's surefire locale/timezone/charset; cover the three
    zero-coverage `spi.Db*` records, `pipeline.DeformationOperator` and `io.projjson`; resolve the

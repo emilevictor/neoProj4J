@@ -103,10 +103,19 @@ public enum ErrorCause {
 
     /**
      * Two or more parameters in one definition are mutually exclusive, or specify the same
-     * quantity inconsistently — {@code +ellps=GRS80 +rf=300}, {@code +rf=298.257 +f=0.00335}.
-     * PROJ's {@code PROJ_ERR_INVALID_OP_MUTUALLY_EXCLUSIVE_ARGS}.
+     * quantity inconsistently. PROJ's {@code PROJ_ERR_INVALID_OP_MUTUALLY_EXCLUSIVE_ARGS}.
      *
-     * @see ContradictoryParameterException
+     * <p>In this library the cause is reported by {@link org.locationtech.proj4j.pipeline.PipelineDefinitionException}, raised
+     * from {@code AxisSwapOperator} when a pipeline step names conflicting axis orders and from
+     * {@code DeformationOperator} when it is given more than one way to specify the same
+     * deformation. {@link ContradictoryParameterException} also carries this cause but is never
+     * thrown; see its Javadoc.
+     *
+     * <p>Ellipsoid parameters are <em>not</em> an example. This library follows PROJ in
+     * accepting {@code +ellps=GRS80 +rf=300} and {@code +rf=298.257 +f=0.00335} and letting the
+     * later shape parameter win, so neither reaches this cause.
+     *
+     * @see org.locationtech.proj4j.pipeline.PipelineDefinitionException
      */
     CONTRADICTORY_PARAMS("crs.contradictory_params", Group.CRS),
 

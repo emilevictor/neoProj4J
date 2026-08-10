@@ -1,44 +1,20 @@
-NOT COMPILED BY MAVEN -- deliberately `.java.txt`.
-=================================================
+/*
+ * Copyright 2026 The Proj4J Contributors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.locationtech.proj4j.conformance.tools;
 
-This is the re-decomposition driver: it groups every FAILING GieAssertionResult of the whole
-vendored corpus by (file, `+proj=` token, category), so that a per-file failure count can be
-turned into a worklist. It reuses the REAL GieLexer, GieRunner and Proj4jGieOperationFactory and
-the published comparator (org.locationtech.proj4j.gie.{GieComparator,GieTolerance,GieIoUnits})
-via GieRunner -- it re-parses no expectation and no tolerance of its own.
-
-It cannot live in `core/src/test/java` as a `.java` file because it compiles against the
-`conformance` module's TEST classes, and `core` is a dependency of `conformance`, not the other
-way round. Hence the `.txt` suffix: Maven's `**/*.java` include skips it, and the source stays
-next to the tests it informs instead of in /tmp.
-
-Build and run (about 25 s for the whole 7,845-assertion corpus):
-
-    export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
-    export PATH="$JAVA_HOME/bin:/opt/homebrew/bin:$PATH"
-    cd /Volumes/git/proj4j
-
-    mvn -B -q -Dmaven.repo.local=/tmp/m2-btail -pl conformance -am -Pconformance test-compile \
-        -Dmaven.javadoc.skip=true                       # once, to get conformance/target/test-classes
-    mvn -B -q -Dmaven.repo.local=/tmp/m2-btail -pl core -am install \
-        -Dmaven.javadoc.skip=true -DskipTests           # after every change to core
-
-    CP="conformance/target/test-classes:conformance/target/classes:core/target/classes:\
-epsg/target/classes:db/target/classes:grids-us-legacy/target/classes"
-    mkdir -p /tmp/decomp/classes
-    cp core/src/test/java/org/locationtech/proj4j/builtins2/Decompose.java.txt /tmp/decomp/Decompose.java
-    javac -nowarn -cp "$CP" -d /tmp/decomp/classes /tmp/decomp/Decompose.java
-    java -cp "/tmp/decomp/classes:$CP" Decompose /tmp/decomp/report.txt
-
-A/B protocol: do NOT recompile `conformance/target/test-classes` between the two arms of a
-comparison -- the bridge is written by a different stream and recompiling it makes the arms
-differ by more than your change. Recompile `core` only. And note that `core/target/classes`
-picks up EVERY other agent's in-flight work, so a delta in a file you did not touch
-(`4D-API_cs2cs-style`, `DHDN_ETRS89`, `more_builtins`, `gridshift`) is probably not yours.
-
-------------------------------------------------------------------------------------------------
-import java.io.IOException;
-import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -61,10 +37,47 @@ import org.locationtech.proj4j.conformance.runner.GieGridAvailability;
 import org.locationtech.proj4j.conformance.runner.GieRunner;
 
 /**
- * Re-decomposes the failing assertions of the whole corpus by (file, +proj= token, category).
+ * A worklist generator: it groups every FAILING assertion of the whole vendored corpus by (file,
+ * {@code +proj=} token, category), so a per-file failure count can be turned into a list of things
+ * to go and fix.
  *
- * <p>Deliberately reuses the real GieLexer/GieRunner/Proj4jGieOperationFactory and the published
- * comparator, via GieRunner, so no expectation or tolerance is re-parsed here.
+ * <p>It deliberately reuses the real {@link GieLexer}, {@link GieRunner} and
+ * {@link Proj4jGieOperationFactory}, and — through {@code GieRunner} — the published comparator
+ * ({@code org.locationtech.proj4j.gie.GieComparator}, {@code GieTolerance}, {@code GieIoUnits}). It
+ * re-parses no expectation and no tolerance of its own, so its verdicts are the same verdicts the
+ * conformance sweep reaches. Change the comparator and this tool changes with it.
+ *
+ * <p>This has a {@code main}, not a {@code @Test}. Surefire will not pick it up: the class name
+ * matches none of the default include patterns and it holds no test method. It compiles with the
+ * rest of the module's test sources and is run by hand.
+ *
+ * <h2>Running it</h2>
+ *
+ * <pre>
+ * mvn -B -ntp -pl conformance -am -Pconformance test-compile -Dmaven.javadoc.skip=true
+ *
+ * CP="conformance/target/test-classes:conformance/target/classes:core/target/classes:\
+ * epsg/target/classes:db/target/classes:grids-us-legacy/target/classes"
+ * java -cp "$CP" org.locationtech.proj4j.conformance.tools.Decompose /tmp/decomp/report.txt
+ * </pre>
+ *
+ * <p>The report goes to standard output and to the path in {@code argv[0]}, defaulting to
+ * {@code /tmp/decomp/report.txt}. The destination directory must already exist.
+ *
+ * <h2>A/B comparisons</h2>
+ *
+ * <p>When running this twice to measure the effect of a change to {@code core}, do <b>not</b>
+ * recompile {@code conformance/target/test-classes} between the two arms. The bridge that sits
+ * there is maintained separately, and recompiling it makes the two arms differ by more than the
+ * change under test. Recompile {@code core} only. Bear in mind too that {@code core/target/classes}
+ * carries whatever else is in flight in the working tree, so a movement in a file nobody touched is
+ * probably not caused by the change being measured.
+ *
+ * <p>Until 2.0.1 this source sat at
+ * {@code core/src/test/java/org/locationtech/proj4j/builtins2/Decompose.java.txt}, parked with a
+ * {@code .txt} suffix because it compiles against this module's test classes and {@code core} is a
+ * dependency of {@code conformance}, not the other way round. It belongs here, and here it
+ * compiles.
  */
 public final class Decompose {
 

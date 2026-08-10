@@ -161,8 +161,20 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
     protected boolean spherical;
 
     /**
-     * True if this projection is geocentric
+     * True if this projection is geocentric.
+     *
+     * <p><b>Nothing in this library assigns or reads this field</b>, so it is permanently
+     * {@code false} and says nothing about the projection. It has been inert since the JHLabs
+     * import. Ask {@code CoordinateReferenceSystem} or the {@code api} facade's
+     * {@code Crs.isGeocentric()} instead, both of which decide from the parsed definition.
+     *
+     * @deprecated Never assigned, never read; reading it always yields {@code false}. Retained
+     *     because {@code org.locationtech.proj4j.proj} is an exported package and this is a
+     *     {@code protected} field on a public non-final {@link java.io.Serializable} class, so
+     *     removing it would break an out-of-tree subclass at link time and change the default
+     *     serialized form.
      */
+    @Deprecated
     protected boolean geocentric;
 
     /**

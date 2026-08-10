@@ -17,7 +17,27 @@ package org.locationtech.proj4j.util;
 
 import org.locationtech.proj4j.ProjCoordinate;
 
+/**
+ * One static helper that formats a {@link ProjCoordinate} as {@code [x, y]}.
+ *
+ * <p>No main source calls it. Its only callers are two test classes,
+ * {@code ProjectionGridRoundTripper} and {@code MetaCRSTestCase}, which use it to build failure
+ * messages. It predates {@link ProjCoordinate#toString()}, which produces
+ * {@code ProjCoordinate[x y z]} and includes the third ordinate — for new code that is the one to
+ * use, since it does not drop {@code z}.
+ *
+ * <p>The class is kept because {@code org.locationtech.proj4j.util} is an exported package and
+ * removing a public class is a binary break.
+ */
 public class ProjectionUtil {
+
+    /**
+     * Formats the horizontal ordinates of {@code p} as {@code [x, y]}. The {@code z} ordinate is
+     * not shown.
+     *
+     * @param p the coordinate to format
+     * @return the two horizontal ordinates in brackets, comma-separated
+     */
     public static String toString(ProjCoordinate p) {
         return "[" + p.x + ", " + p.y + "]";
     }
