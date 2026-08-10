@@ -222,13 +222,13 @@ public final class Crs {
         if (params == null) {
             return Collections.emptyMap();
         }
-        String nadgrids = value(params, "nadgrids");
+        String nadgrids = paramValue(params, "nadgrids");
         if (nadgrids != null) {
             // An explicit +nadgrids= replaces whatever the datum declared: Proj4Parser applies
             // +datum first and then overwrites the grid list (parseDatum, in that order).
             return Collections.singletonMap("+nadgrids=" + nadgrids, nadgrids);
         }
-        String datum = value(params, "datum");
+        String datum = paramValue(params, "datum");
         if (datum != null) {
             String declared = DATUM_GRID_DECLARATIONS.get(datum);
             if (declared != null) {
@@ -239,24 +239,43 @@ public final class Crs {
     }
 
     /**
-     * The value of a PROJ parameter in an already-parsed list, tolerating both the {@code +key=}
-     * and the bare {@code key=} spelling. <b>The shipped dictionaries write parameters without the
-     * leading {@code +}</b>, so matching only on {@code "+key="} silently finds nothing.
+     * Whether one already-parsed PROJ parameter declares {@code key}, tolerating both the
+     * {@code +key=} and the bare {@code key=} spelling. <b>The shipped dictionaries write parameters
+     * without the leading {@code +}</b>, so matching only on {@code "+key="} silently finds nothing.
+     *
+     * <p>Package-private because {@link Proj} and {@link LegacyAdapters} ask the same question and
+     * used to carry a copy each. Three copies of the test for "is there an explicit {@code +axis=}"
+     * is three chances for one entry point to see a parameter the other two do not, and the symptom
+     * of that would be a CRS whose axis order disagrees with its own {@link #axisOrderNote()}.
      */
-    private static String value(String[] params, String key) {
+    static boolean declares(String param, String key) {
+        if (param == null) {
+            return false;
+        }
+        int start = param.startsWith("+") ? 1 : 0;
+        return param.regionMatches(start, key, 0, key.length())
+                && param.length() > start + key.length()
+                && param.charAt(start + key.length()) == '=';
+    }
+
+    /**
+     * The value of a PROJ parameter in an already-parsed list, or null when the list does not
+     * declare it. A parameter written with nothing after the {@code =} has the empty string as its
+     * value, which is a different answer from null.
+     */
+    static String paramValue(String[] params, String key) {
         for (int i = 0; i < params.length; i++) {
             String p = params[i];
-            if (p == null) {
-                continue;
-            }
-            int start = p.startsWith("+") ? 1 : 0;
-            if (p.regionMatches(start, key, 0, key.length())
-                    && p.length() > start + key.length()
-                    && p.charAt(start + key.length()) == '=') {
-                return p.substring(start + key.length() + 1);
+            if (declares(p, key)) {
+                return p.substring((p.startsWith("+") ? 1 : 0) + key.length() + 1);
             }
         }
         return null;
+    }
+
+    /** Whether an already-parsed parameter list declares {@code key}, whatever its value. */
+    static boolean hasParam(String[] params, String key) {
+        return paramValue(params, key) != null;
     }
 
     // ---------------------------------------------------------------- identity and definition
@@ -551,7 +570,7 @@ public final class Crs {
      * @return three characters from {@code "ewnsud"}; never null
      */
     public String axisOrder() {
-        String axis = params == null ? null : value(params, "axis");
+        String axis = params == null ? null : paramValue(params, "axis");
         return axis == null ? "enu" : axis;
     }
 

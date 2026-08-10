@@ -72,17 +72,26 @@ class TransformWrapper2D extends TransformWrapper implements MathTransform2D {
     }
 
     /**
+     * Transforms a single coordinate tuple, reporting a PROJ4J failure as the GeoAPI exception type.
+     * The {@code z} ordinate of {@code src} is left untouched: it stays {@link Double#NaN} in this
+     * two-dimensional case, which is how PROJ4J is told that no height was supplied.
+     * The returned tuple is not necessarily {@code tgt}.
+     */
+    private ProjCoordinate transform(final ProjCoordinate src, final ProjCoordinate tgt) throws TransformException {
+        try {
+            return impl.transform(src, tgt);
+        } catch (Proj4jException e) {
+            throw cannotTransform(e);
+        }
+    }
+
+    /**
      * Transforms the specified {@code ptSrc} and stores the result in {@code ptDst}.
      */
     @Override
     public Point2D transform(Point2D ptSrc, Point2D ptDst) throws TransformException {
         ProjCoordinate src = new ProjCoordinate(ptSrc.getX(), ptSrc.getY());
-        ProjCoordinate tgt = new ProjCoordinate();
-        try {
-            tgt = impl.transform(src, tgt);
-        } catch (Proj4jException e) {
-            throw cannotTransform(e);
-        }
+        ProjCoordinate tgt = transform(src, new ProjCoordinate());
         if (ptDst == null) {
             return new Point2D.Double(tgt.x, tgt.y);
         } else {
@@ -110,15 +119,10 @@ class TransformWrapper2D extends TransformWrapper implements MathTransform2D {
         }
         final ProjCoordinate src = new ProjCoordinate();
         final ProjCoordinate tgt = new ProjCoordinate();
-        ProjCoordinate result;
         while (--numPts >= 0) {
             src.x = srcPts[srcOff++];
             src.y = srcPts[srcOff++];
-            try {
-                result = impl.transform(src, tgt);
-            } catch (Proj4jException e) {
-                throw cannotTransform(e);
-            }
+            final ProjCoordinate result = transform(src, tgt);
             dstPts[dstOff++] = result.x;
             dstPts[dstOff++] = result.y;
         }
@@ -143,15 +147,10 @@ class TransformWrapper2D extends TransformWrapper implements MathTransform2D {
         }
         final ProjCoordinate src = new ProjCoordinate();
         final ProjCoordinate tgt = new ProjCoordinate();
-        ProjCoordinate result;
         while (--numPts >= 0) {
             src.x = srcPts[srcOff++];
             src.y = srcPts[srcOff++];
-            try {
-                result = impl.transform(src, tgt);
-            } catch (Proj4jException e) {
-                throw cannotTransform(e);
-            }
+            final ProjCoordinate result = transform(src, tgt);
             dstPts[dstOff++] = (float) result.x;
             dstPts[dstOff++] = (float) result.y;
         }
@@ -167,15 +166,10 @@ class TransformWrapper2D extends TransformWrapper implements MathTransform2D {
         checkNumPts(numPts);
         final ProjCoordinate src = new ProjCoordinate();
         final ProjCoordinate tgt = new ProjCoordinate();
-        ProjCoordinate result;
         while (--numPts >= 0) {
             src.x = srcPts[srcOff++];
             src.y = srcPts[srcOff++];
-            try {
-                result = impl.transform(src, tgt);
-            } catch (Proj4jException e) {
-                throw cannotTransform(e);
-            }
+            final ProjCoordinate result = transform(src, tgt);
             dstPts[dstOff++] = result.x;
             dstPts[dstOff++] = result.y;
         }
@@ -191,15 +185,10 @@ class TransformWrapper2D extends TransformWrapper implements MathTransform2D {
         checkNumPts(numPts);
         final ProjCoordinate src = new ProjCoordinate();
         final ProjCoordinate tgt = new ProjCoordinate();
-        ProjCoordinate result;
         while (--numPts >= 0) {
             src.x = srcPts[srcOff++];
             src.y = srcPts[srcOff++];
-            try {
-                result = impl.transform(src, tgt);
-            } catch (Proj4jException e) {
-                throw cannotTransform(e);
-            }
+            final ProjCoordinate result = transform(src, tgt);
             dstPts[dstOff++] = (float) result.x;
             dstPts[dstOff++] = (float) result.y;
         }

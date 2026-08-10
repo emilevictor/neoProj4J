@@ -63,6 +63,20 @@ class TransformWrapper3D extends TransformWrapper {
     }
 
     /**
+     * Transforms a single coordinate tuple, reporting a PROJ4J failure as the GeoAPI exception type.
+     * All three ordinates of {@code src} are expected to have been set by the caller, because a
+     * {@link Double#NaN} height is how PROJ4J is told that no height was supplied.
+     * The returned tuple is not necessarily {@code tgt}.
+     */
+    private ProjCoordinate transform(final ProjCoordinate src, final ProjCoordinate tgt) throws TransformException {
+        try {
+            return impl.transform(src, tgt);
+        } catch (Proj4jException e) {
+            throw cannotTransform(e);
+        }
+    }
+
+    /**
      * Transforms coordinate tuples in the given arrays in double precision.
      * This is the most frequently used method.
      */
@@ -81,16 +95,11 @@ class TransformWrapper3D extends TransformWrapper {
         }
         final ProjCoordinate src = new ProjCoordinate();
         final ProjCoordinate tgt = new ProjCoordinate();
-        ProjCoordinate result;
         while (--numPts >= 0) {
             src.x = srcPts[srcOff++];
             src.y = srcPts[srcOff++];
             src.z = srcPts[srcOff++];
-            try {
-                result = impl.transform(src, tgt);
-            } catch (Proj4jException e) {
-                throw cannotTransform(e);
-            }
+            final ProjCoordinate result = transform(src, tgt);
             dstPts[dstOff++] = result.x;
             dstPts[dstOff++] = result.y;
             dstPts[dstOff++] = result.z;
@@ -116,16 +125,11 @@ class TransformWrapper3D extends TransformWrapper {
         }
         final ProjCoordinate src = new ProjCoordinate();
         final ProjCoordinate tgt = new ProjCoordinate();
-        ProjCoordinate result;
         while (--numPts >= 0) {
             src.x = srcPts[srcOff++];
             src.y = srcPts[srcOff++];
             src.z = srcPts[srcOff++];
-            try {
-                result = impl.transform(src, tgt);
-            } catch (Proj4jException e) {
-                throw cannotTransform(e);
-            }
+            final ProjCoordinate result = transform(src, tgt);
             dstPts[dstOff++] = (float) result.x;
             dstPts[dstOff++] = (float) result.y;
             dstPts[dstOff++] = (float) result.z;
@@ -142,16 +146,11 @@ class TransformWrapper3D extends TransformWrapper {
         checkNumPts(numPts);
         final ProjCoordinate src = new ProjCoordinate();
         final ProjCoordinate tgt = new ProjCoordinate();
-        ProjCoordinate result;
         while (--numPts >= 0) {
             src.x = srcPts[srcOff++];
             src.y = srcPts[srcOff++];
             src.z = srcPts[srcOff++];
-            try {
-                result = impl.transform(src, tgt);
-            } catch (Proj4jException e) {
-                throw cannotTransform(e);
-            }
+            final ProjCoordinate result = transform(src, tgt);
             dstPts[dstOff++] = result.x;
             dstPts[dstOff++] = result.y;
             dstPts[dstOff++] = result.z;
@@ -168,16 +167,11 @@ class TransformWrapper3D extends TransformWrapper {
         checkNumPts(numPts);
         final ProjCoordinate src = new ProjCoordinate();
         final ProjCoordinate tgt = new ProjCoordinate();
-        ProjCoordinate result;
         while (--numPts >= 0) {
             src.x = srcPts[srcOff++];
             src.y = srcPts[srcOff++];
             src.z = srcPts[srcOff++];
-            try {
-                result = impl.transform(src, tgt);
-            } catch (Proj4jException e) {
-                throw cannotTransform(e);
-            }
+            final ProjCoordinate result = transform(src, tgt);
             dstPts[dstOff++] = (float) result.x;
             dstPts[dstOff++] = (float) result.y;
             dstPts[dstOff++] = (float) result.z;

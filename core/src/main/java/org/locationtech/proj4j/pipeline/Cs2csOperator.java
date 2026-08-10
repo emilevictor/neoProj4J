@@ -162,7 +162,7 @@ import org.locationtech.proj4j.vertical.VGridShiftOperator;
  * <p>Not thread-safe: proj4j {@code Projection} instances are mutable, and
  * {@code +proj=cass} writes seventeen instance fields on the hot path.
  */
-final class Cs2csOperator implements PipelineOperator {
+final class Cs2csOperator extends OverridableUnitsOperator {
 
     /** {@code PJ_EPS_LAT}, in radians. */
     static final double EPS_LAT = 1e-12;
@@ -228,9 +228,6 @@ final class Cs2csOperator implements PipelineOperator {
     /** {@code P->rone_es}, i.e. {@code 1 / (1 - es)}; only read when {@link #geoc}. */
     private final double rOneEs;
 
-    private GieIoUnits left;
-    private GieIoUnits right;
-
     /**
      * @param registry the projection registry to resolve {@code +proj=} against
      * @param params   the step's fully expanded parameter list — {@code +init=} and
@@ -248,20 +245,20 @@ final class Cs2csOperator implements PipelineOperator {
         }
         this.projection = crs.getProjection();
 
+        // Never WHATEVER on both sides, so the inherited overrideUnits is unreachable for
+        // this operator: pipeline.cpp only offers the override to a step that declared
+        // neither side, which a classic projection never does.
         if (isLongLat(projName)) {
             this.kernel = Kernel.LONGLAT;
-            this.left = GieIoUnits.RADIANS;
-            this.right = GieIoUnits.RADIANS;
+            declareUnits(GieIoUnits.RADIANS, GieIoUnits.RADIANS);
         } else if ("geocent".equals(projName)) {
             this.kernel = Kernel.GEOCENT;
-            this.left = GieIoUnits.RADIANS;
-            this.right = GieIoUnits.CARTESIAN;
+            declareUnits(GieIoUnits.RADIANS, GieIoUnits.CARTESIAN);
         } else {
             this.kernel = Kernel.PROJECTION;
-            this.left = GieIoUnits.RADIANS;
             // Every PROJ_HEAD projection declares CLASSIC, which pj_right folds to
             // PROJECTED (proj_internal.h:882-883).
-            this.right = GieIoUnits.CLASSIC;
+            declareUnits(GieIoUnits.RADIANS, GieIoUnits.CLASSIC);
         }
 
         this.lam0 = projection.getProjectionLongitude();
@@ -606,9 +603,9 @@ final class Cs2csOperator implements PipelineOperator {
 
     @Override
     public void forward(final double[] coord) {
-        if (left == GieIoUnits.RADIANS) {
+        if (declaredLeft() == GieIoUnits.RADIANS) {
             prepareAngular(coord);
-        } else if (left == GieIoUnits.CARTESIAN && helmert != null) {
+        } else if (declaredLeft() == GieIoUnits.CARTESIAN && helmert != null) {
             // fwd.cpp:114-116: gridshifts are unsupported on cartesian input, but a
             // Helmert is applied in reverse.
             helmert.inverse(coord);
@@ -766,7 +763,7 @@ final class Cs2csOperator implements PipelineOperator {
                 break;
         }
 
-        if (left == GieIoUnits.RADIANS) {
+        if (declaredLeft() == GieIoUnits.RADIANS) {
             finalizeAngular(coord);
         }
     }
@@ -844,26 +841,6 @@ final class Cs2csOperator implements PipelineOperator {
         return Math.atan((forward ? oneEs : rOneEs) * Math.tan(phi));
     }
 
-    // ------------------------------------------------------------------- units
-
-    @Override
-    public GieIoUnits declaredLeft() {
-        return left;
-    }
-
-    @Override
-    public GieIoUnits declaredRight() {
-        return right;
-    }
-
-    @Override
-    public void overrideUnits(final GieIoUnits newLeft, final GieIoUnits newRight) {
-        // Only reachable for an operator declaring WHATEVER on both sides, which a
-        // classic projection never does.
-        this.left = newLeft;
-        this.right = newRight;
-    }
-
     @Override
     public boolean hasInverse() {
         return kernel != Kernel.PROJECTION || projection.hasInverse();
@@ -905,7 +882,8 @@ final class Cs2csOperator implements PipelineOperator {
 
     @Override
     public String toString() {
-        return "Cs2csOperator[" + description + ", " + kernel + ", left=" + left + ", right=" + right
+        return "Cs2csOperator[" + description + ", " + kernel + ", left=" + declaredLeft()
+                + ", right=" + declaredRight()
                 + (helmert != null ? ", helmert" : "") + (cart != null ? ", cart" : "")
                 + (hgridshift != null ? ", " + hgridshift.description() : "")
                 + (geoc ? ", geoc" : "")

@@ -961,7 +961,7 @@ public final class Proj {
                                        CoordinateReferenceSystem crs, CrsDefinition def,
                                        boolean declared) {
         String[] params = crs.getParameters();
-        boolean explicitAxis = params != null && hasKey(params, "axis");
+        boolean explicitAxis = params != null && Crs.hasParam(params, "axis");
         AxisOrderPolicy policy = ctx.axisOrderPolicy();
         boolean geographic = crs.getProjection() != null
                 && Boolean.TRUE.equals(crs.getProjection().isGeographic());
@@ -1034,22 +1034,6 @@ public final class Proj {
                 + "if you need it honoured.";
     }
 
-    private static boolean hasKey(String[] params, String key) {
-        for (int i = 0; i < params.length; i++) {
-            String p = params[i];
-            if (p == null) {
-                continue;
-            }
-            int start = p.startsWith("+") ? 1 : 0;
-            if (p.regionMatches(start, key, 0, key.length())
-                    && p.length() > start + key.length()
-                    && p.charAt(start + key.length()) == '=') {
-                return true;
-            }
-        }
-        return false;
-    }
-
     private static String[] append(String[] params, String extra) {
         String[] out = new String[params.length + 1];
         System.arraycopy(params, 0, out, 0, params.length);
@@ -1061,14 +1045,7 @@ public final class Proj {
         List<String> kept = new ArrayList<String>(params.length);
         for (int i = 0; i < params.length; i++) {
             String p = params[i];
-            if (p == null) {
-                continue;
-            }
-            int start = p.startsWith("+") ? 1 : 0;
-            boolean isKey = p.regionMatches(start, key, 0, key.length())
-                    && p.length() > start + key.length()
-                    && p.charAt(start + key.length()) == '=';
-            if (!isKey) {
+            if (p != null && !Crs.declares(p, key)) {
                 kept.add(p);
             }
         }

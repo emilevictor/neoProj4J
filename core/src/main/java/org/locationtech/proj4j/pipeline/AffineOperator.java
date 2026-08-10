@@ -60,7 +60,7 @@ import org.locationtech.proj4j.gie.GieIoUnits;
  *
  * @since 1.5
  */
-final class AffineOperator implements PipelineOperator {
+final class AffineOperator extends OverridableUnitsOperator {
 
     private final double xoff;
     private final double yoff;
@@ -76,9 +76,6 @@ final class AffineOperator implements PipelineOperator {
     private final double revTScale;
 
     private final boolean invertible;
-
-    private GieIoUnits left = GieIoUnits.WHATEVER;
-    private GieIoUnits right = GieIoUnits.WHATEVER;
 
     AffineOperator(final ProjParams params) {
         this.xoff = params.doubleValue("xoff", 0.0);
@@ -171,22 +168,6 @@ final class AffineOperator implements PipelineOperator {
     }
 
     @Override
-    public GieIoUnits declaredLeft() {
-        return left;
-    }
-
-    @Override
-    public GieIoUnits declaredRight() {
-        return right;
-    }
-
-    @Override
-    public void overrideUnits(final GieIoUnits newLeft, final GieIoUnits newRight) {
-        this.left = newLeft;
-        this.right = newRight;
-    }
-
-    @Override
     public boolean hasInverse() {
         return invertible;
     }
@@ -199,6 +180,7 @@ final class AffineOperator implements PipelineOperator {
 
     @Override
     public String toString() {
-        return "AffineOperator[" + description() + ", left=" + left + ", right=" + right + "]";
+        return "AffineOperator[" + description() + ", left=" + declaredLeft()
+                + ", right=" + declaredRight() + "]";
     }
 }

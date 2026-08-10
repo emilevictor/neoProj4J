@@ -27,14 +27,44 @@ import java.util.Map;
  *
  * <h2>Why this is not {@code org.locationtech.proj4j.io.projjson.Json}</h2>
  *
- * <p>Because that class is <b>package-private</b> — {@code final class Json} with
- * {@code static Object parse(String)} — so nothing outside
- * {@code org.locationtech.proj4j.io.projjson} can call it. It is the right class to
- * use and this one should be deleted the moment {@code Json} and {@code Json.parse}
- * are made {@code public} (or a public facade is added next to
- * {@code ProjJsonReader}); that visibility change is the one item of plumbing this
- * operator family needs and is reported rather than made here, because
- * {@code io/**} is owned elsewhere.
+ * <p>An earlier version of this comment said the only obstacle was that
+ * {@code Json} is package-private, and that this class should be deleted as soon as
+ * {@code Json.parse} was made {@code public}. That was wrong, and acting on it would
+ * have made two things worse. The visibility is real — {@code final class Json} with
+ * {@code static Object parse(String)}, unreachable from this package — but it is the
+ * smallest of three obstacles, and the other two are not plumbing.
+ *
+ * <p><b>There is nowhere to put shared code that is not published API.</b>
+ * {@code core/pom.xml} builds an OSGi bundle with no {@code Export-Package} and no
+ * {@code Private-Package}, so bnd exports every package. A shared parser is therefore
+ * either a {@code public} type — a JSON parser published as supported surface, in a
+ * library whose stated advantage is having no JSON dependency at all, which invites
+ * callers to use it as one and turns every RFC 8259 corner into a compatibility
+ * obligation — or it is duplicated, because a package-private class cannot serve two
+ * packages. Making {@code Json.parse} public is not a small step towards the merge; it
+ * *is* the cost of the merge.
+ *
+ * <p><b>The two report failures differently, and neither type contains the other.</b>
+ * Every refusal here goes through {@link #invalid}, which returns a
+ * {@code PipelineDefinitionException} (a subclass of {@code InvalidValueException})
+ * carrying {@code PipelineErrorCode.FILE_NOT_FOUND_OR_INVALID} and an
+ * {@code "invalid model: "} prefix. {@code Json} throws {@code WktParseException} (a
+ * direct subclass of {@code Proj4jException}) at nineteen sites. They are siblings, so
+ * a shared parser has to take a failure factory and thread it through every throw. Call
+ * {@code Json.parse} from here without one and a corrupt {@code +proj=tinshift} model
+ * reports a WKT parse error, and callers catching {@code InvalidValueException} stop
+ * catching it at all.
+ *
+ * <p>The overlap is also smaller than the two file lengths suggest. About half of
+ * {@code Json} is a writer ({@code write}, {@code writeObject}, {@code writeArray},
+ * {@code writeString}) that this class has no use for, and about a third of this class
+ * is the twelve typed accessors below, including {@link #asIndex}'s
+ * {@code number_unsigned} test, which {@code Json} has no reason to carry. What is
+ * genuinely shared is the scanner and the two container loops. Both files independently
+ * cap nesting at 64, which is worth keeping in step by hand until the rest of this is
+ * resolved.
+ *
+ * <p>So this is reported as a candidate and deliberately not done.
  *
  * <p>Deliberately <em>not</em> a JSON library. PROJ reads these files with
  * {@code nlohmann::json} and proj4j's core has zero runtime dependencies on purpose:

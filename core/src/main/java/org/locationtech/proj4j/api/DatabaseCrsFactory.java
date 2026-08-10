@@ -215,21 +215,25 @@ final class DatabaseCrsFactory {
      * one and multiplies silently.
      */
     private static Double toMetres(ProjDatabase db, double value, DbObjectRef unitRef) {
-        if (Double.isNaN(value)) {
-            return null;
-        }
-        if (unitRef == null) {
-            return null;
-        }
-        DbUnit unit = db.unit(unitRef.authName(), unitRef.code());
-        if (unit == null || !unit.hasConversionFactor() || unit.type() != DbUnit.Type.LENGTH) {
-            return null;
-        }
-        return Double.valueOf(value * unit.conversionFactor());
+        DbUnit unit = convertible(db, value, unitRef, DbUnit.Type.LENGTH);
+        return unit == null ? null : Double.valueOf(value * unit.conversionFactor());
     }
 
     /** An angle in the authority's unit, converted to degrees, or null. See {@link #toMetres}. */
     private static Double toDegrees(ProjDatabase db, double value, DbObjectRef unitRef) {
+        DbUnit unit = convertible(db, value, unitRef, DbUnit.Type.ANGLE);
+        return unit == null ? null : Double.valueOf(value * unit.conversionFactor() * RAD_TO_DEG);
+    }
+
+    /**
+     * The unit a value can actually be converted with, or null if it cannot be: no value, no unit
+     * reference, no such unit, no published factor, or a unit of the wrong kind.
+     *
+     * <p>Only the lookup and the refusals are shared. Each conversion keeps its own arithmetic
+     * where a reader can see it, because moving a multiplication is how a factor goes missing.
+     */
+    private static DbUnit convertible(ProjDatabase db, double value, DbObjectRef unitRef,
+                                      DbUnit.Type type) {
         if (Double.isNaN(value)) {
             return null;
         }
@@ -237,10 +241,10 @@ final class DatabaseCrsFactory {
             return null;
         }
         DbUnit unit = db.unit(unitRef.authName(), unitRef.code());
-        if (unit == null || !unit.hasConversionFactor() || unit.type() != DbUnit.Type.ANGLE) {
+        if (unit == null || !unit.hasConversionFactor() || unit.type() != type) {
             return null;
         }
-        return Double.valueOf(value * unit.conversionFactor() * RAD_TO_DEG);
+        return unit;
     }
 
     /**

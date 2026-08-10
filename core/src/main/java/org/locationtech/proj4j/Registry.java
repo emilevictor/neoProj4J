@@ -80,77 +80,100 @@ public class Registry {
 
     /**
      * The ellipsoids reachable by {@code +ellps=}, searched by {@link #getEllipsoid(String)}.
-     * <p>
-     * This is the list {@code +ellps=} resolves against, and it is <em>not</em> the same list as
-     * {@code Ellipsoid.ellipsoids}, which only the WKT reader consults and which matches numerically
-     * rather than by name. Adding an ellipsoid to one does not add it to the other.
-     * <p>
-     * The array is public and its contents are mutable; treat it as read-only.
+     *
+     * <h2>Every entry is a reference, never a re-declaration</h2>
+     *
+     * <p>Twenty-seven of these were once spelled out again as {@code new Ellipsoid(...)} literals
+     * here, alongside the {@code Ellipsoid} constants of the same name, and keeping two copies of
+     * the same number in agreement by hand went wrong in the worst available way: {@code NWL9D} and
+     * {@code andrae} were re-declared with the inverse flattening in the {@code poleRadius} slot —
+     * {@code new Ellipsoid("NWL9D", 6378145.0, 298.25, 0.0)} — which selects the
+     * {@code 1 - (b*b)/(a*a)} branch of the constructor and takes 298.25 <em>metres</em> literally
+     * as the pole radius. That gives {@code e = 0.999999998906693} against GRS80's 0.0818, so every
+     * transform through {@code +ellps=NWL9D} or {@code +ellps=andrae} was computed on a near-flat
+     * disc. A reference cannot go wrong that way, so there are no literals left to go wrong.
+     *
+     * <p>Replacing the literals moved nothing: all 49 entries agreed with their constants on all
+     * six fields — {@code name}, {@code shortName}, {@code equatorRadius}, {@code poleRadius},
+     * {@code eccentricity} and {@code eccentricity2} — before the substitution, so the only change
+     * is that {@link #getEllipsoid(String)} now hands back the shared constant instead of a private
+     * copy of it. The one place that compares ellipsoids by identity is
+     * {@code GeocentProjection.converter()}, a cache guard, where sharing means more cache hits and
+     * never a different answer.
+     *
+     * <h2>This array's order is deliberate and is not {@code Ellipsoid.ellipsoids}' order</h2>
+     *
+     * <p>The two arrays hold the same 49 ellipsoids, but in different orders, and the order of
+     * {@code Ellipsoid.ellipsoids} is load-bearing in a way this one's is not:
+     * {@code WktNames.projEllipsoidCode} scans it numerically and breaks ties by array position, so
+     * reordering <em>that</em> array changes the {@code +ellps=} code the WKT writer emits. This
+     * array is searched by exact name ({@link #getEllipsoid(String)}), so its order affects nothing.
+     * That asymmetry is why the two are not simply aliased to one another.
+     *
+     * <p>Membership is still maintained by hand in two places: adding a constant to
+     * {@code Ellipsoid} alone leaves it unreachable through {@code +ellps=}, which is exactly how
+     * {@code clrk80ign}, {@code danish}, {@code GSK2011} and {@code PZ90} were first added and then
+     * found to still throw "Unknown ellipsoid". {@code EllipsoidTableAgreementTest} is the guard on
+     * that.
+     *
+     * <p>The array is public and its contents are mutable; treat it as read-only.
      */
     public final static Ellipsoid[] ellipsoids = {
             Ellipsoid.SPHERE,
-            new Ellipsoid("MERIT", 6378137.0, 0.0, 298.257, "MERIT 1983"),
-            new Ellipsoid("SGS85", 6378136.0, 0.0, 298.257, "Soviet Geodetic System 85"),
+            Ellipsoid.MERIT,
+            Ellipsoid.SGS85,
             Ellipsoid.GRS80,
-            new Ellipsoid("IAU76", 6378140.0, 0.0, 298.257, "IAU 1976"),
+            Ellipsoid.IAU76,
             Ellipsoid.AIRY,
             Ellipsoid.MOD_AIRY,
-            new Ellipsoid("APL4.9", 6378137.0, 0.0, 298.25, "Appl. Physics. 1965"),
-            // Referenced rather than re-declared. Both were re-declared here with the inverse
-            // flattening in the poleRadius slot -- new Ellipsoid("NWL9D", 6378145.0, 298.25, 0.0)
-            // and new Ellipsoid("andrae", 6377104.43, 300.0, 0.0) -- which selects the
-            // 1 - (b*b)/(a*a) branch of the constructor and takes 298.25 metres literally as the
-            // pole radius, giving e = 0.999999998906693 against GRS80's 0.0818. Every transform
-            // through +ellps=NWL9D or +ellps=andrae was computed on a near-flat disc.
+            Ellipsoid.APL4_9,
             Ellipsoid.NWL9D,
             Ellipsoid.ANDRAE,
-            new Ellipsoid("aust_SA", 6378160.0, 0.0, 298.25, "Australian Natl & S. Amer. 1969"),
+            Ellipsoid.AUST_SA,
             // Not a PROJ name -- PROJ 9.8.1's ellps.cpp has aust_SA and no "australian". This is a
             // proj4j extra, and it is listed here so that +ellps=australian resolves to the
             // Ellipsoid.AUSTRALIAN that this library has always defined instead of failing lookup.
             // Numerically identical to aust_SA above: both are a=6378160.0, 1/f=298.25, and
             // AUSTRALIAN's poleRadius is ignored because reciprocalFlattening takes precedence.
             Ellipsoid.AUSTRALIAN,
-            new Ellipsoid("GRS67", 6378160.0, 0.0, 298.2471674270, "GRS 67 (IUGG 1967)"),
+            Ellipsoid.GRS67,
             Ellipsoid.BESSEL,
-            new Ellipsoid("bess_nam", 6377483.865, 0.0, 299.1528128, "Bessel 1841 (Namibia)"),
+            Ellipsoid.BESS_NAM,
             Ellipsoid.CLARKE_1866,
             Ellipsoid.CLARKE_1880,
-            new Ellipsoid("CPM", 6375738.7, 0.0, 334.29, "Comm. des Poids et Mesures 1799"),
-            new Ellipsoid("delmbr", 6376428.0, 0.0, 311.5, "Delambre 1810 (Belgium)"),
-            new Ellipsoid("engelis", 6378136.05, 0.0, 298.2566, "Engelis 1985"),
+            Ellipsoid.CPM,
+            Ellipsoid.DELMBR,
+            Ellipsoid.ENGELIS,
             Ellipsoid.EVEREST,
-            new Ellipsoid("evrst48", 6377304.063, 0.0, 300.8017, "Everest 1948"),
-            new Ellipsoid("evrst56", 6377301.243, 0.0, 300.8017, "Everest 1956"),
-            new Ellipsoid("evrst69", 6377295.664, 0.0, 300.8017, "Everest 1969"),
-            new Ellipsoid("evrstSS", 6377298.556, 0.0, 300.8017, "Everest (Sabah & Sarawak)"),
-            new Ellipsoid("fschr60", 6378166.0, 0.0, 298.3, "Fischer (Mercury Datum) 1960"),
-            new Ellipsoid("fschr60m", 6378155.0, 0.0, 298.3, "Modified Fischer 1960"),
-            new Ellipsoid("fschr68", 6378150.0, 0.0, 298.3, "Fischer 1968"),
-            new Ellipsoid("helmert", 6378200.0, 0.0, 298.3, "Helmert 1906"),
-            new Ellipsoid("hough", 6378270.0, 0.0, 297.0, "Hough"),
+            Ellipsoid.EVRST48,
+            Ellipsoid.EVRST56,
+            // EVRTS69, EVRTSTSS, FRSCH60 and FSRCH60M are misspelled -- they are +ellps=evrst69,
+            // evrstSS, fschr60 and fschr60m. The typos are in the public constant names, not in the
+            // shortName strings that +ellps= matches on, so they are cosmetic and unfixable: core is
+            // an OSGi bundle with no Export-Package, so bnd publishes every one of these and a
+            // rename is a binary break.
+            Ellipsoid.EVRTS69,
+            Ellipsoid.EVRTSTSS,
+            Ellipsoid.FRSCH60,
+            Ellipsoid.FSRCH60M,
+            Ellipsoid.FSCHR68,
+            Ellipsoid.HELMERT,
+            Ellipsoid.HOUGH,
             Ellipsoid.INTERNATIONAL,
             Ellipsoid.INTERNATIONAL_1967,
             Ellipsoid.KRASSOVSKY,
-            new Ellipsoid("kaula", 6378163.0, 0.0, 298.24, "Kaula 1961"),
-            new Ellipsoid("lerch", 6378139.0, 0.0, 298.257, "Lerch 1979"),
-            new Ellipsoid("mprts", 6397300.0, 0.0, 191.0, "Maupertius 1738"),
-            new Ellipsoid("plessis", 6376523.0, 6355863.0, 0.0, "Plessis 1817 France)"),
-            new Ellipsoid("SEasia", 6378155.0, 6356773.3205, 0.0, "Southeast Asia"),
-            new Ellipsoid("walbeck", 6376896.0, 6355834.8467, 0.0, "Walbeck"),
+            Ellipsoid.KAULA,
+            Ellipsoid.LERCH,
+            Ellipsoid.MPRTS,
+            Ellipsoid.PLESSIS,
+            Ellipsoid.SEASIA,
+            Ellipsoid.WALBECK,
             Ellipsoid.WGS60,
             Ellipsoid.WGS66,
             Ellipsoid.WGS72,
             Ellipsoid.WGS84,
-            new Ellipsoid("NAD27", 6378249.145, 0.0, 293.4663, "NAD27: Clarke 1880 mod."),
-            new Ellipsoid("NAD83", 6378137.0, 0.0, 298.257222101, "NAD83: GRS 1980 (IUGG, 1980)"),
-            // Present in PROJ 9.8.1's src/ellps.cpp and previously absent here, so +ellps= failed
-            // for all four. NOTE: this array, not Ellipsoid.ellipsoids, is what getEllipsoid()
-            // searches - the two lists are separate and had already drifted apart. Adding a
-            // constant to Ellipsoid alone leaves it unreachable via +ellps=, which is exactly
-            // how these four were first added and then found to still throw
-            // "Unknown ellipsoid". Ellipsoid.ellipsoids is read only by the WKT reader, which
-            // matches numerically rather than by name.
+            Ellipsoid.NAD27,
+            Ellipsoid.NAD83,
             Ellipsoid.CLRK80IGN,
             Ellipsoid.DANISH,
             Ellipsoid.GSK2011,

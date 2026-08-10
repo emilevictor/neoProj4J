@@ -276,18 +276,26 @@ final class PjdxFile implements Closeable {
         }
         String s = stringCache[id];
         if (s == null) {
-            int from = stringOffsets[id];
-            int len = stringOffsets[id + 1] - from;
-            byte[] b = new byte[len];
-            try {
-                Resources.readFully(reader(), stringBytesBase + from, b, 0, len);
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
-            s = new String(b, UTF8);
+            s = new String(stringBytes(id), UTF8);
             stringCache[id] = s;
         }
         return s;
+    }
+
+    /**
+     * The pool's raw UTF-8 for one string. Both decoding and the binary search read it, and they have
+     * to agree about where it starts and how long it is, so there is one copy of that arithmetic.
+     */
+    private byte[] stringBytes(int id) {
+        int from = stringOffsets[id];
+        int len = stringOffsets[id + 1] - from;
+        byte[] b = new byte[len];
+        try {
+            Resources.readFully(reader(), stringBytesBase + from, b, 0, len);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return b;
     }
 
     /**
@@ -318,22 +326,15 @@ final class PjdxFile implements Closeable {
 
     /** Compares pool string {@code id} against {@code want} in unsigned byte order. */
     private int compareStringAt(int id, byte[] want) {
-        int from = stringOffsets[id];
-        int len = stringOffsets[id + 1] - from;
-        byte[] b = new byte[len];
-        try {
-            Resources.readFully(reader(), stringBytesBase + from, b, 0, len);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-        int n = Math.min(len, want.length);
+        byte[] b = stringBytes(id);
+        int n = Math.min(b.length, want.length);
         for (int i = 0; i < n; i++) {
             int d = (b[i] & 0xFF) - (want[i] & 0xFF);
             if (d != 0) {
                 return d;
             }
         }
-        return len - want.length;
+        return b.length - want.length;
     }
 
     // ---------------------------------------------------------------- sections

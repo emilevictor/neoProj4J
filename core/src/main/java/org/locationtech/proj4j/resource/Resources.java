@@ -36,14 +36,13 @@ public final class Resources {
      */
     public static void readFully(SeekableByteReader reader, long position, byte[] dst, int off, int len)
             throws IOException {
-        int done = 0;
-        while (done < len) {
-            int n = reader.read(position + done, dst, off + done, len - done);
-            if (n <= 0) {
-                throw new EOFException("Unexpected end of resource at byte " + (position + done)
-                        + " (wanted " + len + " bytes from " + position + ")");
-            }
-            done += n;
+        // The loop below this one, because the two methods differ in nothing except what happens
+        // when the resource ends early: readAtMost stops at the same read, having filled the same
+        // bytes, so the count it returns is exactly the count this message used to report.
+        int done = readAtMost(reader, position, dst, off, len);
+        if (done < len) {
+            throw new EOFException("Unexpected end of resource at byte " + (position + done)
+                    + " (wanted " + len + " bytes from " + position + ")");
         }
     }
 
