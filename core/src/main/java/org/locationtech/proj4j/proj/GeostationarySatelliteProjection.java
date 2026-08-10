@@ -6,6 +6,7 @@ package org.locationtech.proj4j.proj;
 
 import java.util.Objects;
 
+import org.locationtech.proj4j.ErrorCause;
 import org.locationtech.proj4j.ProjCoordinate;
 import org.locationtech.proj4j.ProjectionException;
 import org.locationtech.proj4j.util.ProjectionMath;
@@ -73,6 +74,33 @@ public class GeostationarySatelliteProjection extends Projection {
         return out;
     }
 
+    /**
+     * Spherical forward.
+     *
+     * <p><b>This arm diverges from PROJ 9.8.1 on purpose.</b> Upstream's {@code geos_s_forward}
+     * ({@code src/projections/geos.cpp:65}) has a "check visibility" comment with no code under it.
+     * The check was deleted by upstream commit {@code dbba67bd} ("Converted geos. Expanded tabs.",
+     * 2016-04-18) — a mechanical tab-expansion pass whose message claims nothing about removing a
+     * check, and which left the ellipsoidal arm's equivalent check intact in the same diff. Ten
+     * years on it has not been restored.
+     *
+     * <p>The consequence upstream is not a visible failure. Behind the globe
+     * {@code radius_g - Vx} stays positive, so both {@code atan} calls return finite numbers and
+     * {@code +proj=geos +R=...} answers an invisible point with a plausible, wrong coordinate. This
+     * library keeps the check instead, because a failure must not be expressed as a coordinate that
+     * looks usable. The refusal reports {@link ErrorCause#COORDINATE_OUT_OF_DOMAIN}, which is the
+     * cause upstream's own ellipsoidal arm reports for exactly this condition.
+     *
+     * <p>Nothing in the gie corpus measures the divergence in either direction: the one spherical
+     * geos block ({@code builtins.gie}, {@code +R=6400000}) probes within 2 degrees of the
+     * sub-satellite point, and the corpus's only invisible-point assertion is ellipsoidal. A gie
+     * assertion could not cover it, since it would have to assert something PROJ does not do.
+     *
+     * @param lplam longitude relative to the central meridian, in radians
+     * @param lpphi latitude, in radians
+     * @param out   receives the projected coordinate
+     * @throws ProjectionException if the point is not visible from the satellite
+     */
     public void project_s(double lplam, double lpphi, ProjCoordinate out) {
         /* Calculation of the three components of the vector from satellite to
          ** position on earth surface (lon,lat).*/
@@ -83,10 +111,10 @@ public class GeostationarySatelliteProjection extends Projection {
 
         /* Check visibility.*/
         if (((_radiusG - vx) * vx - vy * vy - vz * vz) < 0) {
-            out.x = Double.NaN;
-            out.y = Double.NaN;
-            //throw new ProjectionException(20);
-            return;
+            throw new ProjectionException(ErrorCause.COORDINATE_OUT_OF_DOMAIN, this,
+                    "fwd: (" + lplam + ", " + lpphi + ") rad is not visible from an orbit of "
+                            + heightOfOrbit + " m above the central meridian; the point lies "
+                            + "behind the globe");
         }
 
         /* Calculation based on view angles from satellite.*/
@@ -95,7 +123,26 @@ public class GeostationarySatelliteProjection extends Projection {
         out.y = _radiusG1 * Math.atan(vz / ProjectionMath.hypot(vy, tmp));
     }
 
+    /**
+     * Ellipsoidal forward.
+     *
+     * <p>The visibility check matches PROJ 9.8.1's {@code geos_e_forward}
+     * ({@code src/projections/geos.cpp:96-100}) predicate for predicate, and upstream reports the
+     * same condition as {@code PROJ_ERR_COORD_TRANSFM_OUTSIDE_PROJECTION_DOMAIN}, which is
+     * {@link ErrorCause#COORDINATE_OUT_OF_DOMAIN} here. Unlike {@link #project_s}, this arm is not
+     * a divergence.
+     *
+     * @param lplam longitude relative to the central meridian, in radians
+     * @param lpphi latitude, in radians
+     * @param out   receives the projected coordinate
+     * @throws ProjectionException if the point is not visible from the satellite
+     */
     public void project_e(double lplam, double lpphi, ProjCoordinate out) {
+        // Kept for the refusal message below: lpphi is about to be overwritten with the geocentric
+        // latitude, which is up to ~0.19 degrees away from what the caller passed at mid-latitudes.
+        // Reporting the overwritten value would name a latitude nobody asked for.
+        double geodeticPhi = lpphi;
+
         /* Calculation of geocentric latitude. */
         lpphi = Math.atan(_radiusP2 * Math.tan(lpphi));
 
@@ -108,10 +155,10 @@ public class GeostationarySatelliteProjection extends Projection {
 
         /* Check visibility. */
         if (((_radiusG - vx) * vx - vy * vy - vz * vz * _radiusPInv2) < 0) {
-            out.x = Double.NaN;
-            out.y = Double.NaN;
-            //throw new ProjectionException(20);
-            return;
+            throw new ProjectionException(ErrorCause.COORDINATE_OUT_OF_DOMAIN, this,
+                    "fwd: (" + lplam + ", " + geodeticPhi + ") rad is not visible from an orbit of "
+                            + heightOfOrbit + " m above the central meridian; the point lies "
+                            + "behind the globe");
         }
 
         /* Calculation based on view angles from satellite. */

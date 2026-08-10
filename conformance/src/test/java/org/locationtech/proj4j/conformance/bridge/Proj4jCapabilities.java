@@ -121,7 +121,17 @@ final class Proj4jCapabilities {
             "R_A", "R_V", "R_a", "R_g", "R_h", "R_lat_a", "R_lat_g", "R_C",
             // coordinate frame
             "lat_0", "lon_0", "lat_1", "lat_2", "lat_ts", "x_0", "y_0", "k", "k_0",
-            // operator parameters proj4j's Projection base carries
+            // Operator-scoped parameters. +alpha and +lonc are fields on the Projection base.
+            // +gamma and +no_uoff are NOT, and used to look as though they were: the base carried
+            // a pair of empty setters so Proj4Parser could dispatch them to every projection,
+            // which meant the base advertised parameters it did not have. Proj4Parser now guards
+            // both on ObliqueMercatorProjection, the only 9.8.1 operator that reads either
+            // (omerc.cpp:137, :140-144), so they stay HONOURED under the same rule as the adams
+            // family above -- the set of proj4j classes that apply the key is exactly the set of
+            // PROJ operators that read it. +h and +south are neither: the base REFUSES both
+            // (Projection.setSouthernHemisphere and the +h pair), and each is honoured only on
+            // the classes that override the setter -- for +south that is now four of them,
+            // including leac.
             "alpha", "lonc", "gamma", "no_uoff", "h", "south",
             // peirce_q arrangement, and spilhaus's oblique framing
             "shape", "scrollx", "scrolly", "azi", "rot",

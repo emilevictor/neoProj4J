@@ -150,6 +150,48 @@ public class ProjectionParameterRefusalTest {
         assertRefused("+proj=longlat +ellps=GRS80 +south", "+south", "LongLat");
     }
 
+    @Test
+    public void southIsNowHONOUREDOnLambertEqualAreaConic() {
+        // INVERTED PIN, and an over-refusal being lifted rather than a wrong number being fixed.
+        // `+proj=leac +south` used to throw from the base class, because the parser calls
+        // setSouthernHemisphere and LambertEqualAreaConicProjection spelled its own accessor
+        // setSouth. The name mismatch was the entire defect: setSouth existed, worked, and was
+        // reachable only from the two-arg constructor, so nothing in the library ever called it.
+        //
+        // Upstream genuinely reads the key here -- leac is a second PJ_PROJECTION inside
+        // aea.cpp, not a file of its own, and 9.8.1:src/projections/aea.cpp:223 is
+        // pj_param(P->ctx, P->params, "bsouth") -- so refusing was strictly wrong, unlike the
+        // merc/lcc/longlat cases above where PROJ reads nothing and refusing only costs
+        // strictness.
+        //
+        // The negative controls above are unchanged and are what still holds the fail-closed
+        // contract for projections that really do not read +south.
+        CoordinateReferenceSystem north =
+                CRS.createFromParameters("leac", "+proj=leac +ellps=GRS80 +lat_1=30");
+        CoordinateReferenceSystem south =
+                CRS.createFromParameters("leac_s", "+proj=leac +ellps=GRS80 +lat_1=30 +south");
+        assertFalse("+proj=leac without +south must report north",
+                north.getProjection().getSouthernHemisphere());
+        assertTrue("+proj=leac +south must be retained, not refused and not defaulted",
+                south.getProjection().getSouthernHemisphere());
+
+        // And it must reach the arithmetic. +south moves the first standard parallel from +90 to
+        // -90, which inverts the sign of the cone constant n and mirrors the whole cone, so this
+        // is not a tolerance question -- the two eastings are far apart.
+        CoordinateReferenceSystem wgs84 =
+                CRS.createFromParameters("wgs84", "+proj=longlat +ellps=GRS80");
+        CoordinateTransformFactory factory = new CoordinateTransformFactory();
+        ProjCoordinate dstNorth = poisoned();
+        ProjCoordinate dstSouth = poisoned();
+        factory.createTransform(wgs84, north).transform(new ProjCoordinate(10, 40), dstNorth);
+        factory.createTransform(wgs84, south).transform(new ProjCoordinate(10, 40), dstSouth);
+        assertTrue("both leac transforms must overwrite the poisoned destination; got "
+                + dstNorth + " and " + dstSouth, dstNorth.x < 1e300 && dstSouth.x < 1e300);
+        assertTrue("+south must select a different cone, not merely be stored; got "
+                + dstNorth + " and " + dstSouth,
+                Math.abs(dstNorth.y - dstSouth.y) > 1000.0);
+    }
+
     // ----------------------------------------------------- +h, via the parse path
 
     @Test

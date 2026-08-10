@@ -1142,9 +1142,11 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
      * Declares that the projection is in the southern hemisphere, the {@code +south} of
      * {@code 9.8.1:src/projections/utm.cpp} and {@code tmerc.cpp}.
      * <p>
-     * The base class refuses, because it has no {@code +south} to set. Only
-     * {@code TransverseMercatorProjection} and {@code ExtendedTransverseMercatorProjection}
-     * override this.
+     * The base class refuses, because it has no {@code +south} to set. Four classes override it:
+     * {@code TransverseMercatorProjection}, {@code ExtendedTransverseMercatorProjection},
+     * {@code UniversalPolarStereographicProjection} (which reads it as the pole selector) and
+     * {@code LambertEqualAreaConicProjection} (which forwards to its own {@code setSouth}, since
+     * {@code aea.cpp:223} reads {@code bsouth} for {@code +proj=leac}).
      * <p>
      * <b>Behaviour change.</b> This used to throw a bare {@link java.util.NoSuchElementException NoSuchElementException} with
      * <em>no message</em>. That is unchecked and is <b>not</b> a {@link Proj4jException}, so
@@ -1422,14 +1424,48 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
         return angle;
     }
 
+    /**
+     * {@code +gamma}, in radians. <b>Does nothing on the base class</b>, which has no
+     * {@code gamma} field to set.
+     *
+     * @param gamma the azimuth of the centre line, in radians; ignored here
+     * @deprecated This exists only so that {@link ObliqueMercatorProjection} has something to
+     *     override. {@code omerc} is the one operator in 9.8.1 that reads {@code +gamma}
+     *     ({@code omerc.cpp:137}), so nothing else has a use for the parameter, and
+     *     {@code Proj4Parser} no longer dispatches it through this reference — it guards on
+     *     {@code ObliqueMercatorProjection} first. Calling it on any other projection is a
+     *     silent no-op and always was. Kept because {@code org.locationtech.proj4j.proj} is an
+     *     exported package and removing a public method is a binary break; call
+     *     {@link ObliqueMercatorProjection#setGamma(double)} on the concrete class instead.
+     */
+    @Deprecated
     public void setGamma(double gamma) {
         // no-op, overridden for Oblique Mercator
     }
-    
+
+    /**
+     * {@code +gamma}, in degrees, converted and handed to {@link #setGamma(double)}.
+     *
+     * @param gamma the azimuth of the centre line, in degrees
+     * @deprecated For the reason given on {@link #setGamma(double)}: on the base class the value
+     *     is converted and then discarded.
+     */
+    @Deprecated
     public void setGammaDegrees(double gamma) {
-    	setGamma(DTR * gamma);
+        setGamma(DTR * gamma);
     }
 
+    /**
+     * {@code +no_off} / {@code +no_uoff}. <b>Does nothing on the base class</b>, which has no
+     * such flag.
+     *
+     * @param no_uoff whether to omit the offset from the origin; ignored here
+     * @deprecated For the reason given on {@link #setGamma(double)} — {@code omerc} is the only
+     *     operator that reads either spelling ({@code omerc.cpp:140-144}), and the parser now
+     *     dispatches both on the concrete class. Call
+     *     {@link ObliqueMercatorProjection#setNoUoff(boolean)} instead.
+     */
+    @Deprecated
     public void setNoUoff(boolean no_uoff) {
         // no-op, overridden for Oblique Mercator
     }

@@ -293,6 +293,82 @@ same asymmetry exists for `toDeg` (`:145`) versus `radToDeg` (`:370`).
 This is the clearest example of why the change bar for this review is bit-identity. Consolidating
 these two into one function is a one-line change that moves output.
 
+#### 9. `+proj=geos` reports "numerical failure" for a point that is simply behind the globe
+
+Both forward arms of `proj/GeostationarySatelliteProjection.java` wrote `out.x = out.y = NaN` and
+returned when the visibility test failed. `Projection.projectRadians`' finiteness postcondition
+(`Projection.java:473-478`) then turned that into `ProjectionException(NUMERICAL_FAILURE)`, so the
+library did fail closed — but it named the wrong reason. Nothing failed numerically. The point is
+outside the projection's domain, which is what upstream reports
+(`PROJ_ERR_COORD_TRANSFM_OUTSIDE_PROJECTION_DOMAIN`, `geos.cpp:99`).
+
+**Resolved in 2.0.1: both arms throw `COORDINATE_OUT_OF_DOMAIN` directly**, with a message naming the
+longitude, the latitude and the orbit height it refused for. This is a cause reclassification, not a
+new throw — the call already failed, one frame up, under a different name.
+
+Two details are worth recording. First, `project_e` overwrites its `lpphi` parameter with the
+geocentric latitude before the check runs, so the message saves the caller's value first; reporting
+the overwritten one would name a latitude about 0.19° from anything the caller supplied. Second,
+**the spherical check is a deliberate divergence from PROJ 9.8.1 and stays.** Upstream's
+`geos_s_forward` has a `/* Check visibility*/` comment with no body (`geos.cpp:65`); the check was
+dropped by `dbba67bd` ("Converted geos. Expanded tabs.", 2016-04-18), a tab-expansion pass that left
+the ellipsoidal equivalent intact in the same diff, and has not been restored in the ten years since.
+Behind the globe upstream's two `atan` calls both return finite numbers, so `+proj=geos +R=…` answers
+an invisible point with a plausible, wrong coordinate. No gie assertion can cover a divergence in
+either direction, so the pin is a unit test:
+`core/src/test/java/org/locationtech/proj4j/domain/GeostationaryVisibilityTest.java`.
+
+#### 10. `+gamma` and `+no_uoff` were dispatched through the base class, to no effect
+
+`parser/Proj4Parser.java` read `+gamma`, `+no_uoff` and `+no_off` unconditionally and pushed them
+into `Projection.setGamma` / `setGammaDegrees` / `setNoUoff` — base methods with empty bodies,
+overridden only by `ObliqueMercatorProjection`. So on any other projection the value was parsed,
+dispatched, and discarded.
+
+**Resolved in 2.0.1: the dispatch moved inside the existing `instanceof ObliqueMercatorProjection`
+block**, which is the set of classes that read the keys, and — per `omerc.cpp:137` and `:140-144` —
+also exactly the set of PROJ 9.8.1 operators that read them. `somerc.cpp` calls `pj_param` zero
+times. The three base methods are **deprecated, not deleted**: `proj` is an exported package with no
+`Export-Package`/`Private-Package` directive in `core/pom.xml`, so removing a public method is a
+binary break. `ObliqueMercatorProjection` gains a `setGammaDegrees` override so the parser's call on
+the concrete reference does not land on a deprecated method.
+
+One off-corpus behaviour change, and it moves toward PROJ: `+proj=merc +gamma=nonsense` used to be
+rejected, because `parseAngle` ran unconditionally, and is now accepted and ignored. PROJ does the
+same — `src/init.cpp` has no validation pass, and the `used` bit `pj_param` sets (`src/param.cpp:99`,
+`:172`) has exactly one consumer, `pj_get_def` at `src/pr_list.cpp:74-76`. There is in-tree precedent
+already asserting this shape: `OperatorScopedParameterTest.aziAndRotAreIgnoredOnEveryOtherProjection`.
+
+#### 11. `+proj=leac +south` was refused, though `leac` reads it
+
+`Projection.setSouthernHemisphere` throws `UnsupportedParameterException(PROJECTION_NOT_IMPLEMENTED)`
+unless a subclass overrides it, and `LambertEqualAreaConicProjection` did not — although it carries
+its own `setSouth`/`isSouth` pair and `aea.cpp:223` reads `bsouth` for `+proj=leac`. So this was an
+over-refusal, not a silently-wrong number: the transform raised rather than answering.
+
+**Resolved in 2.0.1**: the class overrides `setSouthernHemisphere`/`getSouthernHemisphere` and
+forwards to its own pair. Same family as the `nsper` `+h` case, and pinned the same inverted way, in
+`ProjectionParameterRefusalTest.southIsNowHONOUREDOnLambertEqualAreaConic`. The sibling refusals stay
+— `southIsRefusedOnAlbers` and `southIsRefusedOnLongLat` still hold, because `aea.cpp` reads `bsouth`
+only in the `leac` entry point.
+
+Three stale documentation claims fell out of tracing this. `Projection.setSouthernHemisphere`'s
+Javadoc named two overriding classes where there are four. Two test Javadocs called `+alpha`,
+`+lonc`, `+gamma` and `+pm` "a known defect" for using `parseDouble`; all four go through
+`parseAngle` (`Proj4Parser.java:181`, `:185`, `:616`, `:821`). And `Proj4jCapabilities`' `HONOURED`
+comment said the `Projection` base "carries" `gamma`, `no_uoff`, `h` and `south`, none of which was
+true. All three are corrected.
+
+**Blast radius of findings 9-11: zero rows in every corpus**, measured per corpus rather than
+argued. `golden/probes.tsv` has 60 `gamma`/`no_uoff` rows across six non-omerc hosts and all 60 are
+bit-identical — the value formerly reached an empty method, and is now never fetched, so projection
+state is byte-for-byte what it was. `golden/pairs.tsv`: 0. The five `proj4/nad/` dictionaries carry
+`+gamma`/`+no_uoff` only on `omerc`, and `+proj=leac` not at all. `leac` has 5 canonical probe rows
+and is not one of the six modifier-sweep hosts. The one GIGS `somerc +no_uoff +gamma` case is
+quarantined as `*.gie.failing`. **So no golden rule was written for this change** — an `active` rule
+matching zero rows fails the build as `DEAD_RULE`, which is the correct outcome for a change that
+moves nothing.
+
 ---
 
 ### Static analysis, by the numbers

@@ -329,12 +329,26 @@ public class ObliqueMercatorProjection extends CylindricalProjection {
 		v_pole_s = arb * Math.log(Math.tan(ProjectionMath.QUARTERPI + f));
 	}
 
-    /** {@code +gamma}, in radians. */
+    /**
+     * {@code +gamma}, in radians. This is the only class for which the parameter means anything:
+     * {@code omerc} is the one operator in 9.8.1 that reads it ({@code omerc.cpp:137}), so
+     * {@link Projection}'s copy of this method is an empty no-op kept only as the override point,
+     * and {@code Proj4Parser} guards the dispatch on this class.
+     */
     @Override public void setGamma(double gamma) {
         this.gamma = gamma;
     }
 
-    /** {@code +no_off} / {@code +no_uoff}. */
+    /**
+     * {@code +gamma}, in degrees. Overridden only so that the parser can dispatch degrees on this
+     * reference without going through the deprecated method on {@link Projection}; the conversion
+     * is the same one.
+     */
+    @Override public void setGammaDegrees(double gamma) {
+        setGamma(DTR * gamma);
+    }
+
+    /** {@code +no_off} / {@code +no_uoff}. Also omerc's alone ({@code omerc.cpp:140-144}). */
     @Override public void setNoUoff(boolean no_uoff) {
     	this.no_uoff = no_uoff;
     }

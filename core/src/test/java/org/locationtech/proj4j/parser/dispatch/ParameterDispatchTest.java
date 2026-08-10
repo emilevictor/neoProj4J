@@ -18,6 +18,7 @@ package org.locationtech.proj4j.parser.dispatch;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -105,8 +106,10 @@ public class ParameterDispatchTest {
     /**
      * The angular value grammar, on the two {@code r}-sigil keys. All four forms are the same
      * angle, so all four must project identically — and {@code Double.parseDouble} accepts only
-     * the first of them, which is why {@code +alpha}, {@code +lonc}, {@code +gamma} and
-     * {@code +pm} using it is a defect and not a style choice.
+     * the first of them, which is why an {@code r}-sigil key must not be read with it.
+     * {@code +alpha}, {@code +lonc}, {@code +gamma} and {@code +pm} were named here as instances
+     * of that defect; they are not, and were not when this was written. All four go through
+     * {@code parseAngle} ({@code Proj4Parser} lines 181, 185, 616 and 821).
      *
      * <p>{@code 98.30382} degrees is {@code 98d18'13.752"}; the corpus itself supplies the
      * radian form, {@code 1.7157253262878522r}.
@@ -472,6 +475,67 @@ public class ParameterDispatchTest {
         p.initialize();
         assertTrue("setNoRot must survive a second initialize(); if this fails, `rot` has been "
                 + "moved back inside initialize() and +no_rot is inert again", !p.isRot());
+    }
+
+    /** A valid {@code omerc} in the {@code +lonc}/{@code +gamma} framing, the one that reads gamma. */
+    private static final String OMERC_GAMMA =
+            "+proj=omerc +ellps=GRS80 +lat_0=45 +lonc=10 +gamma=30 +k=1 +x_0=0 +y_0=0";
+
+    /**
+     * {@code +gamma} and {@code +no_off}/{@code +no_uoff} reach {@code omerc}, and are invisible
+     * everywhere else.
+     *
+     * <p>They used to be dispatched unconditionally through {@code Projection}, which carried two
+     * empty setters purely to swallow them. So {@code +proj=merc +gamma=30} parsed the angle,
+     * handed it to a no-op and dropped it — the same numbers PROJ gives, since PROJ ignores an
+     * unread key too, but with the base class advertising a parameter it does not have. The
+     * dispatch is now guarded on {@code ObliqueMercatorProjection}, the one 9.8.1 operator that
+     * reads any of the three ({@code omerc.cpp:137}, {@code :140-144}).
+     *
+     * <p>The first two assertions are the non-vacuity check: if the guard is ever written so that
+     * it also stops the value reaching {@code omerc}, these fail. Comparing outcomes rather than
+     * inspecting fields is deliberate — neither {@code gamma} nor {@code no_uoff} has a public
+     * getter, and a test that measures coordinates cannot be satisfied by a setter that stores
+     * into a field nothing reads.
+     */
+    @Test
+    public void gammaAndNoUoffReachOmercAndNothingElse() {
+        // First, that the baseline definition PROJECTS. Without this the two assertNotEquals
+        // below would also pass if every variant threw a differently-worded exception, which is
+        // the way a test like this goes quietly vacuous.
+        ProjCoordinate out = new ProjCoordinate();
+        Projection omerc = projection(OMERC_GAMMA);
+        assertTrue("OMERC_GAMMA must build an omerc, not something else; got " + omerc.getClass(),
+                omerc instanceof ObliqueMercatorProjection);
+        omerc.project(new ProjCoordinate(2, 1), out);
+        assertTrue("OMERC_GAMMA must project (2, 1) to a finite coordinate; got " + out,
+                Double.isFinite(out.x) && Double.isFinite(out.y));
+
+        assertNotEquals("+gamma must reach omerc's arithmetic",
+                outcome(OMERC_GAMMA, 2, 1),
+                outcome(OMERC_GAMMA.replace("+gamma=30", "+gamma=60"), 2, 1));
+        assertNotEquals("+no_uoff must reach omerc's arithmetic; it zeroes u_0",
+                outcome(OMERC_GAMMA, 2, 1),
+                outcome(OMERC_GAMMA + " +no_uoff", 2, 1));
+
+        // The two spellings are ORed under one presence sigil upstream, so they are synonyms.
+        assertEquals("+no_off and +no_uoff are the same flag",
+                outcome(OMERC_GAMMA + " +no_uoff", 2, 1),
+                outcome(OMERC_GAMMA + " +no_off", 2, 1));
+
+        // Off omerc, all three are retained and ignored, which is what init.cpp does.
+        assertEquals("+gamma must not perturb a projection that does not read it",
+                outcome("+proj=merc +ellps=GRS80", 2, 1),
+                outcome("+proj=merc +ellps=GRS80 +gamma=30", 2, 1));
+        assertEquals("+no_uoff must not perturb a projection that does not read it",
+                outcome("+proj=merc +ellps=GRS80", 2, 1),
+                outcome("+proj=merc +ellps=GRS80 +no_uoff", 2, 1));
+
+        // The one real behaviour change, and it moves toward PROJ: the value is no longer parsed
+        // on a projection that never pulls it, so it can no longer be rejected there. Same shape
+        // as OperatorScopedParameterTest.aziAndRotAreIgnoredOnEveryOtherProjection.
+        assertNotNull("an unparseable +gamma is not looked at off omerc, since nothing pulls it",
+                projection("+proj=merc +ellps=GRS80 +gamma=nonsense"));
     }
 
     // -------------------------------------------------------------------- helpers
