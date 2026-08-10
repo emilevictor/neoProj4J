@@ -218,16 +218,6 @@ public class Proj4Parser {
             s = params.get(Proj4Keyword.k);
         if (s != null)
             projection.setScaleFactor(parseDouble(Proj4Keyword.k_0, s));
-        /*
-         * omerc tests +no_off and +no_uoff with the same "t" (presence) sigil and ORs
-         * them (omerc.cpp:139-144), so they are synonyms; only the second was
-         * recognised here, which silently dropped the spelling the documentation uses.
-         */
-        if (params.containsKey(Proj4Keyword.no_uoff) || params.containsKey(Proj4Keyword.no_off))
-            projection.setNoUoff(true);
-        s = params.get(Proj4Keyword.gamma);
-        if (s != null)
-            projection.setGammaDegrees(parseAngle(Proj4Keyword.gamma, s));
 
         /*
          * The linear unit, resolved exactly once, the way init.cpp:678-714 does it:
@@ -602,12 +592,36 @@ public class Proj4Parser {
                 omerc.setLon2(parseAngleRadians(Proj4Keyword.lon_2, s));
 
             /*
+             * omerc tests +no_off and +no_uoff with the same "t" (presence) sigil and ORs
+             * them (omerc.cpp:139-144), so they are synonyms; only the second was
+             * recognised here, which silently dropped the spelling the documentation uses.
+             *
+             * +gamma and +no_off/+no_uoff are dispatched here, on the concrete class, for the
+             * same reason +no_rot is below: omerc is the only operator in 9.8.1 that reads any
+             * of them - "rgamma" at omerc.cpp:137 and "tno_off"/"tno_uoff" at :140-144, and
+             * nothing else under src/projections/ names them (somerc.cpp calls pj_param not at
+             * all). They used to be dispatched unconditionally through Projection, which
+             * carried a pair of empty setters purely to swallow them, so "+proj=merc +gamma=30"
+             * parsed the angle, handed it to a no-op and dropped it. Numerically that agreed
+             * with PROJ, which ignores an unread key too - init.cpp validates nothing, and
+             * paralist::used feeds pj_get_def (pr_list.cpp:74-76) and nothing else - but it
+             * made the base class advertise a parameter it does not have, and it rejected a
+             * malformed +gamma on projections that never look at the value.
+             */
+            if (params.containsKey(Proj4Keyword.no_uoff) || params.containsKey(Proj4Keyword.no_off))
+                omerc.setNoUoff(true);
+
+            s = params.get(Proj4Keyword.gamma);
+            if (s != null)
+                omerc.setGammaDegrees(parseAngle(Proj4Keyword.gamma, s));
+
+            /*
              * +no_rot is tested with the same "t" (presence) sigil as +no_off/+no_uoff
              * (omerc.cpp:145, pj_param(..., "tno_rot").i), so it is valueless: present
              * means "do not rotate the (u,v) frame".
              *
-             * Deliberately dispatched here on the concrete class rather than beside
-             * setNoUoff above, because setNoRot is ObliqueMercatorProjection's own and
+             * Dispatched here on the concrete class for the same reason as +gamma and
+             * +no_off/+no_uoff just above: setNoRot is ObliqueMercatorProjection's own and
              * Projection carries no such flag. It could not be dispatched at all until
              * the setter existed: `rot` was a private field assigned unconditionally in
              * initialize(), which runs TWICE - once from the constructor and once from

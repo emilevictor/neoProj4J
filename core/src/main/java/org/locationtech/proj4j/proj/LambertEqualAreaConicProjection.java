@@ -105,6 +105,32 @@ public class LambertEqualAreaConicProjection extends AlbersProjection {
         return south;
     }
 
+    /**
+     * {@code +south}, under the name {@code Proj4Parser} actually calls. Without this override the
+     * parameter reached {@link Projection#setSouthernHemisphere(boolean)}, which refuses on the
+     * base class, so {@code +proj=leac +south} threw
+     * {@link org.locationtech.proj4j.UnsupportedParameterException} rather
+     * than selecting the south pole. That was an over-refusal: upstream genuinely reads the key
+     * here, as {@code pj_param(P->ctx, P->params, "bsouth")} at
+     * {@code 9.8.1:src/projections/aea.cpp:223} — {@code leac} is a second {@code PJ_PROJECTION}
+     * in {@code aea.cpp}, not a file of its own. The name mismatch was the whole defect:
+     * {@link #setSouth(boolean)} existed and worked, and nothing in the library ever called it.
+     *
+     * @param isSouth whether the first standard parallel is the south pole
+     */
+    @Override
+    public void setSouthernHemisphere(boolean isSouth) {
+        setSouth(isSouth);
+    }
+
+    /**
+     * @return whether the first standard parallel is the south pole
+     */
+    @Override
+    public boolean getSouthernHemisphere() {
+        return isSouth();
+    }
+
     public String toString() {
         return "Lambert Equal Area Conic";
     }

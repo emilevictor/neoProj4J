@@ -340,9 +340,12 @@ public class OperatorScopedParameterTest {
      * ({@code spilhaus.cpp:133-136}), so they must go through the DMS-capable angle parser and
      * never through bare {@code Double.parseDouble} — which would throw on every form below.
      *
-     * <p>{@code +alpha}, {@code +lonc}, {@code +gamma} and {@code +pm} are still parsed with
-     * {@code parseDouble} elsewhere in {@code Proj4Parser}; that is a known defect and this is
-     * deliberately not a sixth instance of it.
+     * <p>This javadoc used to say that {@code +alpha}, {@code +lonc}, {@code +gamma} and
+     * {@code +pm} were still parsed with {@code parseDouble} elsewhere in {@code Proj4Parser},
+     * and called that a known defect. It is not one any more, and had already been fixed when
+     * this was written: all four go through {@code parseAngle}
+     * ({@code Proj4Parser} lines 181, 185, 616 and 821), so every form exercised below works on
+     * them too.
      */
     @Test
     public void aziAndRotGoThroughTheAngleParser() {
