@@ -57,7 +57,7 @@ import org.locationtech.proj4j.gie.GieIoUnits;
  *
  * @since 1.5
  */
-final class PushPopOperator implements PipelineOperator {
+final class PushPopOperator extends OverridableUnitsOperator {
 
     /** {@code +v_1}..{@code +v_4}, in component order. */
     private static final String[] COMPONENT_KEYS = {"v_1", "v_2", "v_3", "v_4"};
@@ -66,9 +66,6 @@ final class PushPopOperator implements PipelineOperator {
     private final boolean[] selected;
     /** The enclosing pipeline's stack, or {@code null} for {@code P->parent == nullptr}. */
     private final CoordinateStack stack;
-
-    private GieIoUnits left = GieIoUnits.WHATEVER;
-    private GieIoUnits right = GieIoUnits.WHATEVER;
 
     /**
      * @param isPush {@code true} for {@code +proj=push}, {@code false} for
@@ -129,22 +126,6 @@ final class PushPopOperator implements PipelineOperator {
     }
 
     @Override
-    public GieIoUnits declaredLeft() {
-        return left;
-    }
-
-    @Override
-    public GieIoUnits declaredRight() {
-        return right;
-    }
-
-    @Override
-    public void overrideUnits(final GieIoUnits newLeft, final GieIoUnits newRight) {
-        this.left = newLeft;
-        this.right = newRight;
-    }
-
-    @Override
     public boolean hasInverse() {
         return true;
     }
@@ -165,6 +146,7 @@ final class PushPopOperator implements PipelineOperator {
 
     @Override
     public String toString() {
-        return "PushPopOperator[" + description() + ", left=" + left + ", right=" + right + "]";
+        return "PushPopOperator[" + description() + ", left=" + declaredLeft()
+                + ", right=" + declaredRight() + "]";
     }
 }

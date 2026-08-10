@@ -46,15 +46,12 @@ import org.locationtech.proj4j.gie.GieIoUnits;
  *
  * @since 1.5
  */
-final class SetOperator implements PipelineOperator {
+final class SetOperator extends OverridableUnitsOperator {
 
     private static final String[] COMPONENT_KEYS = {"v_1", "v_2", "v_3", "v_4"};
 
     private final boolean[] selected = new boolean[4];
     private final double[] value = new double[4];
-
-    private GieIoUnits left = GieIoUnits.WHATEVER;
-    private GieIoUnits right = GieIoUnits.WHATEVER;
 
     SetOperator(final ProjParams params) {
         for (int i = 0; i < 4; i++) {
@@ -85,22 +82,6 @@ final class SetOperator implements PipelineOperator {
     }
 
     @Override
-    public GieIoUnits declaredLeft() {
-        return left;
-    }
-
-    @Override
-    public GieIoUnits declaredRight() {
-        return right;
-    }
-
-    @Override
-    public void overrideUnits(final GieIoUnits newLeft, final GieIoUnits newRight) {
-        this.left = newLeft;
-        this.right = newRight;
-    }
-
-    @Override
     public boolean hasInverse() {
         return true;
     }
@@ -118,6 +99,7 @@ final class SetOperator implements PipelineOperator {
 
     @Override
     public String toString() {
-        return "SetOperator[" + description() + ", left=" + left + ", right=" + right + "]";
+        return "SetOperator[" + description() + ", left=" + declaredLeft()
+                + ", right=" + declaredRight() + "]";
     }
 }

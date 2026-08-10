@@ -440,22 +440,30 @@ public final class WktWriter {
     }
 
     private WktNode unit(String keyword, UnitDefinition u) {
-        List<WktNode> children = new ArrayList<WktNode>();
-        children.add(WktNode.quoted(u.getName() == null ? "unknown" : u.getName()));
-        children.add(WktNode.number(u.getConversionFactor()));
+        List<WktNode> children = unitNameAndFactor(u);
         addId(children, u.getId());
         return WktNode.of(keyword, children);
     }
 
     /**
-     * A unit with no {@code ID}, for the places PROJ writes none: the {@code LENGTHUNIT} of an
-     * {@code ELLIPSOID} and the unit of a {@code PARAMETER}.
+     * A unit with no {@code ID}, for the one place PROJ writes none: the unit of a
+     * {@code PARAMETER}.
      */
     private WktNode unitWithoutId(String keyword, UnitDefinition u) {
+        return WktNode.of(keyword, unitNameAndFactor(u));
+    }
+
+    /**
+     * The two children every unit element starts with, in the order WKT2 requires them. Shared so
+     * that the two forms cannot drift: the output of this writer is compared byte for byte, and a
+     * unit written with its name defaulted one way here and another way there would break that
+     * without breaking anything a reader would notice.
+     */
+    private static List<WktNode> unitNameAndFactor(UnitDefinition u) {
         List<WktNode> children = new ArrayList<WktNode>();
         children.add(WktNode.quoted(u.getName() == null ? "unknown" : u.getName()));
         children.add(WktNode.number(u.getConversionFactor()));
-        return WktNode.of(keyword, children);
+        return children;
     }
 
     private void addMetadata(List<WktNode> children, CrsDefinition def, boolean asBase) {

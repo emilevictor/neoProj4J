@@ -179,6 +179,73 @@ public final class VerifyIndex {
         }
     }
 
+    /** The deprecated flag. Nearly every table carries one and they all spell it the same way. */
+    private static void eqDeprecated(Table t, Object[] row, boolean actual) {
+        eq(ref(t, row) + ".deprecated", Boolean.valueOf(t.bool(row, "deprecated")),
+                Boolean.valueOf(actual));
+    }
+
+    /** Source CRS, target CRS and accuracy: the block every operation row carries. */
+    private static void eqSourceTargetAccuracy(Table t, Object[] row, DbOperation op) {
+        refEq(ref(t, row) + ".source_crs", t.text(row, "source_crs_auth_name"),
+                t.text(row, "source_crs_code"), op.sourceCrs());
+        refEq(ref(t, row) + ".target_crs", t.text(row, "target_crs_auth_name"),
+                t.text(row, "target_crs_code"), op.targetCrs());
+        eqDouble(ref(t, row) + ".accuracy", t.real(row, "accuracy"), op.accuracy());
+    }
+
+    /**
+     * (authority, code) to name, for one of the small lookup tables.
+     *
+     * <p>GenerateIndex has a method of the same shape and this one deliberately does not call it. The
+     * whole worth of this class is that it re-derives what the index should contain straight from the
+     * source dump; a verifier that runs the generator's code cannot catch the generator's mistakes.
+     */
+    private static Map<String, String> nameMap(Table t) {
+        Map<String, String> m = new java.util.HashMap<String, String>();
+        for (Object[] row : t.rows) {
+            m.put(t.text(row, "auth_name") + ' ' + t.text(row, "code"), t.text(row, "name"));
+        }
+        return m;
+    }
+
+    /**
+     * The paramN_* columns against the parameter list the index produced, compared in order. Gaps in
+     * the source columns are skipped, so column number and list position are not the same thing.
+     *
+     * @param names   the parameter names, for a table that records only each parameter's
+     *                (authority, code); null for a table that carries paramN_name in a column
+     * @param missing how to word a shortfall. The two callers word it differently, and the wording is
+     *                what someone reads in a failing build, so it stays the caller's to choose.
+     */
+    private static void eqParams(Table t, Object[] row, int maxParams, Map<String, String> names,
+                                 List<DbParam> actual, String missing) {
+        int n = 0;
+        for (int i = 1; i <= maxParams; i++) {
+            String pa = t.text(row, "param" + i + "_auth_name");
+            String pc = t.text(row, "param" + i + "_code");
+            if (pa == null || pc == null) {
+                continue;
+            }
+            if (n >= actual.size()) {
+                fail(ref(t, row) + ": param" + i + missing);
+                n++;
+                continue;
+            }
+            DbParam p = actual.get(n);
+            String what = ref(t, row) + ".param" + i;
+            eq(what + ".auth", pa, p.authName());
+            eq(what + ".code", pc, p.code());
+            eq(what + ".name", names == null ? t.text(row, "param" + i + "_name")
+                    : names.get(pa + ' ' + pc), p.name());
+            eqDouble(what + ".value", t.real(row, "param" + i + "_value"), p.value());
+            refEq(what + ".uom", t.text(row, "param" + i + "_uom_auth_name"),
+                    t.text(row, "param" + i + "_uom_code"), p.unit());
+            n++;
+        }
+        eq(ref(t, row) + " param count", Integer.valueOf(n), Integer.valueOf(actual.size()));
+    }
+
     // ------------------------------------------------------------------ per table
 
     private static void verifyMetadata(QuoteDump d, PjdxDatabase db) {
@@ -205,8 +272,7 @@ public final class VerifyIndex {
                     u.type() == null ? null : u.type().dbValue());
             eqDouble(ref(t, row) + ".conv_factor", t.real(row, "conv_factor"), u.conversionFactor());
             eq(ref(t, row) + ".proj_short_name", t.text(row, "proj_short_name"), u.projShortName());
-            eq(ref(t, row) + ".deprecated", Boolean.valueOf(t.bool(row, "deprecated")),
-                    Boolean.valueOf(u.deprecated()));
+            eqDeprecated(t, row, u.deprecated());
         }
     }
 
@@ -244,8 +310,7 @@ public final class VerifyIndex {
                     e.inverseFlattening());
             eqDouble(ref(t, row) + ".semi_minor_axis", t.real(row, "semi_minor_axis"),
                     e.semiMinorAxis());
-            eq(ref(t, row) + ".deprecated", Boolean.valueOf(t.bool(row, "deprecated")),
-                    Boolean.valueOf(e.deprecated()));
+            eqDeprecated(t, row, e.deprecated());
             // Upstream's CHECK: exactly one of the two shape parameters. If the transcode ever loses
             // one, this catches it independently of the field comparisons above.
             isTrue(ref(t, row) + ": exactly one of inv_flattening / semi_minor_axis",
@@ -265,8 +330,7 @@ public final class VerifyIndex {
             eqDouble(ref(t, row) + ".longitude", t.real(row, "longitude"), p.longitude());
             refEq(ref(t, row) + ".uom", t.text(row, "uom_auth_name"), t.text(row, "uom_code"),
                     p.unit());
-            eq(ref(t, row) + ".deprecated", Boolean.valueOf(t.bool(row, "deprecated")),
-                    Boolean.valueOf(p.deprecated()));
+            eqDeprecated(t, row, p.deprecated());
         }
     }
 
@@ -290,8 +354,7 @@ public final class VerifyIndex {
                     dm.frameReferenceEpoch());
             eqDouble(ref(g, row) + ".ensemble_accuracy", g.real(row, "ensemble_accuracy"),
                     dm.ensembleAccuracy());
-            eq(ref(g, row) + ".deprecated", Boolean.valueOf(g.bool(row, "deprecated")),
-                    Boolean.valueOf(dm.deprecated()));
+            eqDeprecated(g, row, dm.deprecated());
         }
         Table v = d.table("vertical_datum");
         for (Object[] row : v.rows) {
@@ -306,8 +369,7 @@ public final class VerifyIndex {
                     Boolean.valueOf(dm.ellipsoid() == null));
             eqDouble(ref(v, row) + ".ensemble_accuracy", v.real(row, "ensemble_accuracy"),
                     dm.ensembleAccuracy());
-            eq(ref(v, row) + ".deprecated", Boolean.valueOf(v.bool(row, "deprecated")),
-                    Boolean.valueOf(dm.deprecated()));
+            eqDeprecated(v, row, dm.deprecated());
         }
         verifyEnsembleMembers(d.table("geodetic_datum_ensemble_member"), db,
                 DbObjectType.GEODETIC_DATUM);
@@ -420,8 +482,7 @@ public final class VerifyIndex {
                     crs.datum());
             eq(ref(g, row) + ".text_definition", g.text(row, "text_definition"),
                     crs.textDefinition());
-            eq(ref(g, row) + ".deprecated", Boolean.valueOf(g.bool(row, "deprecated")),
-                    Boolean.valueOf(crs.deprecated()));
+            eqDeprecated(g, row, crs.deprecated());
         }
         Table p = d.table("projected_crs");
         for (Object[] row : p.rows) {
@@ -440,8 +501,7 @@ public final class VerifyIndex {
                     p.text(row, "conversion_code"), crs.conversion());
             eq(ref(p, row) + ".text_definition", p.text(row, "text_definition"),
                     crs.textDefinition());
-            eq(ref(p, row) + ".deprecated", Boolean.valueOf(p.bool(row, "deprecated")),
-                    Boolean.valueOf(crs.deprecated()));
+            eqDeprecated(p, row, crs.deprecated());
         }
         Table v = d.table("vertical_crs");
         for (Object[] row : v.rows) {
@@ -485,18 +545,8 @@ public final class VerifyIndex {
 
     private static void verifyConversions(QuoteDump d, PjdxDatabase db) {
         Table t = d.table("conversion_table");
-        Map<String, String> paramNames = new java.util.HashMap<String, String>();
-        Table cp = d.table("conversion_param");
-        for (Object[] row : cp.rows) {
-            paramNames.put(cp.text(row, "auth_name") + ' ' + cp.text(row, "code"),
-                    cp.text(row, "name"));
-        }
-        Map<String, String> methodNames = new java.util.HashMap<String, String>();
-        Table cm = d.table("conversion_method");
-        for (Object[] row : cm.rows) {
-            methodNames.put(cm.text(row, "auth_name") + ' ' + cm.text(row, "code"),
-                    cm.text(row, "name"));
-        }
+        Map<String, String> paramNames = nameMap(d.table("conversion_param"));
+        Map<String, String> methodNames = nameMap(d.table("conversion_method"));
         for (Object[] row : t.rows) {
             DbConversion cv = db.conversion(t.text(row, "auth_name"), t.text(row, "code"));
             if (cv == null) {
@@ -511,30 +561,7 @@ public final class VerifyIndex {
             eq(ref(t, row) + ".method_name",
                     ma == null || mc == null ? null : methodNames.get(ma + ' ' + mc),
                     cv.methodName());
-            int expected = 0;
-            for (int i = 1; i <= 7; i++) {
-                String pa = t.text(row, "param" + i + "_auth_name");
-                String pc = t.text(row, "param" + i + "_code");
-                if (pa == null || pc == null) {
-                    continue;
-                }
-                if (expected >= cv.parameters().size()) {
-                    fail(ref(t, row) + ": param" + i + " missing from the index");
-                    expected++;
-                    continue;
-                }
-                DbParam p = cv.parameters().get(expected);
-                String what = ref(t, row) + ".param" + i;
-                eq(what + ".auth", pa, p.authName());
-                eq(what + ".code", pc, p.code());
-                eq(what + ".name", paramNames.get(pa + ' ' + pc), p.name());
-                eqDouble(what + ".value", t.real(row, "param" + i + "_value"), p.value());
-                refEq(what + ".uom", t.text(row, "param" + i + "_uom_auth_name"),
-                        t.text(row, "param" + i + "_uom_code"), p.unit());
-                expected++;
-            }
-            eq(ref(t, row) + " param count", Integer.valueOf(expected),
-                    Integer.valueOf(cv.parameters().size()));
+            eqParams(t, row, 7, paramNames, cv.parameters(), " missing from the index");
         }
     }
 
@@ -561,15 +588,10 @@ public final class VerifyIndex {
                     op.methodAuthName());
             eq(ref(t, row) + ".method_code", t.text(row, "method_code"), op.methodCode());
             eq(ref(t, row) + ".method_name", t.text(row, "method_name"), op.methodName());
-            refEq(ref(t, row) + ".source_crs", t.text(row, "source_crs_auth_name"),
-                    t.text(row, "source_crs_code"), op.sourceCrs());
-            refEq(ref(t, row) + ".target_crs", t.text(row, "target_crs_auth_name"),
-                    t.text(row, "target_crs_code"), op.targetCrs());
-            eqDouble(ref(t, row) + ".accuracy", t.real(row, "accuracy"), op.accuracy());
+            eqSourceTargetAccuracy(t, row, op);
             eq(ref(t, row) + ".operation_version", t.text(row, "operation_version"),
                     op.operationVersion());
-            eq(ref(t, row) + ".deprecated", Boolean.valueOf(t.bool(row, "deprecated")),
-                    Boolean.valueOf(op.deprecated()));
+            eqDeprecated(t, row, op.deprecated());
             refEq(ref(t, row) + ".interpolation_crs", t.text(row, "interpolation_crs_auth_name"),
                     t.text(row, "interpolation_crs_code"), op.interpolationCrs());
 
@@ -582,30 +604,7 @@ public final class VerifyIndex {
             }
             eq(ref(t, row) + ".grids", expectedGrids, op.gridNames());
 
-            int n = 0;
-            for (int i = 1; i <= maxParams; i++) {
-                String pa = t.text(row, "param" + i + "_auth_name");
-                String pc = t.text(row, "param" + i + "_code");
-                if (pa == null || pc == null) {
-                    continue;
-                }
-                if (n >= op.parameters().size()) {
-                    fail(ref(t, row) + ": param" + i + " missing");
-                    n++;
-                    continue;
-                }
-                DbParam p = op.parameters().get(n);
-                String what = ref(t, row) + ".param" + i;
-                eq(what + ".auth", pa, p.authName());
-                eq(what + ".code", pc, p.code());
-                eq(what + ".name", t.text(row, "param" + i + "_name"), p.name());
-                eqDouble(what + ".value", t.real(row, "param" + i + "_value"), p.value());
-                refEq(what + ".uom", t.text(row, "param" + i + "_uom_auth_name"),
-                        t.text(row, "param" + i + "_uom_code"), p.unit());
-                n++;
-            }
-            eq(ref(t, row) + " param count", Integer.valueOf(n),
-                    Integer.valueOf(op.parameters().size()));
+            eqParams(t, row, maxParams, null, op.parameters(), " missing");
 
             verifyFoundBetween(db, t, row, op);
         }
@@ -618,12 +617,7 @@ public final class VerifyIndex {
      */
     private static void verifyHelmert(QuoteDump d, PjdxDatabase db) {
         Table t = d.table("helmert_transformation_table");
-        Map<String, String> methodNames = new java.util.HashMap<String, String>();
-        Table m = d.table("coordinate_operation_method");
-        for (Object[] row : m.rows) {
-            methodNames.put(m.text(row, "auth_name") + ' ' + m.text(row, "code"),
-                    m.text(row, "name"));
-        }
+        Map<String, String> methodNames = nameMap(d.table("coordinate_operation_method"));
         String[][] byCode = {
                 {"8605", "tx", "translation"}, {"8606", "ty", "translation"},
                 {"8607", "tz", "translation"},
@@ -653,13 +647,8 @@ public final class VerifyIndex {
             eq(ref(t, row) + ".method_name",
                     ma == null || mc == null ? null : methodNames.get(ma + ' ' + mc),
                     op.methodName());
-            refEq(ref(t, row) + ".source_crs", t.text(row, "source_crs_auth_name"),
-                    t.text(row, "source_crs_code"), op.sourceCrs());
-            refEq(ref(t, row) + ".target_crs", t.text(row, "target_crs_auth_name"),
-                    t.text(row, "target_crs_code"), op.targetCrs());
-            eqDouble(ref(t, row) + ".accuracy", t.real(row, "accuracy"), op.accuracy());
-            eq(ref(t, row) + ".deprecated", Boolean.valueOf(t.bool(row, "deprecated")),
-                    Boolean.valueOf(op.deprecated()));
+            eqSourceTargetAccuracy(t, row, op);
+            eqDeprecated(t, row, op.deprecated());
             isTrue(ref(t, row) + " must have at least tx/ty/tz", op.parameters().size() >= 3);
             Set<String> seen = new HashSet<String>();
             for (DbParam p : op.parameters()) {
@@ -694,11 +683,7 @@ public final class VerifyIndex {
             }
             eq(ref(t, row) + ".kind", DbObjectType.CONCATENATED_OPERATION, op.kind());
             eq(ref(t, row) + ".name", t.text(row, "name"), op.name());
-            refEq(ref(t, row) + ".source_crs", t.text(row, "source_crs_auth_name"),
-                    t.text(row, "source_crs_code"), op.sourceCrs());
-            refEq(ref(t, row) + ".target_crs", t.text(row, "target_crs_auth_name"),
-                    t.text(row, "target_crs_code"), op.targetCrs());
-            eqDouble(ref(t, row) + ".accuracy", t.real(row, "accuracy"), op.accuracy());
+            eqSourceTargetAccuracy(t, row, op);
             eq(ref(t, row) + ".operation_version", t.text(row, "operation_version"),
                     op.operationVersion());
             eq(ref(t, row) + ".method is null", Boolean.TRUE,
@@ -786,8 +771,7 @@ public final class VerifyIndex {
             eqDouble(ref(t, row) + ".south_lat", t.real(row, "south_lat"), e.southLatitude());
             eqDouble(ref(t, row) + ".east_lon", t.real(row, "east_lon"), e.eastLongitude());
             eqDouble(ref(t, row) + ".north_lat", t.real(row, "north_lat"), e.northLatitude());
-            eq(ref(t, row) + ".deprecated", Boolean.valueOf(t.bool(row, "deprecated")),
-                    Boolean.valueOf(e.deprecated()));
+            eqDeprecated(t, row, e.deprecated());
         }
     }
 

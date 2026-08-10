@@ -493,28 +493,72 @@ public final class GenerateIndex {
                 new PjdxWriter.RowEmitter() {
                     @Override
                     public void emit(PjdxWriter.Enc e, Object[] row) {
-                        e.str(t.text(row, "name"));
-                        String ma = t.text(row, "method_auth_name");
-                        String mc = t.text(row, "method_code");
-                        e.str(ma);
-                        e.str(mc);
-                        e.str(ma == null || mc == null ? null : methodNames.get(ma + ' ' + mc));
-                        List<Object[]> params = new ArrayList<Object[]>(7);
-                        for (int i = 1; i <= 7; i++) {
-                            String pa = t.text(row, "param" + i + "_auth_name");
-                            String pc = t.text(row, "param" + i + "_code");
-                            if (pa == null || pc == null) {
-                                continue;
-                            }
-                            params.add(new Object[]{pa, pc, paramNames.get(pa + ' ' + pc),
-                                    Double.valueOf(t.real(row, "param" + i + "_value")),
-                                    t.text(row, "param" + i + "_uom_auth_name"),
-                                    t.text(row, "param" + i + "_uom_code")});
-                        }
-                        emitParams(e, params);
+                        emitNameAndMethod(e, t, row, methodNames);
+                        emitColumnParams(e, t, row, 7, paramNames);
                         e.bool(t.bool(row, "deprecated"));
                     }
                 });
+    }
+
+    /**
+     * Name, method authority, method code, method name -- in that order, because that is the order the
+     * reader expects. The tables that share this shape disagree about where the method name lives, so
+     * the lookup is done here rather than by the caller: doing it in an argument would read the method
+     * columns before the name column, and Table.text names the first missing column when it throws.
+     *
+     * @param methodNames the coordinate_operation_method or conversion_method names, for a table that
+     *                    records only the method's (authority, code); null for a table that carries
+     *                    method_name in a column of its own
+     */
+    private static void emitNameAndMethod(PjdxWriter.Enc e, Table t, Object[] row,
+                                          Map<String, String> methodNames) {
+        e.str(t.text(row, "name"));
+        String ma = t.text(row, "method_auth_name");
+        String mc = t.text(row, "method_code");
+        e.str(ma);
+        e.str(mc);
+        if (methodNames == null) {
+            e.str(t.text(row, "method_name"));
+        } else {
+            e.str(ma == null || mc == null ? null : methodNames.get(ma + ' ' + mc));
+        }
+    }
+
+    /** Source CRS, target CRS, accuracy: the block every operation row carries, in reader order. */
+    private static void emitSourceTargetAccuracy(PjdxWriter.Enc e, Table t, Object[] row) {
+        e.str(t.text(row, "source_crs_auth_name"));
+        e.str(t.text(row, "source_crs_code"));
+        e.str(t.text(row, "target_crs_auth_name"));
+        e.str(t.text(row, "target_crs_code"));
+        e.dbl(t.real(row, "accuracy"));
+    }
+
+    /**
+     * Slots param1_* .. param&lt;maxParams&gt;_* in column order, dropping any whose authority or code
+     * is NULL. Upstream leaves gaps, so what goes out is a count followed by the survivors renumbered
+     * from one.
+     *
+     * @param names non-null for conversion_table, which records only each parameter's (authority, code)
+     *              and has the name resolved through conversion_param; null for the transformation
+     *              tables, which carry paramN_name inline. The ternary is lazy, so whichever column the
+     *              table in hand does not have is never asked for -- asking would throw.
+     */
+    private static void emitColumnParams(PjdxWriter.Enc e, Table t, Object[] row, int maxParams,
+                                         Map<String, String> names) {
+        List<Object[]> params = new ArrayList<Object[]>(maxParams);
+        for (int i = 1; i <= maxParams; i++) {
+            String pa = t.text(row, "param" + i + "_auth_name");
+            String pc = t.text(row, "param" + i + "_code");
+            if (pa == null || pc == null) {
+                continue;
+            }
+            params.add(new Object[]{pa, pc,
+                    names == null ? t.text(row, "param" + i + "_name") : names.get(pa + ' ' + pc),
+                    Double.valueOf(t.real(row, "param" + i + "_value")),
+                    t.text(row, "param" + i + "_uom_auth_name"),
+                    t.text(row, "param" + i + "_uom_code")});
+        }
+        emitParams(e, params);
     }
 
     private static void emitParams(PjdxWriter.Enc e, List<Object[]> params) {
@@ -574,17 +618,8 @@ public final class GenerateIndex {
                 new PjdxWriter.RowEmitter() {
                     @Override
                     public void emit(PjdxWriter.Enc e, Object[] row) {
-                        e.str(t.text(row, "name"));
-                        String ma = t.text(row, "method_auth_name");
-                        String mc = t.text(row, "method_code");
-                        e.str(ma);
-                        e.str(mc);
-                        e.str(ma == null || mc == null ? null : methodNames.get(ma + ' ' + mc));
-                        e.str(t.text(row, "source_crs_auth_name"));
-                        e.str(t.text(row, "source_crs_code"));
-                        e.str(t.text(row, "target_crs_auth_name"));
-                        e.str(t.text(row, "target_crs_code"));
-                        e.dbl(t.real(row, "accuracy"));
+                        emitNameAndMethod(e, t, row, methodNames);
+                        emitSourceTargetAccuracy(e, t, row);
                         emitParams(e, helmertParams(t, row));
                         e.str(t.text(row, "operation_version"));
                         e.bool(t.bool(row, "deprecated"));
@@ -635,37 +670,38 @@ public final class GenerateIndex {
     }
 
     private void addGridTransformations(QuoteDump d) {
-        final Table t = d.table("grid_transformation");
-        writer.addTable(PjdxFormat.S_GRID_TRANSFORMATION, "grid_transformation", t.rows, 2, authCode(t),
-                new PjdxWriter.RowEmitter() {
-                    @Override
-                    public void emit(PjdxWriter.Enc e, Object[] row) {
-                        emitTransformationHead(e, t, row, 2);
-                        List<String> grids = new ArrayList<String>(2);
-                        addGrid(grids, t.text(row, "grid_name"));
-                        addGrid(grids, t.text(row, "grid2_name"));
-                        e.uint(grids.size());
-                        for (String g : grids) {
-                            e.str(g);
-                        }
-                        e.str(t.text(row, "interpolation_crs_auth_name"));
-                        e.str(t.text(row, "interpolation_crs_code"));
-                        e.str(t.text(row, "operation_version"));
-                        e.bool(t.bool(row, "deprecated"));
-                    }
-                });
+        addTransformation(d, PjdxFormat.S_GRID_TRANSFORMATION, "grid_transformation", 2,
+                new String[]{"grid_name", "grid2_name"});
     }
 
     private void addOtherTransformations(QuoteDump d) {
-        final Table t = d.table("other_transformation");
-        writer.addTable(PjdxFormat.S_OTHER_TRANSFORMATION, "other_transformation", t.rows, 2,
-                authCode(t),
+        addTransformation(d, PjdxFormat.S_OTHER_TRANSFORMATION, "other_transformation", 9,
+                new String[]{"grid_name"});
+    }
+
+    /**
+     * grid_transformation and other_transformation have the same row shape and differ only in how many
+     * parameter slots they use and how many grid columns they carry, so one emitter serves both. The
+     * emission order is exactly the order the two hand-written copies used.
+     *
+     * @param maxParams   the highest paramN_* slot the table defines
+     * @param gridColumns the grid name columns, in the order they must be emitted; an empty or absent
+     *                    name is skipped, so the count that precedes them is not the column count
+     */
+    private void addTransformation(QuoteDump d, int section, String table, final int maxParams,
+                                   final String[] gridColumns) {
+        final Table t = d.table(table);
+        writer.addTable(section, table, t.rows, 2, authCode(t),
                 new PjdxWriter.RowEmitter() {
                     @Override
                     public void emit(PjdxWriter.Enc e, Object[] row) {
-                        emitTransformationHead(e, t, row, 9);
-                        List<String> grids = new ArrayList<String>(1);
-                        addGrid(grids, t.text(row, "grid_name"));
+                        emitNameAndMethod(e, t, row, null);
+                        emitSourceTargetAccuracy(e, t, row);
+                        emitColumnParams(e, t, row, maxParams, null);
+                        List<String> grids = new ArrayList<String>(gridColumns.length);
+                        for (String column : gridColumns) {
+                            addGrid(grids, t.text(row, column));
+                        }
                         e.uint(grids.size());
                         for (String g : grids) {
                             e.str(g);
@@ -684,36 +720,6 @@ public final class GenerateIndex {
         }
     }
 
-    /**
-     * The head shared by {@code grid_transformation} and {@code other_transformation}: name, method,
-     * source, target, accuracy, parameters. Both carry {@code paramN_name} inline, unlike
-     * {@code conversion_table}.
-     */
-    private static void emitTransformationHead(PjdxWriter.Enc e, Table t, Object[] row, int maxParams) {
-        e.str(t.text(row, "name"));
-        e.str(t.text(row, "method_auth_name"));
-        e.str(t.text(row, "method_code"));
-        e.str(t.text(row, "method_name"));
-        e.str(t.text(row, "source_crs_auth_name"));
-        e.str(t.text(row, "source_crs_code"));
-        e.str(t.text(row, "target_crs_auth_name"));
-        e.str(t.text(row, "target_crs_code"));
-        e.dbl(t.real(row, "accuracy"));
-        List<Object[]> params = new ArrayList<Object[]>(maxParams);
-        for (int i = 1; i <= maxParams; i++) {
-            String pa = t.text(row, "param" + i + "_auth_name");
-            String pc = t.text(row, "param" + i + "_code");
-            if (pa == null || pc == null) {
-                continue;
-            }
-            params.add(new Object[]{pa, pc, t.text(row, "param" + i + "_name"),
-                    Double.valueOf(t.real(row, "param" + i + "_value")),
-                    t.text(row, "param" + i + "_uom_auth_name"),
-                    t.text(row, "param" + i + "_uom_code")});
-        }
-        emitParams(e, params);
-    }
-
     private void addConcatenatedOperations(QuoteDump d) {
         final Table t = d.table("concatenated_operation");
         writer.addTable(PjdxFormat.S_CONCATENATED_OPERATION, "concatenated_operation", t.rows, 2,
@@ -722,11 +728,7 @@ public final class GenerateIndex {
                     @Override
                     public void emit(PjdxWriter.Enc e, Object[] row) {
                         e.str(t.text(row, "name"));
-                        e.str(t.text(row, "source_crs_auth_name"));
-                        e.str(t.text(row, "source_crs_code"));
-                        e.str(t.text(row, "target_crs_auth_name"));
-                        e.str(t.text(row, "target_crs_code"));
-                        e.dbl(t.real(row, "accuracy"));
+                        emitSourceTargetAccuracy(e, t, row);
                         e.str(t.text(row, "operation_version"));
                         e.bool(t.bool(row, "deprecated"));
                     }

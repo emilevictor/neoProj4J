@@ -605,6 +605,196 @@ switches degree output from degrees-minutes-seconds to a two-decimal number.
 
 CPD flags this pair. It is the one CPD hit that must be left alone.
 
+### What was actually consolidated
+
+Seven changes were made. Every one is confined to non-numeric code, adds no public or protected
+member, and carries a test that fails if it is undone. Sizes are measured, not estimated.
+
+| Change | Duplication removed | Guard added |
+|---|---|---|
+| `Registry.ellipsoids` now references the 49 `Ellipsoid` constants instead of re-declaring 27 of them. **The array's order is unchanged**, which matters because ties are broken by position — see below. | 27 objects → 0 | `EllipsoidTableAgreementTest`, 6 tests |
+| Six pipeline operators — `Affine`, `AxisSwap`, `Cs2cs`, `PushPop`, `Set`, `UnitConvert` — now extend a new package-private `OverridableUnitsOperator` (73 lines) holding the `declaredLeft`/`declaredRight`/`overrideUnits` block they each carried. | ~100 lines | `OverridableUnitsOperatorTest`, 8 tests |
+| `geoapi`'s `TransformWrapper2D`/`3D` array methods share a private `transform(ProjCoordinate, ProjCoordinate)` per class instead of repeating the try/catch five and four times. | 45 lines, net −17 | `TransformArrayOverloadsTest`, 6 tests |
+| `api` and `io.wkt`: one parameter-matching rule in `Crs` replaces `Proj.hasKey`, `LegacyAdapters.hasAxis` and two inline copies; `DatabaseCrsFactory` shares its refusal guards; `OperationSelector` shares its message prefix and accuracy text; `WktNode.find`/`findAll` and `WktWriter.unit`/`unitWithoutId` each share a helper. | ~66 lines, net +7 | `ParameterMatchingTest`, 3 tests |
+| `Proj4FileReader`'s two streaming dictionary lookups share one `scan` method. | ~14 lines | covered by existing `io` tests |
+| `Resources.readFully` delegates to `readAtMost` rather than repeating the loop. | 9 lines | `ResourcesReadTest`, 8 tests |
+| `db`: `PjdxFile` shares one `stringBytes`; `PjdxDatabase` shares `crsEntry`, `rowByAuthCode` (six accessors) and `objectPrefix` (five methods); `GenerateIndex` shares four emitters, including one that covers both `grid_transformation` and `other_transformation`; `VerifyIndex` shares four comparers. Nothing is shared *between* generator and verifier — see below. | net −45 lines | `PjdxSupersessionTest`, 6 tests |
+
+The net line count barely moves — 757 inserted against 707 deleted across 24 files — because most of
+what replaces the duplication is the Javadoc explaining why the surviving copy is the only one. That
+is the intended trade. The point of this work is not fewer lines; it is that a change to a rule now
+has one place to be made, and a test that notices when it is made in only one of two.
+
+Two of these are worth more than their line counts. The ellipsoid one removes a genuine drift
+hazard: the two tables had already drifted, and the comment preserved in `Registry` records what it
+cost — `+ellps=NWL9D` and `+ellps=andrae` were re-declared with the inverse flattening in the pole
+radius slot, which selects a different branch of the constructor and takes 298.25 metres literally,
+giving an eccentricity of 0.999999998906693 against GRS80's 0.0818. Every transform through either
+was computed on a near-flat disc. The `api` one collapses four independently-written spellings of
+"does this parameter list mention `+axis=`" into the rule they were all approximating.
+
+The new tests are pinned to the mechanism, not to a convenient string. `EllipsoidTableAgreementTest`
+asserts **reference identity** rather than equal fields, because comparing fields would pass for a
+freshly written correct literal and so would not stop the next one being written wrongly. It also
+pins the four ties that `WktNames.projEllipsoidCode` decides by array position — `clrk80`/`NAD27`,
+`WGS66`/`NWL9D`, `GRS80`/`NAD83`, `australian`/`aust_SA` — which had no coverage anywhere, and it
+asserts each pair is still genuinely tied before asserting the order, so the test cannot quietly
+become vacuous. Non-vacuity was checked rather than assumed: compiled against the pre-change
+`Registry` and exactly one test fails, naming all 27 copies.
+
+`DegreeUnitFormatTest` (5 tests) was added for the CPD hit in the section above, which had no test at
+all. It now fails if the "redundant" overrides are deleted.
+
+Forty-two tests were added in total, and the three touched modules pass: **core 1953, `db` 58,
+`geoapi` 12**. Two checks are worth naming because they are stronger than a green suite. The `db`
+work was verified by regenerating the index from the same `proj.db` dump with the old and new
+generators and diffing the output: byte-identical, SHA-256
+`8a82064783a07132f31e42ffe51cdc2bbb48c3835a01ab015485dfe7a456d389`, which is the value already pinned
+in `db/pom.xml` and the hash of the checked-in artifact. `VerifyIndex` reports the same **486,491**
+field comparisons before and after, so no assertion was silently dropped. And `javap` over every
+non-`gen` class in `db` is identical either side of the change — the only class-level difference
+anywhere is one fewer anonymous class in `GenerateIndex`, which `db/pom.xml:120` excludes from the
+jar.
+
+One near-miss in that work is worth recording, because it is the shape of mistake this kind of
+refactor invites. The first version of `emitNameAndMethod` took the resolved method name as an
+argument: `emitNameAndMethod(e, t, row, resolvedMethodName(t, row, methodNames))`. Java evaluates
+arguments left to right, so that reads `method_auth_name` *before* `name` — and
+`QuoteDump.Table.text` throws naming the first missing column. The output would have been identical
+today and the *error message* would have named a different column under a future upstream schema
+change. It was restructured so the helper does its own lookup and the read order matches both
+originals.
+
+### The candidates, and why each was left
+
+- **The two JSON parsers.** Reported and not merged; `PipelineJson`'s own Javadoc now carries the
+  reasoning, replacing an earlier claim that visibility was the only obstacle. There are three, and
+  two are not plumbing. The two report failures with unrelated exception types
+  (`PipelineDefinitionException`, a subclass of `InvalidValueException`, against 19
+  `WktParseException` sites, which descends directly from `Proj4jException`), so a shared parser
+  needs a failure factory threaded through every throw or a corrupt `+proj=tinshift` model starts
+  reporting a WKT parse error. And because core's bundle declares no `Export-Package`, there is
+  nowhere to put shared code that is not published API — so the merge means publishing a JSON parser
+  as permanently supported surface, in a library whose advantage is having no JSON dependency. The
+  overlap is also smaller than 415 + 406 lines suggests: half of `Json` is a writer, and a third of
+  `PipelineJson` is typed accessors.
+- **The `TransformWrapper2D`/`3D` array methods themselves.** After the helper extraction the residue
+  is the four `{double,float} × {double,float}` combinations, and Java 8 cannot abstract over
+  primitive arrays. Collapsing them needs `Object` plus per-point casts in the hottest loop in the
+  module, at exactly the float↔double conversion points that are worth protecting. Their nine
+  cross-file clusters have no home either: the only sensible one is the shared supertype, and a
+  package-private static in `2D` called from `3D` would make 3D depend on 2D, which is worse than the
+  duplication.
+- **`WktMethods.java:265` and `:276`.** These read as near-identical and are not: `P_OMERC_A` ends
+  with EPSG 8806/8807, "False easting"/"False northing", while `P_OMERC_B` ends with 8816/8817,
+  "Easting/Northing at projection centre". Merging would silently swap EPSG parameter codes on every
+  Hotine oblique Mercator variant. `P_MERCATOR_B` and `P_EQC` are likewise textually identical but
+  belong to two different methods, and keeping them apart is what lets either change alone.
+- **The Landsat / Space Oblique Mercator family.** Do not merge — and the reason is a live trap
+  rather than a preference. `SpaceObliqueMercatorProjection.java:317`/`:375` call `Math.log`/`Math.exp`
+  where `LandsatProjection.java:176`/`:237` call `StrictMath`, so `+proj=som` and `+proj=misrsom`
+  output is architecture-dependent where `+proj=lsat`'s is not. Worse, SOM's own Javadoc at
+  `:54-67` lists "two differences to reconcile" when there are six, and two of the four it omits move
+  bits: the iteration bound is `l > 0` against `l >= 0`, and Landsat applies `adjlon` on the inverse,
+  worth about 6 nanometres. Executing that Javadoc as written would re-pin `+proj=lsat` output.
+- **Three CPD clusters whose named constants differ.** `FXC` is 0.85 in `HatanoProjection` and
+  0.31245971410378249250 in `McBrydeThomasFlatPolarQuarticProjection`; `CTABLEV2` is
+  `LITTLE_ENDIAN` where `NTV1` is `BIG_ENDIAN`; and `GeoTiffGrid.boundingTable` omits the
+  `GridExtents.checkedAxis` guard that NTv2 applies. Token-identical is not value-identical.
+- **Anything shared between `db`'s generator and its verifier.** CPD's two cross-file pairs are real:
+  `GenerateIndex`'s parameter loop and method-name resolution agree line for line with
+  `VerifyIndex`'s, and the two `nameMap` methods are the same six lines. They were consolidated
+  *within* each file and deliberately not across, because a verifier that runs the generator's code
+  cannot catch the generator's mistakes. Merging them would delete the only independent
+  re-derivation the build has. `VerifyIndex.nameMap`'s Javadoc now says so, so the next reader finds
+  the reason rather than the temptation. The two differing failure messages — `" missing from the
+  index"` against `" missing"` — are passed in from the call sites verbatim, because they are what
+  somebody reads in a failing build.
+- **`Crs`'s two constructors**, `toProjString`/`toProjParameterString`, and
+  `containsIgnoreCase`/`indexOfIgnoreCase`. The first would need a ten-argument canonical constructor
+  decoded positionally at every read; the other two are cross-package, so sharing them publishes new
+  API for no behavioural gain.
+- Everything already listed under "Not safe" above stands unchanged.
+
+### Defects found while consolidating, and deliberately not fixed here
+
+None of these are duplication, so none belong in a bit-identity-constrained change. They are recorded
+for the wrong-answers group.
+
+- **`PrimeMeridian.forName` fails open.** `+pm=pari` silently becomes Greenwich — a 260 km error —
+  where PROJ refuses at `src/init.cpp:774-778`. Its own pull request, after this one, so this one's
+  bit-identity claim stays clean.
+- **`Units.DEGREES.format(-0.5)`** returns `"0d30 deg"`, losing the sign whenever the whole-degree
+  part is zero.
+- **`Angle.parse("123d")`** returns 123.0 where `AngleFormat.parse("123d")` throws
+  `NumberFormatException`.
+- **`InitFileCache` retains failed loads forever**, unaccounted and unevictable — the exact hole
+  `GridCache`'s Javadoc claims to have closed — and charges phantom bytes on interrupt, on a path
+  that then does more I/O rather than less.
+- **Two `api` routes to the same request disagree.** `fromLegacy(crs, AUTHORITY).axisOrder()` gives
+  `"enu"` while `fromLegacy(crs, null).withAxisOrderPolicy(AUTHORITY).axisOrder()` gives `"neu"`,
+  because the second has already recorded the source as `PROJ_STRING`. Separately,
+  `DatabaseCrsFactory` computes `axisAuthoritative` before the LEGACY branch clears `axis`, so a
+  database CRS under LEGACY reports its axis order as authoritative while `enu` is in force —
+  disclosed by `axisOrderNote()`, but still wrong. Both pre-existing.
+- **The three entry points report empty input differently.** `createCrs("")`,
+  `createCrsFromWkt("")` and `createCrsFromProjJson("")` agree on the `ErrorCause` and give three
+  different messages, because only the first checks for emptiness explicitly.
+- **`db/gen/GenerateIndex.java` contains five raw NUL bytes in its source.** Five char literals at
+  `:520`, `:552`, `:575`, `:760` and `:783` are a literal `0x00`, not `'\0'` and not a space, in the
+  committed file. `VerifyIndex` uses a real space for the same composite key. Each file is
+  self-consistent, so nothing is broken today, and NUL is the better of the two choices because it
+  cannot occur in an authority name or a code where a space can. But the two disagree, and a NUL
+  written as an invisible byte is one careless editor away from becoming a space. Writing it as
+  `'\0'` would settle it. Neither file was changed here.
+- **Four fields `GenerateIndex` writes are never checked by `VerifyIndex`**: `deprecated` on
+  `conversion_table` and on `concatenated_operation`, and `method_auth_name`, `method_code` and
+  `operation_version` on `helmert_transformation_table`. Every accessor exists, and
+  `verifyTransformation` checks all of them for the grid and other-transformation tables, which is
+  what makes the gaps look accidental. The verifier is the only thing standing between a generator
+  bug and a wrong answer, so where it is silent nothing is watching. Adding assertions can turn a
+  passing build red, so this is reported rather than fixed.
+
+### One consolidation held back for a measurement rather than a doubt
+
+`FastStrictTrig`'s three one-argument methods are their two-argument counterparts with `scratch`
+fixed at `null` — same threshold, same `x - x` for NaN and infinity, same call into
+`reduceAndKernel` — so `sin(x)` could read `return sin(x, null);` and the same for `cos` and `tan`.
+That removes 18 lines of a dispatch protocol currently written six times, where the fast-path
+threshold `0x3fe9_21fb` has to be changed in six places and agree with itself.
+
+Bit-identity here is a proof, not a hope, and it was confirmed anyway: both versions compiled and
+compared over 9,000,048 inputs — the sub-π/4 fast path, the medium and multi-word reduction ranges,
+the `NPIO2_HW` table neighbourhood, a full exponent sweep, random bit patterns including NaN and
+infinity, and the named specials — with **zero differing results**.
+
+It is still not landed, because the risk is speed rather than correctness and this is the wrong
+class to guess about. There are **394 one-argument call sites across 41 files and no two-argument
+call sites in main at all** — the `Scratch` overloads are used only by three test classes. So the
+delegation adds a frame to the only form the library actually uses, on paths that include projection
+inner loops. C2 will almost certainly inline it; the interpreter and C1 will not. The patch is
+prepared and applies cleanly, and it lands only if the benchmark gate shows no regression against
+`master`. If it costs anything measurable, both bodies stay and this paragraph is the reason.
+
+### A latent hazard the geoapi work turned up
+
+`TransformWrapper2D`'s array methods leave `src.z` at `Double.NaN`, and
+`BasicCoordinateTransform.transformClosed` reads that NaN as a deliberate sentinel —
+`final boolean noHeightIn = Double.isNaN(src.z)` at `BasicCoordinateTransform.java:520`. So the 2D
+and 3D loop bodies are one `src.z =` line apart textually and different in meaning: the 2D body is
+asserting "no height". An arity-parameterised merge that wrote a zero height would flip that.
+
+Measured, not assumed: a NaN height and a zero height currently give bit-identical easting and
+northing on EPSG:4326 → 2154, 27700, 31467, 23032, 4269 and 28992, because the core substitutes zero
+for the datum stage and restores NaN on output. The sentinel presently changes only the output `z`,
+which the 2D wrapper never writes. That makes this latent rather than live — but if the core ever
+stops substituting zero, a merged wrapper would move every datum-shifted result. Both helpers'
+Javadoc says so and `testMissingHeightMatchesTwoDimensional` pins it.
+
+Also found: `transform(Point2D, Point2D)` had no test coverage anywhere. GeoAPI 3.0.2's
+`TransformTestCase` never mentions `Point2D` — checked against the conformance jar's bytecode — and
+neither `TransformTest` nor `WrappersTest` calls it. `testPoint2D` now does.
+
 ## Test sufficiency
 
 Core: **79.7% of instructions and 67.8% of branches**, over 414 classes and 2320 tests. That is a
@@ -909,7 +1099,11 @@ requests after this document.
    `@Deprecated` as never thrown, and the other two are documented in place. `Projection.geocentric`
    — a `protected` field nothing assigns and nothing reads — is `@Deprecated` on the same grounds.
    `Decompose.java.txt` moved into the conformance module and compiles.
-3. **Redundancy.** The safe table above, and nothing from the unsafe one.
+3. **Redundancy.** The safe table above, and nothing from the unsafe one. Seven changes were made
+   across `Registry`, the pipeline operators, `geoapi`, `api`, `io.wkt`, `io` and `db`; each carries a
+   test that fails if it is undone; and the candidates left alone are listed with the specific reason
+   each one risks a bit. See "What was actually consolidated" above. The `FastStrictTrig` delegation
+   is prepared but gated on a benchmark run.
 4. **Tests and documentation.** Pin core's surefire locale/timezone/charset; cover the three
    zero-coverage `spi.Db*` records, `pipeline.DeformationOperator` and `io.projjson`; resolve the
    stale `@Ignore` on `testPconic`; and fix the stale claims, the machine-specific content and the

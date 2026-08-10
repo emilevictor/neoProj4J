@@ -115,26 +115,11 @@ public final class LegacyAdapters {
         String[] params = crs.getParameters();
         String definition = params == null ? crs.getName() : crs.getParameterString().trim();
         return new Crs(definition, Crs.Source.LEGACY_OBJECT, ctx, crs, null,
-                params != null && hasAxis(params),
+                params != null && Crs.hasParam(params, "axis"),
                 "adapted from an existing CoordinateReferenceSystem: its axis order is whatever it "
                         + "was built with and was deliberately not re-derived, because silently "
                         + "transposing a CRS somebody else built is the failure this API exists to "
                         + "prevent.");
-    }
-
-    private static boolean hasAxis(String[] params) {
-        for (int i = 0; i < params.length; i++) {
-            String p = params[i];
-            if (p == null) {
-                continue;
-            }
-            int start = p.startsWith("+") ? 1 : 0;
-            if (p.regionMatches(start, "axis", 0, 4) && p.length() > start + 4
-                    && p.charAt(start + 4) == '=') {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**

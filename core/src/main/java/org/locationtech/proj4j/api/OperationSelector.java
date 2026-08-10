@@ -819,14 +819,30 @@ final class OperationSelector {
 
     // ------------------------------------------------------------------ messages
 
+    /**
+     * The opening of every refusal: which pair could not be built. Shared so that all four
+     * refusals name the pair the same way round, since this is the line a reader greps for.
+     */
+    private static StringBuilder refusal(DbObjectRef srcBase, DbObjectRef tgtBase) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("refusing to build ").append(srcBase.authorityCode()).append(" -> ")
+                .append(tgtBase.authorityCode());
+        return sb;
+    }
+
+    /** A candidate's accuracy for prose, saying so when there is none rather than omitting it. */
+    private static String accuracyText(CrsOperationCandidate candidate) {
+        return candidate.accuracy().isPresent()
+                ? candidate.accuracy().get().metres() + " m" : "accuracy unknown";
+    }
+
     private static String betterButUnavailableNote(CrsOperationCandidate selected,
                                                    CrsOperationCandidate better,
                                                    ProjContext context) {
         StringBuilder sb = new StringBuilder();
         sb.append("a better-ranked candidate was skipped: ").append(better.authorityCode())
                 .append(", ").append(better.name()).append(", ")
-                .append(better.accuracy().isPresent()
-                        ? better.accuracy().get().metres() + " m" : "accuracy unknown")
+                .append(accuracyText(better))
                 .append(" -- ").append(better.rejectionReason().orElse("")).append(' ');
         if (selected.isDegradedRelativeTo(better)) {
             sb.append("BestOperationPolicy.").append(context.bestOperationPolicy())
@@ -837,8 +853,7 @@ final class OperationSelector {
                     + "Selected instead: ");
         }
         sb.append(selected.authorityCode()).append(", ").append(selected.name()).append(", ")
-                .append(selected.accuracy().isPresent()
-                        ? selected.accuracy().get().metres() + " m" : "accuracy unknown")
+                .append(accuracyText(selected))
                 .append('.');
         return sb.toString();
     }
@@ -846,11 +861,9 @@ final class OperationSelector {
     private static String degradedMessage(CrsOperationCandidate selected,
                                           CrsOperationCandidate better, DbObjectRef srcBase,
                                           DbObjectRef tgtBase, ProjContext context) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("refusing to build ").append(srcBase.authorityCode()).append(" -> ")
-                .append(tgtBase.authorityCode())
-                .append(": the best operation the authority publishes cannot be executed here, and "
-                        + "the best one that can is less accurate.\n");
+        StringBuilder sb = refusal(srcBase, tgtBase);
+        sb.append(": the best operation the authority publishes cannot be executed here, and "
+                + "the best one that can is less accurate.\n");
         sb.append("  best      : ").append(better.describe()).append('\n');
         sb.append("  available : ").append(selected.describe()).append('\n');
         appendMissingFiles(sb, better);
@@ -874,10 +887,9 @@ final class OperationSelector {
                                              List<CrsOperationCandidate> candidates,
                                              DbObjectRef srcBase, DbObjectRef tgtBase,
                                              ProjContext context) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("refusing to build ").append(srcBase.authorityCode()).append(" -> ")
-                .append(tgtBase.authorityCode()).append(": the authority publishes an operation for "
-                        + "this pair and not one of the executable ones has its grid files.\n");
+        StringBuilder sb = refusal(srcBase, tgtBase);
+        sb.append(": the authority publishes an operation for "
+                + "this pair and not one of the executable ones has its grid files.\n");
         sb.append("  best executable candidate: ").append(best.describe()).append('\n');
         appendMissingFiles(sb, best);
         sb.append("This is NOT a ballpark rejection. The authority does publish an operation -- ")
@@ -934,9 +946,8 @@ final class OperationSelector {
     private static String unsupportedMessage(CrsOperationCandidate best,
                                              List<CrsOperationCandidate> candidates,
                                              DbObjectRef srcBase, DbObjectRef tgtBase) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("refusing to build ").append(srcBase.authorityCode()).append(" -> ")
-                .append(tgtBase.authorityCode()).append(": the authority publishes ")
+        StringBuilder sb = refusal(srcBase, tgtBase);
+        sb.append(": the authority publishes ")
                 .append(candidates.size() - 1)
                 .append(" operation(s) for this pair, and this library cannot execute any of them.\n");
         sb.append("  best candidate: ").append(best.describe()).append('\n');
@@ -949,10 +960,8 @@ final class OperationSelector {
     private static String ballparkMessage(CrsOperationCandidate ballpark,
                                           List<CrsOperationCandidate> candidates,
                                           DbObjectRef srcBase, DbObjectRef tgtBase) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("refusing to build ").append(srcBase.authorityCode()).append(" -> ")
-                .append(tgtBase.authorityCode())
-                .append(": the only operation available is a ballpark one, ")
+        StringBuilder sb = refusal(srcBase, tgtBase);
+        sb.append(": the only operation available is a ballpark one, ")
                 .append(ballpark.name()).append(". ")
                 .append(ballpark.rejectionReason().orElse("")).append('\n');
         if (candidates.size() == 1) {

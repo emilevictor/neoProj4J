@@ -131,13 +131,8 @@ public final class WktNode {
     public WktNode find(String... keywords) {
         for (int i = 0; i < children.size(); i++) {
             WktNode c = children.get(i);
-            if (c.isLeaf() && c.quoted) {
-                continue;
-            }
-            for (int k = 0; k < keywords.length; k++) {
-                if (c.value.equalsIgnoreCase(keywords[k])) {
-                    return c;
-                }
+            if (isKeyword(c, keywords)) {
+                return c;
             }
         }
         return null;
@@ -150,17 +145,27 @@ public final class WktNode {
         List<WktNode> out = new ArrayList<WktNode>();
         for (int i = 0; i < children.size(); i++) {
             WktNode c = children.get(i);
-            if (c.isLeaf() && c.quoted) {
-                continue;
-            }
-            for (int k = 0; k < keywords.length; k++) {
-                if (c.value.equalsIgnoreCase(keywords[k])) {
-                    out.add(c);
-                    break;
-                }
+            if (isKeyword(c, keywords)) {
+                out.add(c);
             }
         }
         return out;
+    }
+
+    /**
+     * Whether a child is an element named by one of {@code keywords}. A quoted leaf never matches,
+     * so a CRS that happens to be <em>named</em> {@code "DATUM"} is not mistaken for one.
+     */
+    private static boolean isKeyword(WktNode child, String[] keywords) {
+        if (child.isLeaf() && child.quoted) {
+            return false;
+        }
+        for (int k = 0; k < keywords.length; k++) {
+            if (child.value.equalsIgnoreCase(keywords[k])) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public boolean is(String... keywords) {

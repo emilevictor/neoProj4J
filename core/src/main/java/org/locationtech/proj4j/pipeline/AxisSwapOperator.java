@@ -47,7 +47,7 @@ import org.locationtech.proj4j.gie.GieIoUnits;
  * finalisation are skipped entirely — the whole point of the operator is to run
  * <em>outside</em> the offset/scale machinery.
  */
-final class AxisSwapOperator implements PipelineOperator {
+final class AxisSwapOperator extends OverridableUnitsOperator {
 
     /** Sentinel base for unspecified slots, so duplicates can be found in one scan. */
     private static final int UNUSED_BASE = 4;
@@ -56,9 +56,6 @@ final class AxisSwapOperator implements PipelineOperator {
     private final int[] sign = new int[4];
     private final int n;
     private final String description;
-
-    private GieIoUnits left;
-    private GieIoUnits right;
 
     AxisSwapOperator(final ProjParams params) {
         final boolean hasOrder = params.has("order");
@@ -95,9 +92,12 @@ final class AxisSwapOperator implements PipelineOperator {
                     "axisswap: bad axis order");
         }
 
-        final boolean angular = params.booleanValue("angularunits");
-        this.left = angular ? GieIoUnits.RADIANS : GieIoUnits.WHATEVER;
-        this.right = angular ? GieIoUnits.RADIANS : GieIoUnits.WHATEVER;
+        // Stays last: booleanValue throws on a malformed +angularunits, and the order and
+        // axis refusals above are the ones a caller should hear about first.
+        final GieIoUnits units = params.booleanValue("angularunits")
+                ? GieIoUnits.RADIANS
+                : GieIoUnits.WHATEVER;
+        declareUnits(units, units);
     }
 
     /**
@@ -214,22 +214,6 @@ final class AxisSwapOperator implements PipelineOperator {
             return axis[0] < 2 && axis[1] < 2;
         }
         return false;
-    }
-
-    @Override
-    public GieIoUnits declaredLeft() {
-        return left;
-    }
-
-    @Override
-    public GieIoUnits declaredRight() {
-        return right;
-    }
-
-    @Override
-    public void overrideUnits(final GieIoUnits newLeft, final GieIoUnits newRight) {
-        this.left = newLeft;
-        this.right = newRight;
     }
 
     @Override

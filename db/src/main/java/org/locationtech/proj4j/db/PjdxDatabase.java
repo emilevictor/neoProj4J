@@ -152,18 +152,29 @@ public final class PjdxDatabase implements ProjDatabase {
 
     @Override
     public DbCrs crs(String authName, String code) {
+        int e = crsEntry(authName, code);
+        if (e < 0) {
+            return null;
+        }
+        PjdxFile.Index x = file.index(PjdxFormat.X_CRS_BY_CODE);
+        return decodeCrs(x.field(e, 2), x.field(e, 3), authName, code);
+    }
+
+    /**
+     * The {@code X_CRS_BY_CODE} entry for an (authority, code), or -1 if the index has none. Two
+     * callers need it and they have to agree: the CRS lookup itself, and the resolver that decides
+     * whether a compound CRS's horizontal component is geodetic or projected.
+     */
+    private int crsEntry(String authName, String code) {
         int a = file.stringId(authName);
         int c = file.stringId(code);
         if (a < 0 || c < 0) {
-            return null;
+            return -1;
         }
         PjdxFile.Index x = file.index(PjdxFormat.X_CRS_BY_CODE);
         int[] prefix = {a, c};
         int e = x.lowerBound(prefix);
-        if (!x.matches(e, prefix)) {
-            return null;
-        }
-        return decodeCrs(x.field(e, 2), x.field(e, 3), authName, code);
+        return x.matches(e, prefix) ? e : -1;
     }
 
     private DbCrs decodeCrs(int tag, int row, String authName, String code) {
@@ -238,17 +249,11 @@ public final class PjdxDatabase implements ProjDatabase {
         if (authName == null || code == null) {
             return null;
         }
-        int a = file.stringId(authName);
-        int c = file.stringId(code);
-        if (a < 0 || c < 0) {
+        int e = crsEntry(authName, code);
+        if (e < 0) {
             return null;
         }
         PjdxFile.Index x = file.index(PjdxFormat.X_CRS_BY_CODE);
-        int[] prefix = {a, c};
-        int e = x.lowerBound(prefix);
-        if (!x.matches(e, prefix)) {
-            return null;
-        }
         return new DbObjectRef(tagToType(x.field(e, 2)), authName, code);
     }
 
@@ -362,17 +367,10 @@ public final class PjdxDatabase implements ProjDatabase {
 
     @Override
     public DbEllipsoid ellipsoid(String authName, String code) {
-        int a = file.stringId(authName);
-        int c = file.stringId(code);
-        if (a < 0 || c < 0) {
+        PjdxFile.RowCursor r = rowByAuthCode(PjdxFormat.S_ELLIPSOID, authName, code);
+        if (r == null) {
             return null;
         }
-        PjdxFile.Table t = file.table(PjdxFormat.S_ELLIPSOID);
-        int row = t.find(a, c);
-        if (row < 0) {
-            return null;
-        }
-        PjdxFile.RowCursor r = t.row(row);
         String nm = r.str();
         DbObjectRef body = ref(DbObjectType.CELESTIAL_BODY, r);
         double semiMajor = r.dbl();
@@ -385,17 +383,10 @@ public final class PjdxDatabase implements ProjDatabase {
 
     @Override
     public DbPrimeMeridian primeMeridian(String authName, String code) {
-        int a = file.stringId(authName);
-        int c = file.stringId(code);
-        if (a < 0 || c < 0) {
+        PjdxFile.RowCursor r = rowByAuthCode(PjdxFormat.S_PRIME_MERIDIAN, authName, code);
+        if (r == null) {
             return null;
         }
-        PjdxFile.Table t = file.table(PjdxFormat.S_PRIME_MERIDIAN);
-        int row = t.find(a, c);
-        if (row < 0) {
-            return null;
-        }
-        PjdxFile.RowCursor r = t.row(row);
         String nm = r.str();
         double lon = r.dbl();
         DbObjectRef uom = ref(DbObjectType.UNIT_OF_MEASURE, r);
@@ -405,17 +396,10 @@ public final class PjdxDatabase implements ProjDatabase {
 
     @Override
     public DbUnit unit(String authName, String code) {
-        int a = file.stringId(authName);
-        int c = file.stringId(code);
-        if (a < 0 || c < 0) {
+        PjdxFile.RowCursor r = rowByAuthCode(PjdxFormat.S_UNIT, authName, code);
+        if (r == null) {
             return null;
         }
-        PjdxFile.Table t = file.table(PjdxFormat.S_UNIT);
-        int row = t.find(a, c);
-        if (row < 0) {
-            return null;
-        }
-        PjdxFile.RowCursor r = t.row(row);
         String nm = r.str();
         DbUnit.Type type = DbUnit.Type.fromDbValue(r.str());
         double factor = r.dbl();
@@ -426,31 +410,18 @@ public final class PjdxDatabase implements ProjDatabase {
 
     @Override
     public DbCelestialBody celestialBody(String authName, String code) {
-        int a = file.stringId(authName);
-        int c = file.stringId(code);
-        if (a < 0 || c < 0) {
-            return null;
-        }
-        PjdxFile.Table t = file.table(PjdxFormat.S_CELESTIAL_BODY);
-        int row = t.find(a, c);
-        if (row < 0) {
-            return null;
-        }
-        PjdxFile.RowCursor r = t.row(row);
-        return new DbCelestialBody(authName, code, r.str(), r.dbl());
+        PjdxFile.RowCursor r = rowByAuthCode(PjdxFormat.S_CELESTIAL_BODY, authName, code);
+        return r == null ? null : new DbCelestialBody(authName, code, r.str(), r.dbl());
     }
 
     @Override
     public List<DbObjectRef> crsUsingDatum(DbObjectType datumType, String datumAuthName,
                                            String datumCode) {
-        int tag = typeToTag(datumType);
-        int a = file.stringId(datumAuthName);
-        int c = file.stringId(datumCode);
-        if (a < 0 || c < 0) {
+        int[] prefix = objectPrefix(datumType, datumAuthName, datumCode);
+        if (prefix == null) {
             return Collections.emptyList();
         }
         PjdxFile.Index x = file.index(PjdxFormat.X_CRS_BY_DATUM);
-        int[] prefix = {tag, a, c};
         List<DbObjectRef> out = new ArrayList<DbObjectRef>();
         for (int i = x.lowerBound(prefix); x.matches(i, prefix); i++) {
             out.add(new DbObjectRef(tagToType(x.field(i, 3)), file.string(x.field(i, 4)),
@@ -464,17 +435,10 @@ public final class PjdxDatabase implements ProjDatabase {
 
     @Override
     public DbConversion conversion(String authName, String code) {
-        int a = file.stringId(authName);
-        int c = file.stringId(code);
-        if (a < 0 || c < 0) {
+        PjdxFile.RowCursor r = rowByAuthCode(PjdxFormat.S_CONVERSION, authName, code);
+        if (r == null) {
             return null;
         }
-        PjdxFile.Table t = file.table(PjdxFormat.S_CONVERSION);
-        int row = t.find(a, c);
-        if (row < 0) {
-            return null;
-        }
-        PjdxFile.RowCursor r = t.row(row);
         String nm = r.str();
         String methodAuth = r.str();
         String methodCode = r.str();
@@ -665,17 +629,11 @@ public final class PjdxDatabase implements ProjDatabase {
 
     @Override
     public List<DbExtent> extentsFor(DbObjectRef object) {
-        if (object == null) {
-            return Collections.emptyList();
-        }
-        int tag = typeToTag(object.type());
-        int a = file.stringId(object.authName());
-        int c = file.stringId(object.code());
-        if (a < 0 || c < 0) {
+        int[] prefix = objectPrefix(object);
+        if (prefix == null) {
             return Collections.emptyList();
         }
         PjdxFile.Index x = file.index(PjdxFormat.X_USAGE_BY_OBJECT);
-        int[] prefix = {tag, a, c};
         // A LinkedHashMap keyed by the extent reference removes the duplicates that upstream's usage
         // table does contain, without letting map order reach the result: the list is sorted below.
         LinkedHashMap<DbObjectRef, DbExtent> found = new LinkedHashMap<DbObjectRef, DbExtent>();
@@ -699,17 +657,10 @@ public final class PjdxDatabase implements ProjDatabase {
 
     @Override
     public DbExtent extent(String authName, String code) {
-        int a = file.stringId(authName);
-        int c = file.stringId(code);
-        if (a < 0 || c < 0) {
+        PjdxFile.RowCursor r = rowByAuthCode(PjdxFormat.S_EXTENT, authName, code);
+        if (r == null) {
             return null;
         }
-        PjdxFile.Table t = file.table(PjdxFormat.S_EXTENT);
-        int row = t.find(a, c);
-        if (row < 0) {
-            return null;
-        }
-        PjdxFile.RowCursor r = t.row(row);
         String nm = r.str();
         String description = r.str();
         double west = r.dbl();
@@ -724,17 +675,11 @@ public final class PjdxDatabase implements ProjDatabase {
 
     @Override
     public List<String> aliases(DbObjectRef object) {
-        if (object == null) {
-            return Collections.emptyList();
-        }
-        int tag = typeToTag(object.type());
-        int a = file.stringId(object.authName());
-        int c = file.stringId(object.code());
-        if (a < 0 || c < 0) {
+        int[] prefix = objectPrefix(object);
+        if (prefix == null) {
             return Collections.emptyList();
         }
         PjdxFile.Table t = file.table(PjdxFormat.S_ALIAS);
-        int[] prefix = {tag, a, c};
         TreeSet<String> out = new TreeSet<String>();
         for (int i = t.lowerBound(prefix); i < t.rowCount && t.compareKey(i, prefix) == 0; i++) {
             out.add(file.string(t.key(i, 3)));
@@ -766,17 +711,11 @@ public final class PjdxDatabase implements ProjDatabase {
 
     @Override
     public List<DbSupersession> supersededBy(DbObjectRef object) {
-        if (object == null) {
-            return Collections.emptyList();
-        }
-        int tag = typeToTag(object.type());
-        int a = file.stringId(object.authName());
-        int c = file.stringId(object.code());
-        if (a < 0 || c < 0) {
+        int[] prefix = objectPrefix(object);
+        if (prefix == null) {
             return Collections.emptyList();
         }
         PjdxFile.Table t = file.table(PjdxFormat.S_SUPERSESSION);
-        int[] prefix = {tag, a, c};
         List<DbSupersession> out = new ArrayList<DbSupersession>();
         for (int i = t.lowerBound(prefix); i < t.rowCount && t.compareKey(i, prefix) == 0; i++) {
             PjdxFile.RowCursor r = t.row(i);
@@ -799,17 +738,11 @@ public final class PjdxDatabase implements ProjDatabase {
 
     @Override
     public List<DbObjectRef> replacementsFor(DbObjectRef object) {
-        if (object == null) {
-            return Collections.emptyList();
-        }
-        int tag = typeToTag(object.type());
-        int a = file.stringId(object.authName());
-        int c = file.stringId(object.code());
-        if (a < 0 || c < 0) {
+        int[] prefix = objectPrefix(object);
+        if (prefix == null) {
             return Collections.emptyList();
         }
         PjdxFile.Table t = file.table(PjdxFormat.S_DEPRECATION);
-        int[] prefix = {tag, a, c};
         TreeSet<DbObjectRef> out = new TreeSet<DbObjectRef>();
         for (int i = t.lowerBound(prefix); i < t.rowCount && t.compareKey(i, prefix) == 0; i++) {
             PjdxFile.RowCursor r = t.row(i);
@@ -869,6 +802,41 @@ public final class PjdxDatabase implements ProjDatabase {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /**
+     * A cursor positioned on the (authority, code) row of a table section, or null if there is no such
+     * row. Two distinct misses are both "no row": a string that is not in the pool at all cannot name
+     * anything in the file, and a pooled string may still key no row in this particular table.
+     */
+    private PjdxFile.RowCursor rowByAuthCode(int section, String authName, String code) {
+        int a = file.stringId(authName);
+        int c = file.stringId(code);
+        if (a < 0 || c < 0) {
+            return null;
+        }
+        PjdxFile.Table t = file.table(section);
+        int row = t.find(a, c);
+        return row < 0 ? null : t.row(row);
+    }
+
+    /**
+     * The (table tag, authority id, code id) prefix used to scan a section keyed by object, or null if
+     * either string is absent from the pool. The tag is resolved first, deliberately: an object whose
+     * type has no tag is a programming error and must still be reported as one even when its authority
+     * or code happens to be unknown.
+     */
+    private int[] objectPrefix(DbObjectType type, String authName, String code) {
+        int tag = typeToTag(type);
+        int a = file.stringId(authName);
+        int c = file.stringId(code);
+        return a < 0 || c < 0 ? null : new int[]{tag, a, c};
+    }
+
+    /** As {@link #objectPrefix(DbObjectType, String, String)}, and null for a null object. */
+    private int[] objectPrefix(DbObjectRef object) {
+        return object == null ? null
+                : objectPrefix(object.type(), object.authName(), object.code());
+    }
 
     private List<DbParam> params(PjdxFile.RowCursor r) {
         int n = r.uint();

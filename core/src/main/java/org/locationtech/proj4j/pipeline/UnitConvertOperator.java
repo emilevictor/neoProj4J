@@ -53,14 +53,11 @@ import org.locationtech.proj4j.gie.GieIoUnits;
  * <p>Not immutable only because {@link #overrideUnits} exists; safe to use from one
  * thread at a time, like every other operator here.
  */
-final class UnitConvertOperator implements PipelineOperator {
+final class UnitConvertOperator extends OverridableUnitsOperator {
 
     private final double xyFactor;
     private final double zFactor;
     private final String description;
-
-    private GieIoUnits left;
-    private GieIoUnits right;
 
     UnitConvertOperator(final ProjParams params) {
         double xy = 1.0;
@@ -114,8 +111,7 @@ final class UnitConvertOperator implements PipelineOperator {
 
         this.xyFactor = xy;
         this.zFactor = z;
-        this.left = l;
-        this.right = r;
+        declareUnits(l, r);
         this.description = "unitconvert xy_in=" + params.value("xy_in")
                 + " xy_out=" + params.value("xy_out");
     }
@@ -151,22 +147,6 @@ final class UnitConvertOperator implements PipelineOperator {
     }
 
     @Override
-    public GieIoUnits declaredLeft() {
-        return left;
-    }
-
-    @Override
-    public GieIoUnits declaredRight() {
-        return right;
-    }
-
-    @Override
-    public void overrideUnits(final GieIoUnits newLeft, final GieIoUnits newRight) {
-        this.left = newLeft;
-        this.right = newRight;
-    }
-
-    @Override
     public void forward(final double[] coord) {
         coord[0] *= xyFactor;
         coord[1] *= xyFactor;
@@ -192,7 +172,7 @@ final class UnitConvertOperator implements PipelineOperator {
 
     @Override
     public String toString() {
-        return "UnitConvertOperator[" + description + ", xy*" + xyFactor + ", left=" + left
-                + ", right=" + right + "]";
+        return "UnitConvertOperator[" + description + ", xy*" + xyFactor + ", left=" + declaredLeft()
+                + ", right=" + declaredRight() + "]";
     }
 }

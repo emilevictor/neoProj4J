@@ -182,22 +182,46 @@ public class Proj4FileReader {
         return t;
     }
 
-    private String[] readFile(BufferedReader reader, String name) throws IOException {
+    /**
+     * Drives the tokenizer over one dictionary and returns the first entry that matches, or
+     * {@code null} at end of file.
+     *
+     * <p>Both streaming lookups read the file identically - same tokenizer, same
+     * {@code while (t.ttype == '<')} termination, which is what makes a trailing token that is not
+     * {@code '<'} end the scan rather than fail - and differ only in what they compare. Reading it
+     * twice meant a change to the scan protocol had to be made twice and agreed with itself.
+     *
+     * <p>The parameter array is built only in the branch that needs one to compare with. Matching
+     * by name must not pay for an array per entry <em>scanned</em>: allocating per entry scanned is
+     * the whole reason a lookup at the end of {@code proj4/nad/epsg} cost 7.9 MB.
+     *
+     * @param name   the CRS name to match on, or {@code null} to match on {@code params} instead;
+     *               exactly one of the two is non-null
+     * @param params the parameter array to match on, consulted only when {@code name} is null
+     */
+    private static Pair<String, List> scan(BufferedReader reader, String name, String[] params)
+            throws IOException {
         StreamTokenizer t = createTokenizer(reader);
 
         t.nextToken();
         while (t.ttype == '<') {
             Pair<String, List> pair = parseTokenizer(t);
-            String crsName = pair.fst();
-            List v = pair.snd();
 
-            // found requested CRS?
-            if (crsName.equals(name)) {
-                String[] args = (String[]) v.toArray(new String[0]);
-                return args;
+            if (name != null) {
+                // found requested CRS?
+                if (pair.fst().equals(name)) {
+                    return pair;
+                }
+            } else if (Arrays.equals(params, (String[]) pair.snd().toArray(new String[0]))) {
+                return pair;
             }
         }
         return null;
+    }
+
+    private String[] readFile(BufferedReader reader, String name) throws IOException {
+        Pair<String, List> hit = scan(reader, name, null);
+        return hit == null ? null : (String[]) hit.snd().toArray(new String[0]);
     }
 
     private static void addParam(List v, String key, String value) {
@@ -254,18 +278,8 @@ public class Proj4FileReader {
         BufferedReader reader = new BufferedReader(new InputStreamReader(inStr));
 
         try {
-            StreamTokenizer t = createTokenizer(reader);
-
-            t.nextToken();
-            while (t.ttype == '<') {
-                Pair<String, List> pair = parseTokenizer(t);
-                String crsName = pair.fst();
-                List v = pair.snd();
-
-                String[] paramsParsed = (String[]) v.toArray(new String[0]);
-
-                if (Arrays.equals(params, paramsParsed)) return crsName;
-            }
+            Pair<String, List> hit = scan(reader, null, params);
+            if (hit != null) return hit.fst();
         } finally {
             reader.close();
         }
