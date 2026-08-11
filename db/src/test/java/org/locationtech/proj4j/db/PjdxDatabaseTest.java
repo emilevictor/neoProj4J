@@ -51,7 +51,7 @@ import org.locationtech.proj4j.spi.ProjDatabase;
  * Reads the shipped index and asserts the facts that motivate its existence.
  * <p>
  * These are not spot checks standing in for a proof — {@code gen/VerifyIndex} compares every row of
- * every transcoded table against the SQLite source, 486,491 field comparisons, and runs under
+ * every transcoded table against the SQLite source, 502,422 field comparisons, and runs under
  * {@code -Pregen-db}. What this class adds is the <em>meaning</em>: each test names a defect the shipped
  * proj4j has today and shows the datum that fixes it, so a change that quietly drops a table fails with
  * a message about NAD27 rather than about a byte count.

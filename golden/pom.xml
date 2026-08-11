@@ -152,8 +152,14 @@
                              formatter (:53,:60) was pinned to Locale.ROOT; the format half was not.
                            - units/AngleFormat.java:65 - same shape.
                          Those are also why this suite formats every float with Double.toHexString
-                         rather than trusting a formatter at all. -->
-                    <argLine>-Duser.language=en -Duser.country=US -Duser.timezone=UTC -Dfile.encoding=UTF-8 -Xmx2g</argLine>
+                         rather than trusting a formatter at all.
+
+                         This module states the pin locally rather than inheriting the root POM's,
+                         because it also needs the heap and a surefire argLine replaces the managed
+                         one whole rather than adding to it. The `@{argLine}` prefix is what keeps a
+                         coverage agent alive; without it this line silently discards the agent, and
+                         golden's coverage reads as zero with nothing failing to say so. -->
+                    <argLine>@{argLine} -Duser.language=en -Duser.country=US -Duser.timezone=UTC -Dfile.encoding=UTF-8 -Xmx2g</argLine>
                 </configuration>
             </plugin>
         </plugins>

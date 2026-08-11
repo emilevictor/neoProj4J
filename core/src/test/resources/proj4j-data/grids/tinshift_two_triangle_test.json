@@ -1,0 +1,21 @@
+{
+  "file_type": "triangulation_file",
+  "format_version": "1.0",
+  "name": "proj4j test fixture: unit square split into two triangles",
+  "description": "Not a real model. The unit square (0,0)-(1,1) is split along its diagonal into triangle A = v0 v1 v2 (below the diagonal) and triangle B = v0 v2 v3 (above it). The two triangles carry deliberately DIFFERENT affine maps - A is (x,y) -> (2x, 2y), B sends (0,1) to (0,3) - so a point is transformed differently depending on which triangle contains it, and a bug that picks the wrong triangle cannot pass. Kept to four vertices because that is the smallest mesh in which triangle selection is observable.",
+  "input_crs": "EPSG:3067",
+  "output_crs": "EPSG:3067",
+  "transformed_components": [ "horizontal" ],
+  "vertices_columns": [ "source_x", "source_y", "target_x", "target_y" ],
+  "triangles_columns": [ "idx_vertex1", "idx_vertex2", "idx_vertex3" ],
+  "vertices": [
+    [0, 0, 0, 0],
+    [1, 0, 2, 0],
+    [1, 1, 2, 2],
+    [0, 1, 0, 3]
+  ],
+  "triangles": [
+    [0, 1, 2],
+    [0, 2, 3]
+  ]
+}

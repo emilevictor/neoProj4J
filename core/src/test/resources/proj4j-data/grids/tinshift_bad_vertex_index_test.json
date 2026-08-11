@@ -1,0 +1,17 @@
+{
+  "file_type": "triangulation_file",
+  "format_version": "1.0",
+  "name": "proj4j test fixture: a triangle referring to a vertex that does not exist",
+  "description": "Not a real model. Structurally a valid triangulation file except that the single triangle names vertex 9 of a three-vertex list, which is how a truncated or hand-edited model most often breaks. It exists so that a model that resolves but does not parse is proved to be refused at construction with a message naming the problem, rather than becoming a transform that returns its input.",
+  "transformed_components": [ "horizontal" ],
+  "vertices_columns": [ "source_x", "source_y", "target_x", "target_y" ],
+  "triangles_columns": [ "idx_vertex1", "idx_vertex2", "idx_vertex3" ],
+  "vertices": [
+    [0, 0, 0, 0],
+    [1, 0, 2, 0],
+    [1, 1, 2, 2]
+  ],
+  "triangles": [
+    [0, 1, 9]
+  ]
+}

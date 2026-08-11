@@ -15,16 +15,16 @@
  *******************************************************************************/
 package org.locationtech.proj4j;
 
-import org.junit.Ignore;
 import org.junit.Test;
 
 /**
  * Tests from the PROJ4 testvarious file.
  * <p>
  * Two methods that were disabled by naming convention (<code>XXX_testRSOBorneo</code>,
- * <code>FAIL_testPconic</code>) are now {@code @Test @Ignore} with a measured reason, and
+ * <code>FAIL_testPconic</code>) are running again, and
  * {@link #testInverseFlatteningParameter()} was added to keep the working half of RSO Borneo —
- * the repository's only use of <code>+rf=</code> — actually running.
+ * the repository's only use of <code>+rf=</code> — held down separately. Nothing in this class is
+ * switched off any more: there is no {@code @Ignore} and no commented-out assertion.
  *
  * @author Martin Davis
  */
@@ -178,11 +178,11 @@ public class Proj4VariousTest extends BaseCoordinateTransformTest {
     }
 
     /**
-     * <code>+proj=pconic</code>. Was <code>FAIL_testPconic</code>, disabled by naming convention.
+     * <code>+proj=pconic</code>. Was <code>FAIL_testPconic</code>, disabled by naming convention,
+     * then {@code @Ignore}d with the two measured defects below.
      * <p>
-     * <b>Still broken, and comprehensively so.</b> Measured against cs2cs 9.8.1, which reproduces the
-     * test's original expected values exactly (−2240096.398139611, −6940342.146955061), confirming
-     * they were right and that it is proj4j that is wrong:
+     * <b>Both defects are fixed, and the test is live again.</b> When the {@code @Ignore} was
+     * written the failure was:
      * <pre>
      *   forward   proj4j  -2805943.988849225  -9419873.546192560
      *             cs2cs   -2240096.398139611  -6940342.146955061
@@ -190,20 +190,25 @@ public class Proj4VariousTest extends BaseCoordinateTransformTest {
      *
      *   inverse   proj4j       120.000000000       -20.031648108
      *             cs2cs        -70.400000007       -23.650000006
-     *             error            190.400 deg           3.618 deg
      * </pre>
-     * The inverse returning exactly <b>120.000000000</b> is the tell: that is not a numerical error
-     * but a clamp — {@code Projection.projectInverse} hard-clamps longitude to ±π rather than
-     * signalling a domain error, so an out-of-domain inverse is returned as a plausible coordinate.
+     * with two causes. {@code SimpleConicProjection.initialize()} carried a {@code FIXME} that
+     * hard-coded {@code p1 = 30}/{@code p2 = 60} and ignored the {@code +lat_1=20n +lat_2=60n}
+     * given here; and the exact {@code 120.000000000} out of the inverse was not arithmetic but
+     * {@code Projection}'s old ±π longitude clamp returning a plausible coordinate for an
+     * out-of-domain point. {@code SimpleConicProjection} now reads {@code +lat_1}/{@code +lat_2}
+     * (and its inverse no longer aliases the output coordinate), and the inverse wraps with
+     * {@code adjlon} the way {@code inv.cpp} does instead of clamping.
      * <p>
-     * Consistent with {@code SimpleConicProjection}'s {@code FIXME}, which hard-codes
-     * {@code p1 = 30}/{@code p2 = 60} and therefore ignores the {@code +lat_1=20n +lat_2=60n} given
-     * here entirely.
+     * The two expected values below are unchanged from the original test. They are confirmed
+     * reference values, not "what our code does today": cs2cs 9.8.1 gives
+     * <pre>
+     *   $ echo "-70.4 -23.65" | cs2cs -f "%.9f" +proj=latlong +datum=WGS84 \
+     *       +to +proj=pconic +units=m +lat_1=20n +lat_2=60n +lon_0=60W +datum=WGS84
+     *   -2240096.398139611      -6940342.146955061
+     * </pre>
+     * and the reverse of that pair returns -70.400000000 / -23.650000000. Proj4J now agrees with
+     * both to 1e-9 m forward and to the printed precision on the inverse.
      */
-    @Ignore("pconic: forward 565,848 m E / 2,479,531 m N off PROJ 9.8.1; inverse returns "
-            + "(120.0, -20.03) for a point whose true inverse is (-70.4, -23.65) -- the 120.0 is "
-            + "Projection.projectInverse's +-pi longitude clamp, not arithmetic. SimpleConicProjection "
-            + "hard-codes p1=30/p2=60 and ignores +lat_1/+lat_2.")
     @Test
     public void testPconic() {
         checkTransform(
@@ -219,14 +224,30 @@ public class Proj4VariousTest extends BaseCoordinateTransformTest {
 
     @Test
     public void testExtendedTransverseMercator() {
-        //checkTransform("+proj=etmerc +k=0.998 +lon_0=-20 +datum=WGS84 +x_0=10000 +y_0=20000", p("10000 20000"), "+proj=latlong +datum=WGS84", p("0dN 0.000"), 1e-3);
+        // Restored. This was commented out and had lost its longitude token -- it read
+        // p("0dN 0.000"), which p() reads as longitude "0dN" and latitude "0.000", i.e. the
+        // expected point (0, 0) rather than the one meant. The point is the projection origin:
+        // (x_0, y_0) inverts to (lon_0, 0), i.e. 20dW 0dN. cs2cs 9.8.1 agrees --
+        //   echo "10000 20000" | cs2cs -f "%.9f" \
+        //     +proj=etmerc +k=0.998 +lon_0=-20 +datum=WGS84 +x_0=10000 +y_0=20000 \
+        //     +to +proj=latlong +datum=WGS84
+        //   -20.000000000   0.000000000
+        // and Proj4J returns -20.000000000000 / 0.000000000000, exactly.
+        checkTransform("+proj=etmerc +k=0.998 +lon_0=-20 +datum=WGS84 +x_0=10000 +y_0=20000", p("10000 20000"), "+proj=latlong +datum=WGS84", p("20dW 0dN 0.000"), 1e-3);
         checkTransform("+proj=etmerc +k=0.998 +lon_0=-20 +datum=WGS84 +x_0=10000 +y_0=20000", p("500000 2000000"), "+proj=latlong +datum=WGS84", p("15d22'16.108\"W 17d52'53.478\"N 0.000"), 1e-6);
         checkTransform("+proj=etmerc +k=0.998 +lon_0=-20 +datum=WGS84 +x_0=10000 +y_0=20000", p("1000000 2000000"), "+proj=latlong +datum=WGS84", p("10d40'55.532\"W 17d42'48.526\"N 0.000"), 1e-6);
         checkTransform("+proj=etmerc +k=0.998 +lon_0=-20 +datum=WGS84 +x_0=10000 +y_0=20000", p("2000000 2000000"), "+proj=latlong +datum=WGS84", p("1d32'21.33\"W 17d3'47.233\"N 0.000"), 1e-6);
         checkTransform("+proj=etmerc +k=0.998 +lon_0=-20 +datum=WGS84 +x_0=10000 +y_0=20000", p("4000000 2000000"), "+proj=latlong +datum=WGS84", p("15d4'42.357\"E 14d48'56.372\"N 0.000"), 1e-6);
         checkTransform("+proj=etmerc +k=0.9996 +lon_0=15 +datum=WGS84 +x_0=500000 +y_0=0", p("1096230.08 7876510.42"), "+proj=latlong +datum=WGS84", p("30.9967055 70.2838512 0.000"), 1e-6);
         
-        //checkTransform("+proj=latlong +datum=WGS84", p("0dN 0.000"), "+proj=etmerc +k=0.998 +lon_0=-20 +datum=WGS84 +x_0=10000 +y_0=20000", p("10000 20000"), 50);
+        // Restored, same missing longitude token as above. The tolerance was 50 m where every
+        // other forward check here uses 0.1 m; it is tightened to 0.1 to match, because the answer
+        // is exact. cs2cs 9.8.1 --
+        //   echo "-20 0" | cs2cs -f "%.9f" +proj=latlong +datum=WGS84 \
+        //     +to +proj=etmerc +k=0.998 +lon_0=-20 +datum=WGS84 +x_0=10000 +y_0=20000
+        //   10000.000000000 20000.000000000
+        // and Proj4J returns 10000.000000000 / 20000.000000000.
+        checkTransform("+proj=latlong +datum=WGS84", p("20dW 0dN 0.000"), "+proj=etmerc +k=0.998 +lon_0=-20 +datum=WGS84 +x_0=10000 +y_0=20000", p("10000 20000"), 0.1);
         checkTransform("+proj=latlong +datum=WGS84", p("15d22'16.108\"W 17d52'53.478\"N 0.000"), "+proj=etmerc +k=0.998 +lon_0=-20 +datum=WGS84 +x_0=10000 +y_0=20000", p("500000 2000000"), 0.1);
         checkTransform("+proj=latlong +datum=WGS84", p("10d40'55.532\"W 17d42'48.526\"N 0.000"), "+proj=etmerc +k=0.998 +lon_0=-20 +datum=WGS84 +x_0=10000 +y_0=20000", p("1000000 2000000"), 0.1);
         checkTransform("+proj=latlong +datum=WGS84", p("1d32'21.33\"W 17d3'47.233\"N 0.000"), "+proj=etmerc +k=0.998 +lon_0=-20 +datum=WGS84 +x_0=10000 +y_0=20000", p("2000000 2000000"), 0.1);

@@ -55,6 +55,12 @@ import org.locationtech.proj4j.spi.DbUnit;
  * {@link Double#compare}, so a value that round-tripped to a neighbouring representable number fails,
  * and every reference is compared as a whole {@code (authority, code)} pair.
  * <p>
+ * Two fields are written by {@link GenerateIndex} and cannot be checked here, because no reader path
+ * reaches them: the {@code source} column of {@code alias_name} and of {@code deprecation}.
+ * {@code PjdxDatabase.aliases} reads only the alias key, and {@code replacementsFor} reads only the
+ * replacement's authority and code, so neither {@code source} is exposed through the SPI at all. A
+ * wrong value in either is undetectable by any test until an accessor exists for it.
+ * <p>
  * Usage: {@code VerifyIndex <dump> <dataDir>}
  */
 public final class VerifyIndex {
@@ -367,6 +373,15 @@ public final class VerifyIndex {
             eq(ref(v, row) + ".name", v.text(row, "name"), dm.name());
             eq(ref(v, row) + ".ellipsoid is null", Boolean.TRUE,
                     Boolean.valueOf(dm.ellipsoid() == null));
+            // A vertical datum's row omits the ellipsoid and prime meridian a geodetic one carries, so
+            // the two sides have to agree about where the row resumes. If the reader ever started
+            // reading those five fields for a vertical datum, publication_date is the first thing it
+            // would get wrong -- it would come back as an ellipsoid authority. 197 of the 554 rows have
+            // a date, so this discriminates rather than comparing null to null.
+            eq(ref(v, row) + ".publication_date", v.text(row, "publication_date"),
+                    dm.publicationDate());
+            eqDouble(ref(v, row) + ".frame_reference_epoch", v.real(row, "frame_reference_epoch"),
+                    dm.frameReferenceEpoch());
             eqDouble(ref(v, row) + ".ensemble_accuracy", v.real(row, "ensemble_accuracy"),
                     dm.ensembleAccuracy());
             eqDeprecated(v, row, dm.deprecated());
@@ -512,10 +527,18 @@ public final class VerifyIndex {
             }
             eq(ref(v, row) + ".name", v.text(row, "name"), crs.name());
             eq(ref(v, row) + ".type", "vertical", crs.type().dbValue());
+            // The coordinate system is emitted before the datum, so a reader that skipped it would
+            // report the CS reference as the datum and still look plausible -- both are (auth, code)
+            // pairs and both are EPSG. The 609 rows use 10 distinct coordinate systems, so a constant
+            // would not pass either.
+            refEq(ref(v, row) + ".cs", v.text(row, "coordinate_system_auth_name"),
+                    v.text(row, "coordinate_system_code"), crs.coordinateSystem());
             refEq(ref(v, row) + ".datum", v.text(row, "datum_auth_name"), v.text(row, "datum_code"),
                     crs.datum());
             eq(ref(v, row) + ".datum type", DbObjectType.VERTICAL_DATUM,
                     crs.datum() == null ? null : crs.datum().type());
+            // Last field of the row, so it is also the proof that the row was read to its end.
+            eqDeprecated(v, row, crs.deprecated());
         }
         Table c = d.table("compound_crs");
         for (Object[] row : c.rows) {
@@ -530,6 +553,9 @@ public final class VerifyIndex {
                     c.text(row, "horiz_crs_code"), crs.horizontalCrs());
             refEq(ref(c, row) + ".vertical", c.text(row, "vertical_crs_auth_name"),
                     c.text(row, "vertical_crs_code"), crs.verticalCrs());
+            // 11 of the 702 compound CRSs are deprecated. Without this the flag could be read from the
+            // wrong offset, or dropped, and nothing here would notice.
+            eqDeprecated(c, row, crs.deprecated());
         }
         Table e = d.table("engineering_crs");
         for (Object[] row : e.rows) {
@@ -540,6 +566,10 @@ public final class VerifyIndex {
             }
             eq(ref(e, row) + ".name", e.text(row, "name"), crs.name());
             eq(ref(e, row) + ".type", "engineering", crs.type().dbValue());
+            // An engineering CRS row is a name and this flag, nothing else. All 15 shipped rows are
+            // deprecated=false, so unlike the other tables this one cannot fail on a dropped flag --
+            // it fails on a flag read from the wrong byte, which is the other way to get it wrong.
+            eqDeprecated(e, row, crs.deprecated());
         }
     }
 
@@ -562,6 +592,9 @@ public final class VerifyIndex {
                     ma == null || mc == null ? null : methodNames.get(ma + ' ' + mc),
                     cv.methodName());
             eqParams(t, row, 7, paramNames, cv.parameters(), " missing from the index");
+            // Emitted after the parameter list, so it is the one field a miscounted parameter block
+            // would corrupt. 911 of the 4,312 conversions are deprecated.
+            eqDeprecated(t, row, cv.deprecated());
         }
     }
 
@@ -644,10 +677,21 @@ public final class VerifyIndex {
             eq(ref(t, row) + ".name", t.text(row, "name"), op.name());
             String ma = t.text(row, "method_auth_name");
             String mc = t.text(row, "method_code");
+            // The authority and code themselves, not only the name they resolve to. The name is looked
+            // up here through the same (auth, code) pair, so it stays right even if the index stored
+            // the pair swapped or dropped it -- these two are what says the pair itself survived. All
+            // 2,734 rows carry both, over 20 distinct method codes.
+            eq(ref(t, row) + ".method_auth_name", ma, op.methodAuthName());
+            eq(ref(t, row) + ".method_code", mc, op.methodCode());
             eq(ref(t, row) + ".method_name",
                     ma == null || mc == null ? null : methodNames.get(ma + ' ' + mc),
                     op.methodName());
             eqSourceTargetAccuracy(t, row, op);
+            // Emitted between the parameter list and the deprecated flag, so a Helmert row whose
+            // branch structure emitted the wrong number of parameters shows up here first. 2,362 of
+            // the 2,734 rows have a version string.
+            eq(ref(t, row) + ".operation_version", t.text(row, "operation_version"),
+                    op.operationVersion());
             eqDeprecated(t, row, op.deprecated());
             isTrue(ref(t, row) + " must have at least tx/ty/tz", op.parameters().size() >= 3);
             Set<String> seen = new HashSet<String>();
@@ -688,6 +732,10 @@ public final class VerifyIndex {
                     op.operationVersion());
             eq(ref(t, row) + ".method is null", Boolean.TRUE,
                     Boolean.valueOf(op.methodName() == null));
+            // 63 of the 374 concatenated operations are deprecated, and a deprecated one still gets
+            // returned by operationsBetween -- so a caller that filters on this flag is reading a value
+            // nothing else here checks.
+            eqDeprecated(t, row, op.deprecated());
             isTrue(ref(t, row) + " must have steps", !op.steps().isEmpty());
             verifyFoundBetween(db, t, row, op);
         }

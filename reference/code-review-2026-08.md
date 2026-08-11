@@ -651,7 +651,9 @@ work was verified by regenerating the index from the same `proj.db` dump with th
 generators and diffing the output: byte-identical, SHA-256
 `8a82064783a07132f31e42ffe51cdc2bbb48c3835a01ab015485dfe7a456d389`, which is the value already pinned
 in `db/pom.xml` and the hash of the checked-in artifact. `VerifyIndex` reports the same **486,491**
-field comparisons before and after, so no assertion was silently dropped. And `javap` over every
+field comparisons before and after, so no assertion was silently dropped. (That 486,491 was
+re-measured during the test-sufficiency work rather than carried forward on trust — see below, where
+the verifier gains eleven field checks and the count becomes 502,422.) And `javap` over every
 non-`gen` class in `db` is identical either side of the change — the only class-level difference
 anywhere is one fewer anonymous class in `GenerateIndex`, which `db/pom.xml:120` excludes from the
 jar.
@@ -849,6 +851,149 @@ Lowest-covered individual classes with 300 or more instructions:
 `pipeline.DeformationOperator` at 12% is the single largest gap, and `ProjCoordinate` at 50.8% is
 the most surprising one — it is the type every single user touches.
 
+### Every figure above counts core's own tests only
+
+JaCoCo attributes coverage per module: each module writes its own `target/jacoco.exec` and
+`jacoco:report` renders it against that module's own `target/classes`. `conformance` has no
+`src/main` at all, so its report goal finds nothing to render and skips — but its tests execute
+**core's** classes, and that execution is recorded in `conformance/target/jacoco.exec` and then
+attributed to nobody.
+
+So the 79.9% is a floor. Merging all four exec files and re-rendering against `core/target/classes`
+gives the number core actually reaches:
+
+```
+core tests only        instr 98285/123083 = 79.9%   branch 8110/11921 = 68.0%
+all modules merged     instr 99487/123083 = 80.8%   branch 8262/11921 = 69.3%
+```
+
+```bash
+mvn org.apache.maven.plugins:maven-dependency-plugin:3.6.1:get \
+    -Dartifact=org.jacoco:org.jacoco.cli:0.8.15:jar:nodeps
+CLI=~/.m2/repository/org/jacoco/org.jacoco.cli/0.8.15/org.jacoco.cli-0.8.15-nodeps.jar
+java -jar $CLI merge */target/jacoco.exec --destfile /tmp/all.exec
+java -jar $CLI report /tmp/all.exec --classfiles core/target/classes --csv /tmp/all.csv
+```
+
+**That +0.9 understates the real lift, and the reason matters more than the number.** The
+measurement above ran with `gie.corpus.skip=true`, the default, so it contains conformance's 345
+fast unit tests and *not* the 8,017-assertion corpus sweep. The sweep is the single largest exercise
+of core in the repository and it contributes to no coverage figure anyone has ever looked at.
+
+Re-run with `-Pconformance` so the corpus is in, and merged the same way, the honest figure is:
+
+```
+corpus on, all modules merged   instr 106120/123083 = 86.2%   branch 8786/11921 = 73.7%
+```
+
+which is **+5.4 points of instruction coverage over the same measurement with the corpus off** — the
+whole of that gap being work the suite was already doing and nobody was counting.
+
+Nothing needs fixing in the build for this. Per-module attribution is JaCoCo behaving correctly, and
+adding `report-aggregate` to a POM is against this review's no-new-plugins decision. What was wrong
+was reading 79.9% as though it were the whole answer.
+
+### Before this change, a coverage build could not be run at all
+
+Both of the following had to be fixed before any of the figures above could be produced, and each
+failed in a way that reported success or looked like the code's fault rather than the harness's:
+
+1. **`ProjContextTest.everyFieldOfTheContextIsFinal` fails under instrumentation.** JaCoCo weaves a
+   `private static transient boolean[] $jacocoData` into every class it touches, and that field is
+   not final, so a reflection test asserting every field is final fails on JaCoCo's own field:
+   `AssertionError: $jacocoData must be final`. Measured at the branch point — `mvn
+   jacoco:prepare-agent test` is a **BUILD FAILURE** there, in core, before conformance is even
+   reached. `f.isSynthetic()` filters it and catches nothing an author can write.
+2. **`conformance` and `golden` each declared a literal `<argLine>` with no `@{argLine}`.** JaCoCo's
+   `prepare-agent` works by *setting* the `argLine` property, so a literal value replaces the agent
+   rather than adding to it: the agent silently never attaches and that module's coverage reads as
+   zero with nothing failing to say so. This is why the corpus contributed to no figure.
+
+Which makes the coverage lift measurable in the first place. Isolating it needs the branch point
+measured *with* this change's plumbing but *without* its new tests — a throwaway worktree at the
+branch point with only the `ProjContextTest` skip and the three POMs copied in:
+
+```
+branch point, corpus on, merged   instr 104066/123083 = 84.5%   branch 8512/11921 = 71.4%
+this change,  corpus on, merged   instr 106120/123083 = 86.2%   branch 8786/11921 = 73.7%
+```
+
+So the tests added here are worth **+1.7 points of instruction coverage and +2.3 of branch
+coverage** — 2,054 more instructions and 274 more branches. The denominator is identical in both
+rows (123,083 and 11,921), which is an independent check that nothing in core's main source moved.
+
+### `inverse(forward(p)) ≈ p` was asserted nowhere, and golden does not cover it
+
+The plan listed "missing round-trip tests where `hasInverse()` is true" as a gap. It is a real one,
+and the reason is worth stating because the obvious rebuttal is wrong.
+
+`errors/RegistryProjectionTest.java` does sweep the whole registry, but it asserts only that every
+name resolves, that nothing touches `System.err`, and that no name lands on an abstract base. It
+never inverts anything.
+
+The golden suite *does* probe forward and inverse across the registry —
+`GoldenFormat.java:158` declares `DIMENSIONS = {"fx","fy","fz","ix","iy","iz"}` and `:72-73`
+documents "f\* is the forward transform's output; i\* is the inverse" — over 45,065 REG plus 1,000
+PAIR plus 2,595 SYN probes. That looks like the same ground, and it is not. **Golden is a change
+detector.** It diffs observed output against a table pinned from released 1.4.3. A projection whose
+inverse has been wrong since 1.4.3 sits in that baseline and golden reports it as `UNCHANGED`
+forever. Golden pins values; it never asserts the identity.
+
+The two answer different questions and the round-trip audit is not the redundancy PR 3 removed.
+
+#### What the audit found: 30 of 122 invertible projections do not close the loop
+
+`roundtrip/RegistryRoundTripAuditTest.java` enumerates the registry — **151** instantiable names, of
+which **122** report `hasInverse()` — and drives each through an 8×7 longitude/latitude grid plus 12
+awkward cases, 68 points per projection. **8,296 probes, 303 skipped as forward-refused, 7,993
+round-trip assertions, 0.051 s.** Eighteen operators that genuinely cannot initialize without extra
+parameters (`lat_1`/`lat_2` conics, `+h` perspectives, `labrd +lat_0`, `misrsom +path`, `gn_sinu
++m`/`+n`, `tpeqd` control points) are listed in a `REQUIRED` table, and a **second test asserts every
+entry in that table is still needed** — so nobody can make a projection pass by feeding it kinder
+parameters.
+
+The tolerance is **1e-5 degrees** (1.1 m of ground displacement) on `max(|dlat|, |dlon|·cos lat)`,
+one value for everything. It is not tighter because at a projection's singular points `dy/dφ`
+vanishes and one ulp of the forward is amplified to about `sqrt(eps)` in the recovered latitude —
+measured worst of that class 1.5e-6 deg, on `putp6p`. More to the point the choice is **not
+delicate**: sorting the 122 measured worst errors leaves a two-and-a-half-decade gap between the
+largest passing (6.6e-6 deg, `eqearth`) and the smallest failing (1.7e-3 deg, `putp4p`), so any
+tolerance in [1e-5, 1e-4] produces the identical failing set.
+
+Most of the 30 are honest domain limits — a regional projection asked about the far side of the
+planet, refusing or answering nonsense. `alsk`, `gs48`, `gs50` (modified stereographic for Alaska and
+the 48/50 states), `labrd` (Madagascar), `imw_p` and `poly` (polyconic far from the central
+meridian), `cass`, and the interrupted lobed projections `igh`, `igh_o`, `imoll`, `imoll_o` whose
+lobe boundaries the inverse refuses by design.
+
+**Five are not domain limits**, and each is filed for its own fix (#101):
+
+| | what |
+|---|---|
+| `lcc`, `ccon`, `pconic`, `murd2` | the forward accepts the far pole. With `lat_1=30`/`lat_2=60` the south pole projects to a finite `y = 1.14e7` — the cone apex — and inverts to **+90**: the wrong hemisphere, silently. `ccon` and `pconic` fold whole southern rows onto one parallel, 180 deg out |
+| `somerc`, `gstmerc` | fold the far side onto the near side. `(-179.9, lat)` forwards to a small easting and inverts to lon 0.5036 — plausible-looking, wholly wrong, no refusal, on 39 of 68 probes each |
+| `nell_h` | the inverse throws `ConvergenceFailureException` at \|lat\| ≥ 89.9 on points its own forward accepts. A missing pole case in the Newton loop, not a domain limit |
+| `putp4p`, `weren` | lose 190 m at the pole, recovering 89.9983 for an input of 90 — `asin` saturation. Werenskiold I is Putnins P4′ rescaled, so one clamp likely fixes both |
+| `PolyconicProjection` | throws `new ProjectionException("I")` at `:109`, `:125` and `:140`. A one-character message, where `ccon`, `imw_p` and `labrd` all cite the upstream line and the offending value. Message-only, so this one is bit-safe |
+
+The test pins the failing set by **equality**, not containment, so it is anti-rot in three
+directions: an unpinned failure is red with the point, the forward output and the recovered values; a
+pinned name that starts passing is red as `OVER-PINNED` with "DELETE the PINNED entry"; and a pinned
+error that more than doubles is red as `REGRESSED`. Entries pinned at "inverse refused" have no upper
+bound and the Javadoc says so rather than implying a guarantee it cannot give.
+
+It was mutation-checked rather than assumed: scaling `MercatorProjection.projectInverse` by 1.000001
+turns `merc` red with a 9.0e-5 deg error; flipping a sign in the audit's own comparison turns 100+
+projections red, which is the check that the comparison is not vacuous; over-pinning a healthy
+projection fires `OVER-PINNED`; tightening `poly`'s pin fires `REGRESSED`; and a bogus `REQUIRED`
+entry fires the staleness test. Every mutation was compiled into a shadowing output directory ahead
+of `core/target/classes` on the classpath, so no repo file was edited and nothing needed reverting.
+
+The honest caveat is that the 30-entry table is what *this* 68-point ladder on GRS80 finds. A
+different ladder, or a spherical base, would shift which projections get pushed outside their design
+region. GRS80 was chosen because it lets `etmerc`, `ups` and `utm` build at all and exercises the
+ellipsoidal iterative inverses.
+
 ### The portability gap in the test setup
 
 Covered as finding 7: `core/pom.xml` configures no surefire plugin, so core's suite inherits the
@@ -871,6 +1016,16 @@ double p2 = projectionLatitude2;
 and the class Javadoc describes the hard-coding in the past tense. The same file has two
 commented-out `//checkTransform` calls at `:222` and `:229`. The test should be re-enabled or
 deleted, not left ambiguous.
+
+**Done in this change, and it needed a fix as well as a re-enable.** The `@Ignore` is gone, the
+`org.junit.Ignore` import with it, and both commented-out `checkTransform` calls are live. One of the
+two was missing a longitude token — `p("0dN 0.000")`, which `p()` read as lon=`0dN`, lat=`0.000`,
+i.e. the point (0,0) rather than the intended one — so it would have passed while testing nothing.
+It now reads `p("20dW 0dN 0.000")`, and the forward tolerance is 0.1 m rather than 50 m, matching
+every sibling in the file. Every expected value is `cs2cs` 9.8.1-verified rather than copied from
+proj4j's own output.
+
+**Core now reports 2,141 tests and zero skipped** — no ambiguous test remains anywhere in it.
 
 ### Not dead, despite appearances
 
@@ -899,6 +1054,224 @@ Its header also contained a stale number: it quoted a "7,845-assertion corpus" w
 `gie-corpus-index.tsv` holds 7,931 and `conformance/pom.xml:127` says 8,017 — three numbers in three
 places. The figure was dropped rather than replaced, since a fourth guess would not help. Reconciling
 the remaining three is a documentation item.
+
+### What the test-sufficiency change added, and what it found
+
+The tests went in where the coverage numbers and the audit above pointed. The notable result is that
+**writing tests for under-covered code found defects in it at a high rate** — the uncovered branches
+were uncovered because nobody had looked, and several were wrong.
+
+`gen/VerifyIndex` in `db` turned out to compare **eleven** fields fewer than it appeared to, not the
+four first counted. Established by reading each `addX(...)` emitter in `GenerateIndex` in emission
+order, matching it against the decode order in `PjdxDatabase` to confirm the field is reachable
+through the SPI at all, then against the verifier's assertions per table:
+
+```
+vertical_datum                  publication_date
+vertical_datum                  frame_reference_epoch
+vertical_crs                    coordinate_system_auth_name / _code
+vertical_crs                    deprecated
+compound_crs                    deprecated
+engineering_crs                 deprecated
+conversion_table                deprecated
+helmert_transformation_table    method_auth_name
+helmert_transformation_table    method_code
+helmert_transformation_table    operation_version
+concatenated_operation          deprecated
+```
+
+Five of the eleven are `deprecated`, checked on ten tables through `eqDeprecated` and simply absent
+from five — which is exactly why it read as covered. The sharpest gap is the Helmert method pair: the
+verifier resolved the method *name* through the same `(auth, code)` pair it was failing to check, so
+a swapped or dropped pair would still have produced the right name.
+
+All eleven are now asserted, and the count is **measured, not derived**:
+
+```
+$ ./db/src/gen/dump.sh /opt/homebrew/share/proj/proj.db /tmp/proj-db-dump.quote
+$ javac -d /tmp/db-classes -cp core/target/classes $(find db/src/main/java -name '*.java')
+$ java -cp /tmp/db-classes:core/target/classes \
+      org.locationtech.proj4j.db.gen.VerifyIndex /tmp/proj-db-dump.quote \
+      db/src/main/resources/proj4j-data/db
+
+  before   VerifyIndex: 486491 field comparisons in 6240 ms   OK
+  after    VerifyIndex: 502422 field comparisons in 6306 ms   OK
+```
+
+`VerifyIndexFieldCoverageTest` then pins, from the shipped index, that each newly compared field
+actually *varies*, so a green comparison has discriminated rather than compared null to null: 197
+vertical datums with a publication date, 2 with a frame epoch, 10 distinct vertical-CRS coordinate
+systems, 11 of 609 and 11 of 702 deprecated vertical and compound CRSs, 784 deprecated conversions,
+20 distinct Helmert method codes over 2,362 operation versions, 63 deprecated concatenated
+operations. One field has nothing to discriminate — all 15 engineering CRSs are `deprecated=false` —
+and the test asserts that premise explicitly rather than letting a reader assume the field is covered
+like the others.
+
+**Two fields cannot be checked by anything.** `alias_name.source` and `deprecation.source` are
+written by the generator and no reader path reads them: `aliases()` reads only the alias key, and
+`replacementsFor()` reads the replacement's authority and code and stops. They are dead payload, and
+a wrong value in either is undetectable by any test until an accessor exists. That is now recorded in
+the `VerifyIndex` class Javadoc rather than left as a silent omission.
+
+On the ProjJSON side, the reader and writer had **11 of 56 reachable `throw` sites covered**; they
+now have 56. Coverage was decided by execution rather than by reading: each malformed document was
+run with `-Dproj4j.exceptions.stackTraces=true` and the topmost `io.projjson` frame recorded, so
+every document is known to land on the site it claims and no other. Of the 11 already covered, only
+four had their *message* asserted; the other seven were reached only by a loop that asserted nothing
+beyond "a `WktParseException` came out", which made `datum "d" has no "ellipsoid"` and `null`
+indistinguishable. Two sites are deliberately left uncovered, with the argument recorded in the test:
+the `default:` branch of a switch whose seven enum constants all have a `case`, and an
+`AssertionError` in a private constructor reachable only by reflection.
+
+### The forward funnel forgets to wrap longitude when `+lon_0` is absent
+
+The largest single defect this change surfaced is not in a projection at all. It is in the funnel
+**every** forward projection passes through.
+
+`proj/Projection.java:464` reads `if (projectionLongitude != 0) {`, and inside that guard sits both
+the central-meridian subtraction **and** the `adjlon` wrap. Upstream's `fwd_prepare`
+(`9.8.1:src/fwd.cpp:109-112`) subtracts unconditionally and guards only the wrap, on `+over` alone:
+
+```c
+coo.lp.lam = (coo.lp.lam - P->from_greenwich) - P->lam0;
+if (0 == P->over)
+    coo.lp.lam = adjlon(coo.lp.lam);
+```
+
+So with no `+lon_0`, or `+lon_0=0`, proj4j behaves exactly as though `+over` were set. Measured on
+`merc` through `Projection.project`, input (200, 45):
+
+| | x |
+|---|---|
+| proj4j, no `+lon_0` | 22263898.158654712 — unwrapped, 200 deg |
+| **PROJ 9.8.1, no `+lon_0`** | **−17811118.526923772** — wrapped to −160 deg |
+| proj4j, `+lon_0=0.0000001` | −17811118.538055720 — wraps, and agrees to 11 mm |
+| proj4j, `+over` | 22263898.158654712 — matches PROJ's `+over` exactly |
+| proj4j, `+lon_0=10` | −18924313.434856508 — matches PROJ exactly |
+
+A full world width apart. The tiny-`lon_0` row is the proof of diagnosis: subtracting 1e-7 degrees
+cannot move a coordinate 40,000 km, so what changed the answer was crossing the guard, not the
+arithmetic inside it.
+
+What makes this a clean call rather than a judgement is that **the inverse funnel in the same file
+already does it correctly.** `:704-707`:
+
+```java
+dst.x = dst.x + projectionLongitude;
+if (!over) {
+    dst.x = ProjectionMath.adjlon(dst.x);
+}
+```
+
+Unconditional add, wrap guarded only by `over` — upstream's shape exactly, with a long comment at
+`:686-688` explaining that the old `projectionLongitude != 0` guard was half the defect. The inverse
+was fixed and the forward was missed. The fix is to hoist the wrap out of the outer guard so the two
+funnels agree. Filed as #99.
+
+**It is not part of this change**, because it moves bits for every CRS with no `+lon_0` whose input
+longitude falls outside [−180, 180], and that has to go through the golden gate on its own.
+
+A second half turned up while verifying it, and is recorded in #99 rather than resolved: through
+`BasicCoordinateTransform` the wrap happens anyway, because a geographic source CRS runs the input
+through the *longlat* projection's inverse funnel — which wraps correctly. That masks the defect on
+the transform path, but it also means `+over` on the target is defeated for a geographic source:
+`+proj=merc +over` through a transform returned the wrapped −17811118.526923772, not 22263898.158654712.
+
+### Van der Grinten's inverse is missing one upstream line
+
+`VanDerGrintenProjection.projectInverse` omits `if (r > PISQ) { d = M_TWOPI - d; }`, which upstream
+places in `vandg_s_inverse` between Snyder 29-17 and 29-18. Since `r = x² + y²`, the branch fires
+outside the map circle of radius π — precisely where `+over` puts everything past the antimeridian.
+Latitude only; longitude is correct throughout:
+
+| input | ours | PROJ 9.8.1 | error |
+|---|---|---|---|
+| `+over` forward of (200, 45) | 41.125734607170 | 45.0 | **3.874 deg** |
+| (0, 4) | 87.436463098346 | 89.347491137743 | 1.911 deg |
+| (3.2, 3.2) | 66.299275009994 | 76.330075167970 | 10.031 deg |
+| (100, 100) | 2.826724968727 | 22.189549318108 | 19.363 deg |
+| (10, 10) | 27.492061638620 | 60.170243400006 | 32.678 deg |
+
+Our forward of (200, 45) is bit-for-bit PROJ's, so the `+over` round trip does not close: forward and
+back loses 3.87 degrees. Adding the single upstream line to a throwaway copy reproduced the PROJ
+column to the last printed digit in all five rows and closed the round trip at exactly 45.0. The
+pinning test fails against that patched copy, which is the check that the pin is real. Filed as #100;
+moves bits, so not part of this change.
+
+### Where proj4j is faithful to PROJ and PROJ is wrong
+
+Three of the defects the new tests turned up are **not** proj4j's**.** Recording them matters because
+the obvious response to each is a "fix" that would silently diverge from upstream and move bits.
+
+**`DeformationOperator`'s inverse amplifies its residual rather than converging on it.** The loop
+computes a residual and then *adds* it where the Newton step would subtract it, so each of the ten
+passes roughly doubles the second-order term, and the `hypot(dif) > 1e-8` guard never lets it exit
+early. Verified against the pinned tag rather than the working tree — the `/Volumes/git/PROJ`
+checkout is at `9.5.0-746-g620ac364`, so `git show 9.8.1:src/transformations/deformation.cpp` is the
+only trustworthy read — and upstream at `:235-241` really does write:
+
+```c
+dif.x = out.x + dt * delta.x - input.x;   /* the residual f(out) */
+out.x += dif.x;                           /* f' ~= 1, so this should be -= */
+```
+
+The shape is worth understanding before anyone touches it: for a *position-independent* `delta` the
+residual is exactly zero on the first pass, because `out` is initialised to `input - dt*delta`, and
+the loop exits correctly. The error appears only where `delta` varies with position — which in this
+operator it always does, since a constant ENU velocity is rotated into geocentric XYZ. Measured on
+the new fixtures, a 100-year 5.385 m displacement closes to ~4.2 mm and a 10-year one to ~42 µm:
+error growing with the *square* of the displacement, which is the signature of an amplified
+second-order term rather than of ordinary numerical noise.
+
+What *is* proj4j's own is the class Javadoc, which describes this as a "10-iteration fixed point"
+with a tolerance — convergence it does not achieve. That claim should be corrected whatever is
+decided about the arithmetic.
+
+**Bipolar's lobe rescaling does not round-trip.** At (-100, -20), inside the pole-B cone and through
+the `if (|t| < al) r /= cos(al + t)` rescaling, the inverse returns (-99.9853750534, -19.9995881702)
+— 1.5 km out. PROJ 9.8.1 returns the identical pair to all ten printed decimals. The inverse
+re-derives the rescaling with a ten-trip fixed-point loop instead of inverting it.
+
+**Goode's 40°44′ seam is not exactly invertible.** Forward at exactly `PHI_LIM` gives
+`y = 4549957.004665751`; the inverse's reciprocal multiply by `1/R` lands one bit *above* `PHI_LIM`,
+takes the Mollweide arm, and returns 40.7331312650° — a 23 m step. PROJ agrees to ten decimals.
+
+All three are pinned at the observed values with a note in the test saying these are what the code
+does today, not a designed result. The round-trip assertions were scoped to the probes that do close
+rather than loosened until everything passed.
+
+Three items were deliberately **not** written, and the reasons are as much a part of the result:
+
+- A registry-wide round-trip audit exists now, but only after establishing that golden does not
+  cover it (above). Had that check gone the other way, the right answer was to write nothing.
+- `AngleFormat`'s known sign defect was pinned, not fixed. The tests assert today's wrong output and
+  say so, because fixing it belongs with the other six defects in the same family, in one change
+  that can be reviewed as a behaviour change rather than smuggled in beside test additions.
+- No committed test input was edited. Where a test needed malformed input, new fixtures were added.
+
+### A verification gate that was not running
+
+`db`'s index reproducibility proof — the thing that makes the checked-in binary trustworthy — did
+not run, and reported success.
+
+All three `regen-db` executions bind to the `generate-resources` phase. The command documented at
+`db/README.md:151`, and the one `db/pom.xml:189-194` claims CI runs, is `mvn -Pregen-db ... validate`.
+`validate` runs *before* `generate-resources`, so none of the three fire:
+
+```
+$ mvn -B -ntp -Pregen-db -pl db validate
+[INFO] BUILD SUCCESS
+[INFO] Total time:  0.541 s
+```
+
+No dump, no transcode, no verification. A `git diff --exit-code` after it passes because nothing was
+regenerated — the gate is vacuous, and vacuous in the direction that reports "reproducible". The POM
+comment's claim that CI runs it is also false: no workflow in `.github/` mentions `regen-db` at all.
+
+The two rows at `db/README.md:166-167` use `mvn install -Pregen-db`, which does work, since `install`
+passes through `generate-resources`. So the repair is to the documented command and the comment, not
+to the phase bindings. The index itself is sound — both verifier runs above pass against the shipped
+bytes.
 
 ## Documentation
 

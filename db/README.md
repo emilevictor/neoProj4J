@@ -94,7 +94,7 @@ transcoded table, field by field**, with doubles compared by `Double.compare` so
 as a neighbouring representable number fails.
 
 ```
-VerifyIndex: 486,491 field comparisons in 6.2 s
+VerifyIndex: 502,422 field comparisons in 6.3 s
 VerifyIndex: OK -- every transcoded row matches the SQLite source
 ```
 
