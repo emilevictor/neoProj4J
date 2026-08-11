@@ -177,6 +177,16 @@ public class ProjContextTest {
     public void everyFieldOfTheContextIsFinal() {
         java.lang.reflect.Field[] fields = ProjContext.class.getDeclaredFields();
         for (java.lang.reflect.Field f : fields) {
+            // Skip fields the compiler or an agent added rather than the author. JaCoCo weaves a
+            // non-final `private static transient boolean[] $jacocoData` into every instrumented
+            // class, so without this the assertion fails under coverage and passes without it --
+            // which is why coverage had never been measured on this project at all. isSynthetic()
+            // catches that field and any future switch-map or assertions-disabled field, and
+            // catches nothing an author can write, because source-declared fields are never
+            // synthetic.
+            if (f.isSynthetic()) {
+                continue;
+            }
             assertTrue(f.getName() + " must be final: a shared context that can be mutated is a "
                             + "policy that can change under a running job",
                     java.lang.reflect.Modifier.isFinal(f.getModifiers()));

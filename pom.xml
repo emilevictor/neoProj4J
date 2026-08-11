@@ -211,6 +211,22 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.1.0</version>
+                <configuration>
+                    <!-- DETERMINISM, for every module. conformance and golden each pinned this
+                         locally and core, epsg, geoapi, db and grids-us-legacy did not, so most of
+                         the suite ran under whatever locale, timezone and charset the machine
+                         happened to have. It passed everywhere it was tried because it was tried on
+                         en_US machines.
+
+                         It MUST be argLine and not systemPropertyVariables. Locale.getDefault() and
+                         the default charset are initialised during JVM startup, before surefire can
+                         set a system property inside an already-running fork - so the other way
+                         looks correct and does nothing.
+
+                         `@{argLine}` first: see the argLine property in this POM for why it is
+                         there. Without it a coverage agent is dropped on the floor. -->
+                    <argLine>@{argLine} -Duser.language=en -Duser.country=US -Duser.timezone=UTC -Dfile.encoding=UTF-8</argLine>
+                </configuration>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -368,5 +384,19 @@
              `Using platform encoding ... to copy filtered resources` and javadoc's `Source files
              encoding has not been set`. -->
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!-- SUREFIRE ARGLINE. Empty on purpose, and it has to exist.
+
+             The surefire configuration below reads `@{argLine}`, which is surefire's late property
+             replacement: it substitutes the value of the `argLine` PROPERTY at fork time rather
+             than at POM-parse time. That is the only way a coverage agent can inject itself,
+             because JaCoCo's prepare-agent goal works by SETTING that property. A module whose
+             surefire config writes a literal `<argLine>` with no `@{argLine}` in it silently
+             discards the agent, and its coverage comes out as zero without anything failing.
+
+             If the property does not exist at all, surefire leaves the text `@{argLine}` in place
+             and passes it to the JVM, which rejects it as an unrecognised option. So the empty
+             declaration here is what makes a plain `mvn test` work when no agent is running. -->
+        <argLine></argLine>
     </properties>
 </project>

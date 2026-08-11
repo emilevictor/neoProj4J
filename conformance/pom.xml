@@ -106,18 +106,26 @@
                     <systemPropertyVariables>
                         <gie.corpus.skip>${gie.corpus.skip}</gie.corpus.skip>
                     </systemPropertyVariables>
-                    <!-- Determinism: pin locale, charset and timezone so a corpus run is
-                         reproducible regardless of the developer's environment.
-                         Proj4FileReader.java:41 calls toLowerCase() with no Locale, which under
-                         tr_TR turns "ESRI" into "esri" with a dotless i and makes all 2,954 ESRI
-                         codes unresolvable - see reference/performance.md.
+                    <!-- The locale, timezone and charset pin that used to sit here has moved to the
+                         root POM's surefire configuration, so it now covers every module rather than
+                         only this one and golden. Nothing is lost: a surefire <configuration> that
+                         omits argLine inherits the managed one.
 
-                         These MUST be argLine, not systemPropertyVariables. Surefire applies
-                         systemPropertyVariables inside the already-started fork, whereas
-                         Locale.getDefault() and the default charset are initialised during JVM
-                         startup - so setting them that way looks right and does nothing. argLine
-                         becomes real JVM command-line arguments and is applied before init. -->
-                    <argLine>-Duser.language=en -Duser.country=US -Duser.timezone=UTC -Dfile.encoding=UTF-8</argLine>
+                         Two things the version here got wrong, recorded rather than deleted because
+                         they are the kind of mistake that gets a pin removed by whoever checks it:
+
+                           - It blamed `Proj4FileReader.java:41 calls toLowerCase() with no Locale`.
+                             That call is at :76 and reads toLowerCase(Locale.ROOT), already guarded
+                             when the comment was written. The hazard it describes is real and the
+                             count of 2,954 ESRI codes is right; the line it names is not the site.
+                             golden/pom.xml carries the full correction and the three sites that ARE
+                             still unguarded.
+                           - It cited reference/performance.md, which has never existed in this
+                             repository.
+
+                         It also discarded any coverage agent, because a literal argLine with no
+                         @{argLine} in it replaces the property surefire would otherwise expand. -->
+
                 </configuration>
             </plugin>
         </plugins>
