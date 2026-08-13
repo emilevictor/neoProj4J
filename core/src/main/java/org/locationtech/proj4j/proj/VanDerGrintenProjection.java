@@ -120,8 +120,37 @@ public class VanDerGrintenProjection extends Projection {
 		al = c1 / c3 - THIRD * c2 * c2;
 		m = 2. * Math.sqrt(-THIRD * al);
 		d = C2_27 * c2 * c2 * c2 + (c0 * c0 - THIRD * c2 * c1) / c3;
-		if (((t = Math.abs(d = 3. * d / (al * m))) - TOL) <= 1.) {
+		/*
+		 * vandg.cpp:102-106. Upstream hoists the product out and refuses the point rather than
+		 * dividing by it. Without the guard the division is by something within 1e-16 of zero and
+		 * the quotient is meaningless; it usually leaves the `(t - TOL) <= 1.` test below and
+		 * throws anyway, so the guard is mostly a better message - but not always, because a
+		 * numerator of the same tiny order can put the quotient back inside [-1, 1] and buy a
+		 * confident wrong latitude. Refuse instead, as upstream does.
+		 */
+		final double alTimesM = al * m;
+		if (Math.abs(alTimesM) < 1.e-16) throw new ProjectionException(
+				"vandg: no point on the map projects to (" + xyx + ", " + xyy
+						+ "). Recovering the latitude means dividing by " + alTimesM
+						+ ", which is within 1e-16 of zero, so the quotient carries no information "
+						+ "(vandg.cpp, vandg_s_inverse)");
+		if (((t = Math.abs(d = 3. * d / alTimesM)) - TOL) <= 1.) {
 			d = t > 1. ? (d > 0. ? 0. : Math.PI) : Math.acos(d);
+			/*
+			 * vandg.cpp:111-115, and it was missing here. `r` is x^2 + y^2 in units of the
+			 * sphere's radius, so this fires exactly outside the map circle of radius pi - which
+			 * is where +over puts everything past the antimeridian, and where any inverse of an
+			 * out-of-map coordinate lands. Upstream's own comment: "This code path is triggered
+			 * for coordinates generated in the forward path when |long|>180deg and +over".
+			 *
+			 * Without it the +over round trip did not close: the forward of (200, 45) was
+			 * bit-for-bit PROJ's and inverting it gave 41.1257 rather than 45. Off the circle the
+			 * error grew with distance - 32.7 degrees of latitude at (10, 10). Longitude was
+			 * never affected, which is why the defect survived a round-trip check on longitude.
+			 */
+			if (r > PISQ) {
+				d = ProjectionMath.TWOPI - d;
+			}
 			out.y = Math.PI * (m * Math.cos(d * THIRD + PI4_3) - THIRD * c2);
 			if (xyy < 0.) out.y = -out.y;
 			t = r2 + TPISQ * (x2 - y2 + HPISQ);

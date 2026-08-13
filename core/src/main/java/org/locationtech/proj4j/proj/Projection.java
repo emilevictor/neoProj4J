@@ -338,8 +338,8 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
      * <li>{@link #checkForwardDomain} reproduces {@code fwd_prepare}
      *     ({@code 9.8.1:src/fwd.cpp:54-77}) <b>on the raw longitude and latitude</b>, and returns
      *     the clamped latitude;</li>
-     * <li><em>then</em> {@code projectionLongitude} is subtracted and the result wrapped
-     *     ({@code fwd.cpp:105-111});</li>
+     * <li><em>then</em> {@code projectionLongitude} is subtracted and the result wrapped, both
+     *     unconditionally as upstream does them ({@code fwd.cpp:105-112});</li>
      * <li>the raw {@link #project(double, double, ProjCoordinate)} result is tested for
      *     finiteness <b>before</b> the affine post-multiply.</li>
      * </ol>
@@ -458,18 +458,25 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
         // fwd.cpp:40-70, on the RAW coordinate. Both range tests are upstream's, in upstream's
         // order, and both are taken before anything is subtracted from the longitude.
         y = checkForwardDomain(x, y);
-        // fwd.cpp:105-111 -- and only now. `+Infinity` and |lam| > 10 rad can no longer reach this
+        // fwd.cpp:105-112 -- and only now. `+Infinity` and |lam| > 10 rad can no longer reach this
         // arithmetic, so adjlon can no longer launder an infinity into a NaN behind the guard's
         // back.
-        if ( projectionLongitude != 0 ) {
-            x -= projectionLongitude;
-            // fwd_prepare (9.8.1:src/fwd.cpp:109-111) subtracts lam0 unconditionally and
-            // wraps only when `+over` is off. Splitting the two apart matters: folding the
-            // wrap into the same guard would have skipped the SUBTRACTION too under +over,
-            // which is a change of central meridian rather than a change of wrapping.
-            if ( !over )
-                x = ProjectionMath.normalizeLongitude( x );
-        }
+        //
+        // Both steps are unconditional, as upstream's are: fwd_prepare subtracts lam0 at
+        // fwd.cpp:108 and wraps at fwd.cpp:111-112 whenever `+over` is off, and neither line
+        // mentions lam0. Both used to sit inside `if (projectionLongitude != 0)`, which meant that
+        // with no +lon_0 -- by far the commonest case -- a longitude outside [-180, 180] reached
+        // the kernel unwrapped and every projection behaved as though +over were on. The inverse
+        // funnel carried the identical guard and lost it earlier -- see inverseProjectRadians,
+        // where it is recorded as "the second half of the defect" -- so the forward was the last
+        // place the shape survived.
+        //
+        // Nothing inside the antimeridian moves, including +/-180 exactly: adjlon returns its
+        // argument untouched while |lon| < pi + 1e-12. The subtraction is a no-op at
+        // projectionLongitude == 0 for every finite x, -0.0 included.
+        x -= projectionLongitude;
+        if ( !over )
+            x = ProjectionMath.normalizeLongitude( x );
         project(x, y, dst);
         if (!dst.hasValidXandYOrdinates()) {
             throw new ProjectionException(ErrorCause.NUMERICAL_FAILURE, this,

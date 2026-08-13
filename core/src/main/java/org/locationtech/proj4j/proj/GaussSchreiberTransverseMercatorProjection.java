@@ -56,6 +56,65 @@ import org.locationtech.proj4j.util.FastStrictTrig;
  * <p>{@code initialize()} runs twice; every field below is a pure function of
  * {@code projectionLatitude}, {@code scaleFactor}, {@code a} and {@code es}.
  *
+ * <h2>Past {@code 90 / n1} degrees of longitude the answer folds back, and the latitude
+ * changes sign</h2>
+ *
+ * <p>The forward recovers two angles from a single argument and so throws the quadrant
+ * away. {@code Ls1} is built from {@code asin(sinLs1)} ({@code gstmerc.cpp:34}), and the
+ * northing is {@code atan(sinh(Ls) / cos(L))} ({@code gstmerc.cpp:36}) — a one-argument
+ * {@code atan}, not {@code atan2}. Both go wrong together the moment {@code cos(L)} turns
+ * negative, that is when {@code |L| = |n1 * lam|} passes 90 degrees. <b>There is no
+ * {@code atan2} anywhere in {@code gstmerc.cpp}</b> (nor in {@code somerc.cpp}); it is not
+ * that the quadrant is computed and then lost, it is never computed.
+ *
+ * <p>The turning point is therefore {@code |lam| = 90 / n1}. On WGS84 at {@code lat_0=0},
+ * {@code n1 = 1.0033640898209764} and the turn is at
+ * <b>89.698247040172731 degrees</b> from the central meridian. Past it the recovered
+ * longitude is reflected about that value, {@code 180 / n1 - lam}, and the recovered
+ * latitude is <em>negated</em>.
+ *
+ * <p>Measured with {@code +proj=gstmerc +lat_0=0 +ellps=WGS84}, forward then inverse:
+ *
+ * <pre>
+ *   (100, 45)  -&gt;  79.396494080345462, -45.000000000000007
+ *   (120, 45)  -&gt;  59.396494080345491, -45.000000000000014
+ *   (179, 45)  -&gt;   0.396494080345456, -45.000000000000007
+ *   ( 89.5, 45) -&gt; 89.500000000000000,  45.000000000000007   (still inside the turn)
+ * </pre>
+ *
+ * <p>This class reproduces those numbers. At {@code (100, 45)} the forward here is
+ * {@code 5469942.2445444325, -8853794.3954467} against {@code proj}'s
+ * {@code 5469942.244544432, -8853794.395446699}, and the inverse here is
+ * {@code 79.39649408034545, -45.00000000000001} against {@code proj}'s
+ * {@code 79.396494080345462, -45.000000000000007}.
+ *
+ * <p><b>The sign flip is the useful part of that evidence.</b> Agreeing on a folded
+ * longitude could be a coincidence of two similar formulas; agreeing that a northern
+ * latitude comes back southern, to fifteen digits, means this port is walking the same
+ * kernel step for step. The mechanism is visible in the code above: the northing is
+ * {@code atan(sinh(Ls) / cos(L))}, so a negative {@code cos(L)} negates {@code y}, and the
+ * inverse's {@link ConformalLat#phi2} duly returns the mirrored latitude.
+ *
+ * <h2>Why this turns at the same place as {@code somerc}</h2>
+ *
+ * <p>{@code Q->n1} here and {@code Q->c} in
+ * {@link SwissObliqueMercatorProjection} are the same expression,
+ * {@code sqrt(1 + es * cos^4(lat_0) / (1 - es))} — at every {@code lat_0}, not only at zero,
+ * though the two files reach it by different routes ({@code pow(cos, 4.0)} and
+ * {@code / (1 - es)} against a squared-then-squared cosine and a cached
+ * {@code rone_es}). Evaluated in {@code double} they came out bit-identical at
+ * {@code lat_0} = 0, 45 and 46.9524055970347. That is why the two projections turn at the
+ * same longitude, and why they agree on the recovered value to thirteen decimal places
+ * ({@code 79.396494080345462} here against {@code somerc}'s
+ * {@code 79.396494080345477}, 1.5e-14 degrees apart) despite computing entirely different
+ * eastings and northings on the way.
+ *
+ * <p>Under this project's parity doctrine the port is faithful and gets no guard: PROJ
+ * 9.8.1 produces every one of the numbers above and never refuses.
+ *
+ * <p><b>No upstream fix is in flight.</b> {@code src/projections/gstmerc.cpp} is
+ * byte-identical between tag {@code 9.8.1} and current {@code master}.
+ *
  * @see <a href="https://github.com/OSGeo/PROJ/blob/9.8.1/src/projections/gstmerc.cpp">9.8.1
  *      gstmerc.cpp</a>
  */
@@ -91,7 +150,13 @@ public class GaussSchreiberTransverseMercatorProjection extends CylindricalProje
         ys = -n2 * phic;
     }
 
-    /** {@code gstmerc_s_forward}, {@code gstmerc.cpp:24-37}. */
+    /**
+     * {@code gstmerc_s_forward}, {@code gstmerc.cpp:24-37}.
+     *
+     * <p>The {@code asin} on the {@code ls1} line and the one-argument {@code atan} on the
+     * {@code xy.y} line are both upstream's, and both lose the quadrant past
+     * {@code |l| = 90} degrees. See the class comment; not guarded, on purpose.
+     */
     @Override
     protected ProjCoordinate project(double lam, double phi, ProjCoordinate xy) {
         final double l = n1 * lam;
