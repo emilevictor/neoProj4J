@@ -39,7 +39,7 @@ import static org.junit.Assert.fail;
  * the legacy {@code +geoidgrids} path at all. Reproduce with:
  *
  * <pre>
- * export PROJ_DATA=core/src/test/resources/proj4j-data/grids:/opt/homebrew/share/proj
+ * export PROJ_DATA=core/src/test/resources/proj4j-data/grids:&lt;your PROJ install's share/proj&gt;
  * echo "12.5 55.5 0" | cct -d 12 +proj=latlong +geoidgrids=egm96_15_downsampled.gtx \
  *                                +ellps=GRS80
  *   12.500000000000  55.500000000000  -36.394090697107</pre>

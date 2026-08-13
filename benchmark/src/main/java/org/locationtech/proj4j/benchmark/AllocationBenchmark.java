@@ -187,10 +187,11 @@ public class AllocationBenchmark {
     }
 
     /**
-     * Tripwire for the {@code Grid.shift} iterator. {@code Grid.java:89} does
+     * Tripwire for the {@code Grid.shift} iterator. {@code Grid.shift} used to do
      * {@code for (Grid g : grids)} over a {@code List} field, and escape analysis will not reliably
-     * remove that iterator allocation - {@code reference/performance.md} calls for a {@code Grid[]}.
-     * Target 0 B/op.
+     * remove that iterator allocation, so it was rewritten as an indexed loop with a {@code Grid[]}
+     * overload for the bulk path. Target 0 B/op, and it is met - this arm exists to keep the
+     * for-each from coming back.
      *
      * <p>This runs the {@link CrsPair#NAD27_TO_NAD83} sample point, 96W 39N, which is inside CTABLE
      * V2 {@code conus}, so it covers the iterator <i>and</i> the interpolation. It used to be

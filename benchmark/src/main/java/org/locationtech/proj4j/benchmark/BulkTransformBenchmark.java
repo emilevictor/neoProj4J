@@ -56,15 +56,16 @@ import org.openjdk.jmh.annotations.Warmup;
  *
  * <h2>What the arms are for</h2>
  *
- * <p>{@code reference/performance.md} attributes the estimated 2-4x to four separable mechanisms, and
- * the arms are arranged to attribute the measured win to them rather than reporting one aggregate:
+ * <p>A bulk API is expected to beat a single-point loop for several separable reasons, and the arms
+ * are arranged so the measured win can be attributed to each one rather than reported as a single
+ * aggregate number:
  * <ul>
  *   <li>{@link #loopOfSinglePoint} vs {@link #interleaved2DInPlace} - hoisting loop invariants and
  *       megamorphic-to-monomorphic dispatch, together. This is the headline ratio.</li>
  *   <li>{@link #interleaved2DInPlace} vs {@link #structOfArrays} - memory layout alone. Same work,
- *       same invariant hoisting, different array shape. {@code performance.md} calls SoA "the
- *       vectorisation-friendly shape and the fastest variant" and estimates 5-15% at 1e5 points; this
- *       pair is where that estimate becomes a measurement.</li>
+ *       same invariant hoisting, different array shape. Struct-of-arrays is the more
+ *       vectorisation-friendly shape and is expected to be the faster of the two; this pair is where
+ *       that expectation becomes a measurement instead of an assumption.</li>
  *   <li>{@link #interleaved2DInPlace} vs {@link #interleaved3DInPlace} - the cost of carrying a
  *       height, which for the Helmert pairs is not free.</li>
  *   <li>{@link #interleaved2DSrcToDst} vs {@link #interleaved2DInPlace} - whether aliasing

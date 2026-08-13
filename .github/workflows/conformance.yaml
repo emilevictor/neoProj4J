@@ -7,19 +7,18 @@ name: Conformance
 # not sit in the path of a normal build. Blocking vs advisory is stated per job and
 # summarised in .github/workflows/README.md.
 #
-# VERIFICATION STATUS (corpus job, 2026-08-01). The Maven invocation below - flags and all -
-# was run locally on Temurin 21 against a scratch -Dmaven.repo.local, and three controls were
-# executed against it:
+# VERIFICATION STATUS (corpus job). The Maven invocation below - flags and all - has been run
+# outside CI on Temurin 21, against a scratch local Maven repository, with three controls:
 #
-#   1. unmodified              -> exit 0, "7378/7895 genuine passes", diff.regressed 0
+#   1. unmodified              -> exit 0, genuine passes with diff.regressed 0. The current
+#                                 reading is 7,441 / 7,900; it was 7,378 / 7,895 earlier, so
+#                                 quote the pair, never one number of it.
 #   2. one manifest row removed -> exit 1, naming the assertion key as REGRESSED
 #   3. baseline file absent    -> exit 1, naming the ABSENT BASELINE as the cause, not a
 #                                 regression count
 #
-# The previous note here read "not executed locally - there is no JDK and no Maven on the
-# authoring machine", and the command it guarded could not have produced a conformance
-# number at all - see the corpus job's comment. The other two jobs in this file are still
-# unexecuted; treat their first run as their first test.
+# The other two jobs in this file are still unexecuted, and so is this YAML as YAML; treat the
+# first run of each as its first test.
 
 # The push trigger is filtered to the long-lived branches: an unfiltered push trigger
 # alongside pull_request fires this workflow twice for every commit on a PR branch, and
@@ -61,8 +60,9 @@ jobs:
   #
   # THIS JOB NEVER RAN THE SWEEP UNTIL 2026-08-01, AND THE REASON IS WORTH KEEPING.
   # The command was a bare `mvn -B -ntp -Pconformance -pl conformance -am verify`. `-am`
-  # also builds `core`, whose suite carries one expected MetaCRSTest failure, so the
-  # reactor stopped there and the conformance module was reported SKIPPED - measured:
+  # also builds `core`, whose suite at the time carried an expected MetaCRSTest failure
+  # (it passes now), so the reactor stopped there and the conformance module was reported
+  # SKIPPED - measured:
   #
   #     Proj4J ........................ FAILURE [ 25.736 s]
   #     Proj4J PROJ Conformance Suite . SKIPPED
@@ -74,10 +74,10 @@ jobs:
   # A blocking job that has never executed its gate is not a control. golden.yaml had
   # already solved exactly this and the fix is copied from it - see the flag notes below.
   #
-  # MEASURED RUNTIME: ~5 s for the sweep once core is compiled, on an M-series laptop with
-  # a warm scratch repo. The 90-minute budget is therefore wildly generous; it is left
-  # alone until there is a number from a real runner, because a cold Maven cache and a
-  # from-scratch core compile are the whole cost here, not the corpus.
+  # MEASURED RUNTIME: the sweep itself is a few seconds once core is compiled, and the whole
+  # reactor is under ten seconds warm. The 90-minute budget is therefore wildly generous; it
+  # is left alone until there is a number from a real runner, because a cold Maven cache and
+  # a from-scratch core compile are the whole cost here, not the corpus.
   corpus:
     name: Corpus sweep (blocking)
     if: github.event_name != 'schedule'
@@ -118,11 +118,13 @@ jobs:
       #       from a fresh checkout.
       #
       #   -Dtest='org.locationtech.proj4j.conformance.**.*Test'
-      #       This is what gets past core's expected MetaCRSTest failure. NOT
-      #       -Dmaven.test.failure.ignore=true: that flag forces exit 0, so it would also
-      #       ignore THE GATE'S OWN FAILURE and turn this job green while the corpus is
-      #       red. Narrowing gets past core without disarming anything - core simply runs
-      #       no tests in this job.
+      #       Keeps core's suite out of this job entirely, so a red test in core cannot stop
+      #       the reactor before the corpus sweep runs. It was added when core carried an
+      #       expected MetaCRSTest failure; that test passes now, but the flag stays, because
+      #       the alternative anyone reaches for is -Dmaven.test.failure.ignore=true - and
+      #       THAT forces exit 0, so it would also ignore THE GATE'S OWN FAILURE and turn this
+      #       job green while the corpus is red. Narrowing gets past core without disarming
+      #       anything: core simply runs no tests here, and it is ci.yaml's job to test it.
       #
       #       THE DOUBLE STAR IS NOT COSMETIC. golden.yaml writes
       #       `org.locationtech.proj4j.golden.*Test` and that works there only because

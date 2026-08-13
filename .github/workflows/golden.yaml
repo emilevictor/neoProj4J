@@ -16,14 +16,28 @@ name: Golden Master
 # golden/src/main, that is a signal, not an inconvenience". Nothing compiled it, so nothing could
 # fire. This job restores both properties: the compile happens, and the sweep runs.
 #
-# THIS JOB IS RED TODAY, AND THAT IS THE CORRECT OUTCOME. Measured 2026-08-01 on a frozen
-# snapshot of the working tree:
+# THIS JOB IS EXPECTED TO FAIL, AND THAT IS THE CORRECT OUTCOME. Its current assertion reads:
 #
-#     12,023 UNCHANGED · 41,407 CHANGED · 0 ADDED · 0 REMOVED · 39,116 INTENDED · 2,291 UNEXPLAINED
+#     12,005 UNCHANGED · 41,425 CHANGED · 0 ADDED · 0 REMOVED · 39,134 INTENDED · 2,291 UNEXPLAINED
 #
-# The 2,291 are the triage backlog - other streams' in-flight changes that have not yet been
-# claimed by a rule - not a defect in this module and not a reason to soften the job. See
-# golden/README.md's triage sections for the breakdown and the owners.
+# The 2,291 are the triage backlog - other streams' changes that have not yet been claimed by a
+# rule - not a defect in this module and not a reason to soften the job. See golden/README.md's
+# triage sections for the breakdown and the owners. Anything that describes this job as green, or as
+# something that should be green today, is wrong.
+#
+# WHAT IS ACTUALLY CHECKED, because an earlier version of this comment claimed more than the job
+# delivers and the claim was copied into docker/run.sh and golden/README.md before anyone noticed.
+# The criterion is that the six figures above are unchanged - but that comparison is made BY EYE
+# from this job's failure output. Nothing here diffs the produced report against the line above.
+# What the job enforces by itself is: the test ran exactly once and was not skipped, at least 40
+# tests ran in the module with none skipped, the generated table has the same line count as the
+# committed baseline, and GoldenMasterTest fails on any UNEXPLAINED row or on DEAD_RULE /
+# PENDING_RULE_FIRED / EXPIRED_RULE / COUNT_MISMATCH. Since the test is already red, its pass/fail
+# bit carries no information about a change - the counts are the whole signal, and a few hundred
+# rows drifting between UNCHANGED and UNEXPLAINED would pass every automated check here. Task #104
+# is to close that. rules.yaml carries 44 rules,
+# all `status: active` and all with a pinned integer `expected_rows` - count them rather than
+# quoting a number from prose, which has been stale more than once.
 #
 # DO NOT ADD `continue-on-error` TO GET PAST THEM. golden/README.md says so directly, and the
 # reason is that the alternative is strictly better: a `status: pending` rule is visible in the
@@ -77,11 +91,17 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # BLOCKING. Generate the table from the working tree, merge-join it against
-  # golden/baseline/1.4.3, apply golden/rules.yaml, and fail on any UNEXPLAINED row, DEAD_RULE,
-  # PENDING_RULE_FIRED, EXPIRED_RULE or COUNT_MISMATCH.
+  # NOT A PR OR PUSH CHECK - it cannot block a merge, because nothing here triggers on one; see the
+  # de-scope block above. Within its own run it is uncompromising: generate the table from the
+  # working tree, merge-join it against golden/baseline/1.4.3, apply golden/rules.yaml, and fail on
+  # any UNEXPLAINED row, DEAD_RULE, PENDING_RULE_FIRED, EXPIRED_RULE or COUNT_MISMATCH.
+  #
+  # The `name:` below deliberately does not say "blocking", because the triggers do not make it so.
+  # PUT THE WORD BACK IN THE SAME COMMIT that restores a push or pull_request trigger, and take it
+  # out again in the same commit that removes one - a name that claims more than the triggers
+  # deliver is how this file came to describe a gate it did not have.
   golden:
-    name: Golden master (behavioural regression, blocking)
+    name: Golden master (behavioural regression, scheduled)
     runs-on: ubuntu-latest
     # The sweep itself is ~20 s once core is built; the budget is almost entirely the reactor
     # build and a cold Maven cache. Generous rather than tuned - tighten it once there is a
@@ -126,14 +146,15 @@ jobs:
       #       path and are not built.
       #
       #   -Dtest='org.locationtech.proj4j.golden.*Test'
-      #       NOT an optimisation - it is what keeps the job honest. `-am` also builds `core`,
-      #       whose suite currently has one expected failure (MetaCRSTest). Without narrowing, the
-      #       reactor stops in `core` and golden never runs, so the usual workaround is
+      #       NOT an optimisation - it is what keeps the job honest. `-am` also builds `core`, and
+      #       any red test there stops the reactor before golden runs. (It was added when core
+      #       carried an expected MetaCRSTest failure; that test passes now, but the exposure is
+      #       structural and the flag stays.) The usual workaround for that is
       #       `-Dmaven.test.failure.ignore=true` - and THAT FLAG WOULD ALSO IGNORE THE GATE'S OWN
       #       FAILURE, turning this job green while the gate is red. The local diagnostic command
       #       in golden/README.md uses it deliberately, because there the goal is to read the
-      #       report; here the goal is to fail. Narrowing gets both: core's red test is never
-      #       run in this job, and golden's failures stay fatal.
+      #       report; here the goal is to fail. Narrowing gets both: core's tests are never run in
+      #       this job, and golden's failures stay fatal.
       #
       #   -Dsurefire.failIfNoSpecifiedTests=false
       #       Required, and it looks backwards. With `-Dtest=`, surefire fails a module in which

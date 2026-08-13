@@ -1,15 +1,8 @@
 # CI workflows
 
-CI is where the properties that cannot be checked on one laptop get checked: a second architecture, a
-hostile locale, and the corpus sweep. That is why there is more here than a single build job.
-
-> **Retracted, and worth keeping as a caution.** The first version of this file opened *"There is no
-> JDK and no Maven on the machine these workflows were authored on, so CI is the only place this
-> project is verified at all."* **That was wrong** — Temurin 21 and Maven 3.9.16 are installed, and
-> Gradle-managed JDKs were there all along, in a directory the original survey did not check. Several
-> design decisions below were made under the false belief and are flagged where they were. Anything
-> here that says "could not be confirmed locally" should be read as a claim about a specific past
-> moment, not a standing fact — check before trusting it.
+CI is where the properties that cannot be checked on a single developer machine get checked: a second
+architecture, a hostile locale, and the corpus sweep. That is why there is more here than a single
+build job.
 
 Five workflows:
 
@@ -18,15 +11,15 @@ Five workflows:
   the corpus never sits in the path of a normal build.
 - **`determinism.yaml`** — the cross-architecture bit-identity proof. Separate from `ci.yaml`'s
   `determinism` job, which checks only that the suite still *passes* per environment; this one
-  compares raw-bit output between architectures. It is also **the only workflow here whose Java side
-  has actually been executed** — see the bottom of this file.
-- **`golden.yaml`** — the golden-master behavioural regression sweep. Added 2026-08-01.
-- **`bench.yaml`** — Tiers 1 and 2 of the performance gate. Added 2026-08-01.
+  compares raw-bit output between architectures.
+- **`golden.yaml`** — the golden-master behavioural regression sweep. **Manual and weekly only**; it
+  is not a PR or push check. See below.
+- **`bench.yaml`** — Tiers 1 and 2 of the performance gate.
 
-> **Why the last two were added, and what their absence had cost.** `golden` and `benchmark` are
-> absent from the root pom's default `<modules>` — deliberately, so `mvn install` stays fast and
-> `core` stays dependency-free — and until 2026-08-01 **no workflow passed `-Pgolden` or `-Pbench`
-> either**. The consequences were not theoretical:
+> **Why `golden.yaml` and `bench.yaml` exist, and what their absence had cost.** `golden` and
+> `benchmark` are absent from the root pom's default `<modules>` — deliberately, so `mvn install`
+> stays fast and `core` stays dependency-free — and for a long time **no workflow passed `-Pgolden`
+> or `-Pbench` either**. The consequences were not theoretical:
 >
 > * The tree's only behavioural change detector ran **only when a human typed the command**.
 > * `golden/pom.xml` states a signal — *"if a change to core breaks the default-profile compile of
@@ -35,19 +28,26 @@ Five workflows:
 > * `benchmark/pom.xml` calls its Tier 1 and Tier 2 checks *"blocking PR gates"*. **No job invoked
 >   `GateChecker`.**
 >
-> Both new jobs were **blocking and red** when added, on real findings, and that was the intended
-> state. **`bench` / `gate` is now GREEN** — the baselines were captured and committed, and the job
-> was re-run to confirm it (see below). `golden` is still red on its triage backlog, which is what
-> it is for. See "Jobs expected to fail today" below. Neither may be made `continue-on-error` —
-> `golden/README.md` says so explicitly, and the reason generalises: a `status: pending` rule or an
-> unpinned-but-named threshold is visible in the diff and self-correcting, while a
-> `continue-on-error` job is invisible and fails never.
+> Both jobs were **blocking and red** when added, on real findings, and that was the intended state.
+> They have since gone different ways. **`bench` / `gate` is GREEN and still blocking** — the
+> baselines were captured and committed, and the job was re-run to confirm it. **`golden` was
+> de-scoped from the PR and push checks** in commit `052e627`: it is red on a real 2,291-row triage
+> backlog that nobody is working through right now, so rather than leave a permanently failing check
+> on every pull request, its triggers are `schedule` (weekly) and `workflow_dispatch` only. The job
+> itself is unchanged and still fails on the backlog when invoked.
+>
+> Neither may be made `continue-on-error`, and a catch-all rule in `rules.yaml` is equally banned —
+> `golden/README.md` says so explicitly, `GoldenRules.java` names the catch-all as the exact failure
+> its design prevents, and the reason generalises: a `status: pending` rule or an unpinned-but-named
+> threshold is visible in the diff and self-correcting, while a `continue-on-error` job is invisible
+> and fails never. Removing a trigger makes a gate **absent**, which is honest; softening it makes
+> the gate **lie**.
 
 ## Jobs
 
 | Workflow | Job | Blocking? | Trigger | What it proves | Expected runtime |
 |---|---|---|---|---|---|
-| `ci.yaml` | `build-and-test` (JDK 17, 21) | **blocking** — 21 green, **17 fails today** | push, PR | All seven reactor modules compile and their fast tests pass on both supported JDKs. This is the gate. | ~4–8 min per leg |
+| `ci.yaml` | `build-and-test` (JDK 17, 21) | **blocking** — green on both legs | push, PR | All seven reactor projects compile and their fast tests pass on both supported JDKs. This is the gate. | ~4–8 min per leg |
 | `ci.yaml` | `jdk-ea` | advisory | push, PR | The next JDK line (27-ea) still accepts `<release>8</release>` and the felix bundle plugin still works. Early warning, months ahead of anyone using that JDK. | ~5 min |
 | `ci.yaml` | `jdk8-runtime` | advisory | push, PR | Jars built on JDK 21 actually *run* on a real JDK 8, and every emitted class file is class-file major version 52. Keeps `<release>8</release>` from being an unverified promise. | ~5 min |
 | `ci.yaml` | `determinism` — `en_US/UTF-8/UTC/x64` | **blocking** | push, PR | `core` passes in the reference environment. | ~3 min |
@@ -59,21 +59,22 @@ Five workflows:
 | `conformance.yaml` | `corpus` | **blocking** — green today | push, PR | `mvn -Pconformance -pl conformance -am verify` with `-Dtest='…conformance.**.*Test'`: the full vendored gie/GIGS sweep (**7,441 / 7,900**, `regressed 0`), diffed against the checked-in expected-outcome manifest. Catches any pass→fail regression. | sweep itself **0.7 s**, whole reactor **8 s** warm; the 90-min timeout is all cold cache, untuned |
 | `conformance.yaml` | `vendored-corpus-matches-upstream` | **blocking** | push, PR | The vendored corpus is byte-for-byte what PROJ `9.8.1` (`f08fa86…`) produces: manifest verified with `shasum -a 256 -c`, `sync-upstream.sh` re-run against a real PROJ checkout, then `git diff --exit-code`. | ~4–6 min (a full PROJ clone dominates) |
 | `conformance.yaml` | `upstream-drift` | advisory | weekly cron (Mon 04:17 UTC), `workflow_dispatch` | What syncing from PROJ **`master`** instead of the pin would change. A news feed, so upstream corpus changes are known before re-pin time. Never fails the build. | ~4–6 min |
-| `golden.yaml` | `golden` | **DE-SCOPED 2026-08-05** — manual/scheduled only, still red on the 2,291-row backlog | `schedule` (weekly), `workflow_dispatch` | `mvn -Pgolden -pl golden -am verify`: generate 53,430 rows from the working tree, merge-join against `baseline/1.4.3`, apply `rules.yaml`. Fails on any `UNEXPLAINED` row, `DEAD_RULE`, `PENDING_RULE_FIRED`, `EXPIRED_RULE` or `COUNT_MISMATCH`. | ~20 s of sweep on top of the reactor build |
+| `golden.yaml` | `golden` | **not a PR or push check** — de-scoped in `052e627`; runs weekly and on demand, and is **expected to fail** on the 2,291-row backlog | `schedule` (weekly), `workflow_dispatch` | `mvn -Pgolden -pl golden -am verify`: generate the table from the working tree, merge-join against `baseline/1.4.3`, apply `rules.yaml`. Fails on any `UNEXPLAINED` row, `DEAD_RULE`, `PENDING_RULE_FIRED`, `EXPIRED_RULE` or `COUNT_MISMATCH`. | ~20 s of sweep on top of the reactor build |
 | `bench.yaml` | `gate` | **blocking** — **green today** | push, PR, `workflow_dispatch` | `run-gate.sh --quick --require-baseline`: Tier 1 allocation bytes/op and Tier 2 deterministic transcendental call counts, over **245 arms** in 10 shards, **245 gated, 0 EXCLUDED**. | **21.4 min** measured for `--quick` (Temurin 21 / aarch64, in the container, 2026-08-03; was 15.8 min at 181 arms); a full run is ~90 min. Still never timed on a runner |
 
 ## Jobs expected to fail today, and why
 
-> **Every figure in this section was re-derived on 2026-08-02 by running the job's exact command**,
-> not carried forward. Four of them had gone stale — the corpus totals, the golden rule count, the
-> whole `bench` entry, and the absence of `build-and-test`. Numbers here are true once; re-measure
-> before quoting.
+> **Every figure in this section is re-derived by running the job's exact command**, never carried
+> forward. Several have gone stale before — the corpus totals, the golden rule count, the whole
+> `bench` entry, and the absence of `build-and-test`. Numbers here are true once; re-measure before
+> quoting.
 
-- **~~`build-and-test` / the JDK 17 leg~~ — FIXED 2026-08-02. The three tests now SKIP, with the
-  reason printed, and a skip is reported as a skip.** Re-measured in the container on 2026-08-03:
-  `mvn -B clean install` exits **0** with javadoc enabled, all seven reactor modules, **2,320 tests
-  and 0 failures, 4 skipped** (`core` **1,917** / 3 skipped, `conformance` 345 / 1 skipped, `db` 52,
-  `geoapi` 6, `grids-us-legacy` 0), in 223 surefire report files.
+- **~~`build-and-test` / the JDK 17 leg~~ — FIXED. The three tests now SKIP, with the reason
+  printed, and a skip is reported as a skip.** `mvn -B clean install` exits **0** with javadoc
+  enabled across the whole default reactor. Per-module surefire counts on the current tree: `core`
+  **2,141** with **zero skipped**, `db` **75**, `geoapi` **12**, `grids-us-legacy` 0, and
+  `conformance` only its unit tests — the corpus sweep is behind `-Pconformance` and is
+  `conformance.yaml`'s business, not this job's.
 
   The finding as recorded was: the JDK **17** leg failed on three `core` tests that have nothing to
   do with the build — `FastStrictTrigAllocationTest.directCallsAllocateNothing`,
@@ -127,25 +128,29 @@ Five workflows:
 - **`jdk-ea`** goes yellow rather than red whenever Adoptium has no `27-ea` build. That is the
   correct outcome for an advisory signal; bump the version each time a JDK GAs.
 
-- **`golden` / `golden`.** Still red, on **2,291 `UNEXPLAINED` rows**. Re-measured 2026-08-03 in the
-  container by running the job's exact command (exit 1):
+- **`golden` / `golden`.** Not a PR or push check any more — see the de-scope note at the top of this
+  file — but when it is run, weekly or on demand, it is **expected to fail**, on **2,291
+  `UNEXPLAINED` rows**. The gate is that the golden *report* is unchanged against the baseline, not
+  that the test passes; a doc that implies `golden` should be green is wrong. Its current assertion
+  reads (exit 1):
 
   ```
-  12,012 UNCHANGED · 41,418 CHANGED · 0 ADDED · 0 REMOVED · 39,127 INTENDED · 2,291 UNEXPLAINED
+  12,005 UNCHANGED · 41,425 CHANGED · 0 ADDED · 0 REMOVED · 39,134 INTENDED · 2,291 UNEXPLAINED
   ```
 
-  **The headline has now held at 2,291 across three readings while the line underneath it moved
-  twice**, and that is the reusable point, not a coincidence:
+  **The headline has now held at 2,291 across four readings while the line underneath it moved every
+  time**, and that is the reusable point, not a coincidence:
 
-  | date | UNCHANGED | CHANGED | INTENDED | UNEXPLAINED |
+  | reading | UNCHANGED | CHANGED | INTENDED | UNEXPLAINED |
   |---|---:|---:|---:|---:|
   | 2026-08-01 | 12,023 | 41,407 | 39,116 | **2,291** |
   | 2026-08-02 | 12,014 | 41,416 | 39,125 | **2,291** |
   | 2026-08-03 | 12,012 | 41,418 | 39,127 | **2,291** |
+  | current | 12,005 | 41,425 | 39,134 | **2,291** |
 
-  Each time, rows moved from UNCHANGED into CHANGED and were **all** absorbed by rules. The last two
+  Each time, rows moved from UNCHANGED into CHANGED and were **all** absorbed by rules. Two of them
   are `LambertAzimuthalEqualAreaProjection`'s `Math.hypot` → `MathHelpers.norm2` conversion, claimed
-  by the new rule `NUM-LAEA-HYPOT-TO-NORM2` with `expected_rows: 2` and both keys **enumerated** —
+  by the rule `NUM-LAEA-HYPOT-TO-NORM2` with `expected_rows: 2` and both keys **enumerated** —
   `proj4-epsg.csv:00619` (EPSG:4326→2163) and `proj4-epsg.csv:01495` (EPSG:4326→3409). **A stable
   headline is not a stable measurement — check the whole line.**
 
@@ -156,13 +161,12 @@ Five workflows:
 
   The backlog is other streams' changes that no rule has claimed yet, and it belongs to those streams,
   not to this workflow. `golden/README.md`'s triage sections break it down by owner. **No
-  `COUNT_MISMATCH`, no `DEAD_RULE`, no `EXPIRED_RULE`, no `PENDING_RULE_FIRED`** in the same run, and
-  `GoldenRulesTest` is 14/14 green. There are now **42 rules**, not the 41 this file said a day ago
-  nor the 38 `golden/README.md` said before that; all 42 are `status: active` and all 42 have a pinned
-  integer `expected_rows` — counted two ways, `grep -c '^  - id:'` and a YAML parse, which agree, and
-  the gate prints `rules.yaml: 42/42 rules carry a pinned expected_rows` as a third. The nine `TBD`
-  tokens left in `rules.yaml` are all inside comments recording why something is *not* TBD. The job
-  goes green when the backlog is claimed, one rule at a time.
+  `COUNT_MISMATCH`, no `DEAD_RULE`, no `EXPIRED_RULE`, no `PENDING_RULE_FIRED`** in the same run.
+  There are **44 rules** — this file has said 38, 41 and 42 at various points, so count rather than
+  quote. All 44 are `status: active` and all 44 carry a pinned integer `expected_rows`, counted two
+  ways (`grep -c '^  - id:'` and a YAML parse, which agree), with the gate's own
+  `rules.yaml: 44/44 rules carry a pinned expected_rows` line as a third. The job goes green when
+  the backlog is claimed, one rule at a time.
 
 - **`bench` / `gate` is no longer in this list — it is GREEN.** Re-derived 2026-08-03 in the container
   (`./docker/run.sh bench`, which runs the job's exact command):
@@ -213,7 +217,7 @@ Five workflows:
   > `Unable to find the resource: /META-INF/BenchmarkList` if the benchmarks jar was built on
   > **JDK 23 or newer**, because javac no longer runs annotation processors found on the classpath
   > by default and JMH's generator is exactly that. Nothing is wrong with the gate — build with the
-  > JDK the workflow pins (21). Seen here with Maven running on Homebrew OpenJDK 26.
+  > JDK the workflow pins (21). Observed with Maven running on a JDK 26 installation.
 
 ## Design notes worth not rediscovering
 
@@ -222,9 +226,12 @@ flag, so JDK 8 cannot run this build at all. Bytecode-level Java 8 compatibility
 `jdk8-runtime` instead: compile on a modern JDK, fork the *test* JVM onto a real JDK 8 with surefire's
 `-Djvm=…`, then sweep every class file through JDK 8's `javap`.
 
-**No JDK 11 leg.** Not added, because it could not be confirmed. Every plugin pinned in the root pom
-is nominally JDK 11 compatible, but there is no JDK on the authoring machine to check with, and a
-matrix leg asserting an untested claim is worse than no leg. Add it once someone has watched it pass.
+**No JDK 11 leg in `ci.yaml`.** Not added, because it has not been confirmed. Every plugin pinned in
+the root pom is nominally JDK 11 compatible, and `core`'s classes compiled with `--release 8` have
+been shown to load and run on Temurin 11 on both aarch64 and x86-64 — but nobody has watched
+`mvn clean install` itself complete on JDK 11, and a matrix leg asserting an untested claim is worse
+than no leg. `determinism.yaml` does run a JDK 11 build leg, so its first green run answers the
+question; add the leg here then.
 
 **The `adopt` → `temurin` change.** AdoptOpenJDK was renamed Eclipse Temurin in 2021; `adopt` is
 deprecated in `setup-java` and resolves to an archive that receives no new releases. Same vendor,
@@ -327,13 +334,13 @@ same day. Do not "fix" that to make the numbers agree. Re-check with
 `gh api repos/actions/<name>/releases/latest --jq .tag_name` before the next bump rather than
 inferring from this list, which is a snapshot.
 
-**`conformance.yaml`'s `corpus` job is now a second exception, on both its Maven and its shell
-side.** Its two steps were extracted from this YAML by `yaml.safe_load` and executed verbatim
-against a scratch `-Dmaven.repo.local`, under all three controls tabulated at the end of this file.
-The other two jobs in that file remain unexecuted.
+**`conformance.yaml`'s `corpus` job has been exercised on both its Maven and its shell side.** Its
+two steps were extracted from this YAML by `yaml.safe_load` and executed verbatim against a scratch
+local Maven repository, under all three controls tabulated at the end of this file. The other two
+jobs in that file remain unexecuted.
 
-**`determinism.yaml` is the exception, and only on its Java side.** The tests it runs were executed
-locally on five JDK/instruction-set combinations before the YAML was written:
+**`determinism.yaml`'s Java side has the deepest coverage of anything here.** The tests it runs were
+executed outside CI on five JDK/instruction-set combinations before the YAML was written:
 
 | JDK | `os.arch` | `StrictMath.sin` | result |
 |---|---|---|---|
@@ -347,11 +354,11 @@ locally on five JDK/instruction-set combinations before the YAML was written:
 across two instruction sets and both `StrictMath` implementations. The two-phase Maven invocation and
 the surefire-count guard were also run locally. The **YAML itself has still never executed.**
 
-**Executed locally on 2026-08-02, so no longer in the unvalidated set:**
+**Executed outside CI, so no longer in the unvalidated set:**
 
 * **`ci.yaml` / `build-and-test`'s only command**, `mvn -B clean install`, on three JDKs. Exit 0 on
-  Temurin 21.0.11 and on Homebrew OpenJDK 26.0.2; exit 1 on Corretto 17.0.20 for the three `core`
-  allocation-premise tests described above.
+  Temurin 21.0.11 and on OpenJDK 26.0.2; exit 1 on Corretto 17.0.20 for the three `core`
+  allocation-premise tests described above, before they were fixed.
 * **`ci.yaml` / `jdk8-runtime`'s bytecode sweep**, extracted from the YAML by `yaml.safe_load` and
   run against the real built tree inside `eclipse-temurin:8-jdk` with a **real Temurin 8.0.492** —
   1,082 class files, all class-file major 52. Four controls; see the section below, one of which
@@ -433,8 +440,8 @@ parsers are no longer assumptions:
 ## `conformance.yaml`'s `corpus` job — reported here, fixed 2026-08-01
 
 `corpus` used to run `mvn -B -ntp -Pconformance -pl conformance -am verify`. `-am` builds `core`,
-whose suite currently has one expected failure (`MetaCRSTest`), so the reactor stopped in `core` and
-**the corpus sweep never ran**. Measured before the fix:
+whose suite at the time carried an expected failure (`MetaCRSTest`), so the reactor stopped in
+`core` and **the corpus sweep never ran**. Measured before the fix:
 
 ```
 Proj4J ........................ FAILURE [ 25.736 s]

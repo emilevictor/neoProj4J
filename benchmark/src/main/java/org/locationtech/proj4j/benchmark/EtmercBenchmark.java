@@ -37,25 +37,29 @@ import org.openjdk.jmh.annotations.Warmup;
  * Isolates the transverse-Mercator algorithm decision, with no {@code BasicCoordinateTransform}
  * envelope and no datum work.
  *
- * <p>Two algorithms are registered ({@code Registry.java:348-349,355}) and both are reachable from
- * shipped EPSG codes:
+ * <p>Two classes are registered, and both are reachable from shipped EPSG codes:
  * <ul>
- *   <li>{@code +proj=etmerc} / {@code +proj=utm} - {@code ExtendedTransverseMercatorProjection},
- *       the Poder/Engsager analogue. Allocates two {@code new double[1]} out-params per call and
- *       calls the non-intrinsified {@code Math.hypot} twice; {@code reference/performance.md} names
- *       it <b>proj4j's most expensive projection</b>.</li>
- *   <li>{@code +proj=tmerc} - {@code TransverseMercatorProjection}, the Evenden/Snyder series,
- *       cheaper and less accurate, and carrying three confirmed coefficient defects
- *       ({@code reference/numerics.md} rows 1-4 of the E/S list).</li>
+ *   <li>{@code +proj=etmerc} - {@code ExtendedTransverseMercatorProjection}, the Poder/Engsager
+ *       series: accurate far from the central meridian, and the more expensive of the two.</li>
+ *   <li>{@code +proj=tmerc} - {@code TransverseMercatorProjection}, which carries both algorithms
+ *       and PROJ 9.8.1's own selection rules.</li>
  * </ul>
  *
- * <p><b>Parameterised across the 3-degree seam.</b> The E/S series degrades with distance from the
- * central meridian; {@code builtins.gie:7466,7472} disables a round-trip for
- * {@code +algo=evenden_snyder} at 6 degrees, and upstream's own accuracy note puts the Poder/Engsager
- * advantage at 0.9 mm at 6 degrees growing without bound beyond 20. The parameter is
+ * <p><b>What the {@code tmerc*} arms measure today is NOT the Evenden/Snyder series.</b>
+ * {@code TransverseMercatorProjection}'s default is {@code Algorithm.PODER_ENGSAGER}, matching PROJ
+ * 9.8.1, and it runs that by delegating to an {@code ExtendedTransverseMercatorProjection} it holds
+ * as a field. So the setup here - a bare {@code +proj=tmerc} string with no {@code +approx} and no
+ * {@code +algo} - measures the Poder/Engsager kernel plus one delegation hop, and the
+ * {@code etmerc}-vs-{@code tmerc} ratio is currently the cost of that hop, not the cost of choosing
+ * an algorithm. To measure the truncated series, the string needs {@code +approx} or
+ * {@code +algo=evenden_snyder}; read {@code TransverseMercatorProjection}'s "Which algorithm runs"
+ * section before quoting any number from this class.
+ *
+ * <p><b>Parameterised across the 3-degree seam.</b> The truncated series degrades with distance from
+ * the central meridian, which is why the seam is worth sampling at all. The parameter is
  * {@code deltaLonDeg}, the offset from the central meridian, sampled at 0 / 1.5 / <b>3</b> / 6 / 20.
- * Cost is expected to be flat in {@code deltaLonDeg} for both algorithms - if it is not, some
- * iteration count is data-dependent, which is itself a finding and a determinism hazard.
+ * Cost is expected to be flat in {@code deltaLonDeg} for both arms - if it is not, some iteration
+ * count is data-dependent, which is itself a finding and a determinism hazard.
  *
  * <p>Uses the public {@code projectRadians}/{@code inverseProjectRadians} entry points rather than
  * the protected {@code project(double,double,ProjCoordinate)}. That includes the central-meridian

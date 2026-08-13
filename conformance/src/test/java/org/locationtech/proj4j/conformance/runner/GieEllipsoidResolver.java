@@ -26,8 +26,7 @@ import org.locationtech.proj4j.gie.GieComparator;
  *
  * <p>{@code proj_lp_dist} calls {@code geod_inverse(P->geod, ...)}, and {@code P->geod} was
  * initialised from {@code P->a} and {@code P->f} — so the metric depends on the operation's own
- * ellipsoid. Two defaults are in play and they are not the same one
- * ({@code reference/gie-comparator.md}, trap 4):
+ * ellipsoid. Two defaults are in play and they are not the same one:
  *
  * <ul>
  *   <li>a bare {@code operation +proj=X} naming no ellipsoid gets <strong>WGS84</strong>
@@ -49,7 +48,7 @@ import org.locationtech.proj4j.gie.GieComparator;
  *
  * <p>That is why this class reads the argument text rather than asking proj4j to parse it: full
  * fidelity to {@code pj_ellipsoid}'s first-match-wins and modifier rules
- * ({@code reference/param-semantics.md}) buys nothing here, while a second implementation of those
+ * buys nothing here, while a second implementation of those
  * rules living in test scope would be a liability. What is reproduced is the part that is not a
  * relative error, namely <em>which default applies</em>, and explicit shape parameters, which are
  * the cases the corpus uses on purpose ({@code gie/ellipsoid.gie} is built out of them).

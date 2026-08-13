@@ -37,7 +37,7 @@ import org.locationtech.proj4j.datum.Grid;
  *
  * <p>Commands, verbatim:
  * <pre>
- * PROJ_DATA=&lt;dir with conus, ntv1_can.dat, ntv2_0_downsampled.gsb&gt;:/opt/homebrew/share/proj
+ * PROJ_DATA=&lt;dir with conus, ntv1_can.dat, ntv2_0_downsampled.gsb&gt;:&lt;your PROJ install's share/proj&gt;
  *
  * cs2cs -f "%.10f" +proj=longlat +ellps=clrk66 +nadgrids=conus \
  *              +to +proj=longlat +datum=NAD83                      &lt; points

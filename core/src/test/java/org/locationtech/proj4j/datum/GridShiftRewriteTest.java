@@ -40,9 +40,8 @@ import org.locationtech.proj4j.util.PolarCoordinate;
  *
  * <p>{@code shift} built two {@link PolarCoordinate}s and an {@code Iterator}; {@code nad_cvt}
  * built three more; {@code nad_intr} built four <em>per call</em> and is called up to eleven times
- * per inverted point. {@code reference/performance.md} priced the inverse path at <b>up to 49
- * allocations per vertex</b> — 4.9 million objects for one 100,000-vertex geometry, on the path the
- * consumer runs per row in a Spark executor. Everything is now a local {@code double}, and the
+ * per inverted point — dozens of short-lived objects per vertex, on the path a consumer runs once
+ * per row in a Spark executor. Everything is now a local {@code double}, and the
  * caller's own {@link ProjCoordinate} is the only scratch.
  *
  * <h2>The two risks the rewrite carries, and the test for each</h2>

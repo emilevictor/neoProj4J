@@ -28,12 +28,13 @@ import org.locationtech.proj4j.CoordinateTransformFactory;
  * parameterised benchmark and the op-count baseline at once, with no other edit. If the pairs were
  * eight string literals per benchmark they would drift apart within a release.
  *
- * <p><b>Each pair is here because it exercises a distinct cost mechanism</b>, not for coverage.
- * The sample point is pinned per pair because the Tier 2 op counts are only deterministic for a
- * fixed input - iterative inverses take a data-dependent number of trips, which is the whole
- * reason {@code reference/numerics.md} insists on fixed iteration counts.
+ * <p><b>Each pair is here because it exercises a distinct cost mechanism</b>, not for coverage. Each
+ * constant's own javadoc below says which mechanism, and that is the definition of the set - there
+ * is no list of these eight anywhere else.
  *
- * @see reference/performance.md "The 8 representative CRS pairs"
+ * <p>The sample point is pinned per pair because the Tier 2 op counts are only deterministic for a
+ * fixed input: an iterative inverse takes a data-dependent number of trips, so an unpinned input
+ * would make the counts vary and the tier would flake.
  */
 public enum CrsPair {
 
@@ -49,11 +50,11 @@ public enum CrsPair {
     WGS84_TO_WEBMERCATOR("EPSG:4326", "EPSG:3857", 8.5, 47.4, 100.0),
 
     /**
-     * UTM zone 33N - <b>proj4j's most expensive projection</b>.
-     * {@code Registry.java:274} maps {@code +proj=utm} to {@code ExtendedTransverseMercatorProjection},
-     * which allocates two {@code new double[1]} out-params per call and invokes the
-     * non-intrinsified {@code Math.hypot} twice. Sample longitude is the zone's central meridian
-     * region so the series converges normally rather than in its degraded far-from-CM regime.
+     * UTM zone 33N - the transverse-Mercator path, and one of the more expensive projections here.
+     * {@code Registry} maps both {@code +proj=utm} and {@code +proj=tmerc} to
+     * {@code TransverseMercatorProjection}, which holds the Poder/Engsager kernel as its exact
+     * delegate. Sample longitude is in the zone's central-meridian region so the series converges
+     * normally rather than in its degraded far-from-CM regime.
      */
     WGS84_TO_UTM33N("EPSG:4326", "EPSG:32633", 15.0, 47.4, 100.0),
 
@@ -96,17 +97,20 @@ public enum CrsPair {
     NAD27_TO_NAD83("EPSG:4267", "EPSG:4269", -96.0, 39.0, 100.0),
 
     /**
-     * Albers Equal Area CONUS. The iterative inverse: {@code authlat}/{@code qsfn} today, an
-     * {@code AuthalicLat} Clenshaw series after {@code reference/numerics.md} row 4. This is the
-     * pair whose op counts should <i>drop sharply</i> when that lands - a Tier 2 baseline refresh
-     * with a smaller count is the expected, correct outcome, not a breach.
+     * Albers Equal Area CONUS. The equal-area inverse. {@code AlbersProjection} now holds an
+     * {@code org.locationtech.proj4j.util.AuthalicLat}, so this pair runs the Clenshaw series
+     * rather than the old iterative {@code authlat}/{@code qsfn} pair, and its op counts fell
+     * accordingly. Keep it: it is the pair that would show a regression back to an iteration, and a
+     * Tier 2 refresh with a <i>smaller</i> count here is the expected, correct outcome of further
+     * series work, not a breach.
      */
     WGS84_TO_ALBERS_CONUS("EPSG:4326", "EPSG:5070", -96.0, 39.0, 100.0),
 
     /**
-     * Geocentric target. {@code +proj=geocent}, where {@code GeocentProjection} constructs a
-     * <b>new {@code GeocentricConverter} per call</b>, so this is the pair Tier 1 watches for the
-     * allocation fix.
+     * Geocentric target. {@code +proj=geocent}, where {@code GeocentProjection} used to construct a
+     * <b>new {@code GeocentricConverter} per call</b>; it now builds one at initialisation and keeps
+     * it. This is the pair Tier 1 watches to make sure that stays true - see the
+     * {@code allocation-geocentric-converter} rule, pinned at 0.
      */
     WGS84_TO_GEOCENTRIC("EPSG:4326", "EPSG:4978", 8.5, 47.4, 100.0);
 

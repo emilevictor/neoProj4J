@@ -226,10 +226,10 @@ public class CRSCacheTest {
     }
 
     /**
-     * The record correction, asserted rather than asserted-in-prose. {@code performance.md} said
-     * this class "memoises null on IOException". It did not: {@code computeIfAbsent} installs no
-     * mapping for a null result. A genuine "no such code" is now memoised - and the test proves the
-     * memoisation is real by requiring the entry to be retained.
+     * Memoisation of a genuine null, asserted rather than asserted-in-prose. It did not happen
+     * before: {@code computeIfAbsent} installs no mapping for a null result. A genuine "no such
+     * code" is now memoised - and the test proves the memoisation is real by requiring the entry to
+     * be retained.
      */
     @Test
     public void aGenuineNullFromTheReverseLookupIsMemoisedAndCorrect() {

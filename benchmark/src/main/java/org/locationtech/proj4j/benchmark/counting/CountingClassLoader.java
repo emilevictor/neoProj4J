@@ -28,7 +28,7 @@ import java.io.InputStream;
  * <h2>Why a class loader, and not the obvious alternatives</h2>
  * <ul>
  *   <li><b>A facade in {@code core}</b> would put a counter increment on the hot path of a published
- *       library. Non-starter, and {@code reference/performance.md} says "test-only" for this reason.</li>
+ *       library. Non-starter: the counting facade is test-only by policy, for exactly that reason.</li>
  *   <li><b>A {@code java.lang.instrument} agent or an ASM transformer</b> would work, but adds a
  *       bytecode-library dependency and an agent-attach step to a gate that has to run on every PR.</li>
  *   <li><b>Source-level counting</b> (a script that greps for {@code Math.} calls) counts <i>call

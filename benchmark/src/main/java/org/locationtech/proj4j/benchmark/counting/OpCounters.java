@@ -30,21 +30,22 @@ public final class OpCounters {
     /**
      * The counted operations.
      *
-     * <p>The first ten are the set {@code reference/performance.md} names for Tier 2:
-     * {@code sin/cos/tan/pow/exp/log/atan/atan2/sqrt/hypot}. The rest are counted as well because
-     * they are equally deterministic and cost nothing extra to tally, and because two of them matter
-     * for specific rows of {@code reference/numerics.md}: {@code log1p} and {@code sinh} are what the
-     * {@code tsfn} and {@code ConformalLat} rewrites trade {@code pow} and {@code tan} <i>for</i>, so a
-     * gate that counted only the ten would see the saving and not the cost.
+     * <p>The first ten - {@code sin cos tan pow exp log atan atan2 sqrt hypot} - are the
+     * transcendentals core's projection kernels actually spend their time in, and they are the set
+     * Tier 2 was built around. The rest are counted as well because they are equally deterministic
+     * and cost nothing extra to tally, and because two of them are load-bearing: {@code log1p} and
+     * {@code sinh} are what the {@code tsfn} and {@code ConformalLat} rewrites trade {@code pow} and
+     * {@code tan} <i>for</i>, so a gate that counted only the ten would see the saving and not the
+     * cost.
      *
      * <p><b>Ordinal order is the wire format.</b> {@code baseline/op-counts.json} is keyed by name,
      * not position, so inserting a constant in the middle is safe for the JSON - but do it at the end
      * anyway, so that a diff of the baseline file stays readable.
      */
     public enum Op {
-        // The ten named in reference/performance.md.
+        // The ten the projection kernels spend their time in.
         SIN, COS, TAN, POW, EXP, LOG, ATAN, ATAN2, SQRT, HYPOT,
-        // Equally deterministic, and load-bearing for the numerics.md rewrites.
+        // Equally deterministic, and load-bearing for the series rewrites.
         ASIN, ACOS, LOG10, SINH, COSH, LOG1P, CBRT, EXPM1, TANH;
 
         static final Op[] VALUES = values();

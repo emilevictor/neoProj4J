@@ -40,30 +40,27 @@ import org.openjdk.jmh.annotations.Warmup;
  * transform instance for every thread. {@code Scope.Thread} would make this a boring linear-scaling
  * benchmark and would measure a model nobody runs.
  *
- * <p><b>A note on the annotation.</b> {@code reference/performance.md} writes
+ * <p><b>A note on the annotation.</b> The obvious way to write this would be
  * {@code @Threads({1,2,4,8,16})}, but {@code org.openjdk.jmh.annotations.Threads} declares
  * {@code int value()}, not {@code int[]} - JMH has no thread-count sweep annotation, and {@code -t}
- * takes one value per run. The intent is realised here as five methods with identical bodies and
- * different {@code @Threads}, which produces the whole sweep in a single JMH invocation and one JSON
+ * takes one value per run. The sweep is realised here as five methods with identical bodies and
+ * different {@code @Threads}, which produces the whole curve in a single JMH invocation and one JSON
  * file, which is what the gate consumes. The alternative - five separate runs with {@code -t} - would
  * put each point in a different fork and make the scaling curve incomparable.
  *
- * <p><b>This benchmark cannot prove thread safety and must not be read as doing so.</b> Sharing a
- * transform across threads is <i>unsafe today</i> for two reasons
- * ({@code reference/performance.md}, "Thread safety: the verdict"): {@code CassiniProjection} writes
- * 17 instance fields inside {@code project()}/{@code projectInverse()} and reads them back 1-4 lines
- * later, and {@code Proj4Parser.java:53} mutates the global static {@code Datum} singletons. The
- * Cassini failure mode is <b>finite, plausible, wrong</b> coordinates, which no throughput number
- * will ever reveal. Correctness is {@code SharedTransformConcurrencyTest}'s job - bitwise identity
- * against a single-threaded recording, because a tolerance assertion would pass through a torn
- * double. This file only answers "does it scale".
+ * <p><b>This benchmark cannot prove thread safety and must not be read as doing so.</b> A projection
+ * that keeps per-call scratch in instance fields produces <b>finite, plausible, wrong</b> coordinates
+ * when two threads interleave, and no throughput number will ever reveal that. Correctness is
+ * {@code org.locationtech.proj4j.concurrent.SharedTransformConcurrencyTest}'s job - bitwise identity
+ * against a single-threaded recording, because a tolerance assertion would pass straight through a
+ * torn double. This file only answers "does it scale".
  *
- * <p>Scaling is expected to be near-linear once the invariant re-derivation is hoisted, because
- * nothing on the path is synchronised. Two things would show up as sub-linear scaling and are worth
- * looking for: {@code Grid.fromNadGrids} running entirely inside a global
- * {@code synchronized (Grid.class)} around blocking I/O ({@code Grid.java:318}) - only on a cold
- * path, but a cold path a Spark stage hits on every executor at once - and false sharing on the
- * non-final {@code srcGeoConv}/{@code tgtGeoConv} fields.
+ * <p>Scaling is expected to be near-linear, because nothing on the per-point path is synchronised:
+ * {@code Grid.fromNadGrids} no longer holds a global {@code synchronized (Grid.class)} across
+ * blocking I/O, and {@code BasicCoordinateTransform} keeps its bulk scratch in a lock-free one-slot
+ * pool rather than in a field, and every other field the per-point path reads is {@code final}.
+ * Sub-linear scaling here is therefore a finding in its own right: something on the path has
+ * acquired shared mutable state or a lock since this was written.
  *
  * <p>Uses {@code Mode.Throughput}, not {@code AverageTime}: with contention the question is
  * aggregate ops/s, and an average latency across contending threads hides whether the total went up.

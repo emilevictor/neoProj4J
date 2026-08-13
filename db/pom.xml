@@ -67,8 +67,10 @@
              than surprise a downstream Spark image. -->
         <proj4j.db.max.jar.bytes>2600000</proj4j.db.max.jar.bytes>
 
-        <!-- Where -Pregen-db looks for a built proj.db. Override with -Dproj.db.source=/path/to/proj.db.
-             Homebrew's proj 9.8.1 installs one here. -->
+        <!-- Where -Pregen-db looks for a built proj.db. This default is only a convenience: it is
+             where Homebrew on Apple silicon puts the file. Anywhere else (a Linux package, a
+             source build of PROJ, an Intel Mac), pass the real path with
+             -Dproj.db.source=/path/to/proj.db. Nothing in a default build reads this property. -->
         <proj.db.source>/opt/homebrew/share/proj/proj.db</proj.db.source>
     </properties>
 
@@ -156,8 +158,8 @@
                                         The checked-in proj4j-db index does not match
                                         ${proj4j.db.sha256}. Either the file was edited by hand, or a
                                         regeneration changed it without the pin being updated. Run
-                                        `mvn -Pregen-db validate` to regenerate and print the new
-                                        SHA-256; do not relax this rule.
+                                        `mvn -Pregen-db -pl db -am process-classes` to regenerate and
+                                        print the new SHA-256; do not relax this rule.
                                     </message>
                                 </requireFileChecksum>
                             </rules>
@@ -186,12 +188,42 @@
     </build>
 
     <profiles>
-        <!-- Regeneration. Manual, plus CI on any db/** or pin change. Never part of a default build:
-             `mvn install` must not need sqlite3, cmake, Python, a PROJ checkout or a network.
+        <!-- Regeneration. Manual only. Never part of a default build: `mvn install` must not need
+             sqlite3, cmake, Python, a PROJ checkout or a network.
 
-             CI runs `mvn -Pregen-db validate` then `git diff` with the exit-code flag. If regeneration does not
-             reproduce the checked-in bytes, the build fails. That is the reproducibility proof, and
-             it is why every ordering in the format is a total order over the data. -->
+             The reproducibility proof is: regenerate, then `git diff` with the exit-code flag. If
+             regeneration does not reproduce the checked-in bytes the diff is non-empty. That is why
+             every ordering in the format is a total order over the data.
+
+             Two details decide whether that proof measures anything, and both were got wrong here
+             once, so they are spelled out:
+
+               * PHASE. All three executions below bind to `generate-resources`, which `validate`
+                 runs BEFORE. `mvn -Pregen-db validate` is therefore BUILD SUCCESS in half a second
+                 having executed nothing, after which `git diff` passes because nothing was written,
+                 reporting "reproducible" precisely when no regeneration happened. Nor can you
+                 name `generate-resources` as the target phase: core is never installed (the root
+                 POM sets maven.install.skip), so with -am the reactor has no core jar to resolve
+                 against at that point and dependency resolution fails. `process-classes` is the
+                 first phase that both fires these executions and resolves. `install` also works and
+                 additionally runs the tests.
+
+               * SOURCE_DATE_EPOCH. GenerateIndex stamps `generatedAtUtc` into db.properties from
+                 it. Without it the stamp is the wall clock, so `git diff` is non-empty on every
+                 run, reporting "not reproducible" for a regeneration that was bit-perfect. The
+                 pinned value below is the one that reproduces the checked-in file.
+
+             The invocation that actually proves something, verified to exit 0:
+
+               SOURCE_DATE_EPOCH=1775865600 \
+                 mvn -Pregen-db -pl db -am process-classes -Dproj.db.source=/path/to/proj.db
+
+             followed by `git diff`, which must report no change. Run it with git's exit-code flag
+             to make that scriptable; db/README.md spells the flag out, because an XML comment
+             cannot contain two consecutive hyphens.
+
+             No workflow in .github/ runs this. It is a contributor step, not a CI gate; an earlier
+             version of this comment claimed CI ran it, which was never true. -->
         <profile>
             <id>regen-db</id>
             <build>

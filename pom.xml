@@ -52,7 +52,7 @@
     <!-- Upstream's developers and contributors stay credited, unchanged: this is a fork of their
          work and Apache 2.0 s4(c) is not optional. The fork maintainer is appended, not
          substituted. geoapi/pom.xml used to SHADOW this list rather than add to it, so the
-         published proj4j-geoapi POM credited only Desruisseaux; it now repeats these four and adds
+         published neoproj4j-geoapi POM credited only Desruisseaux; it now repeats these four and adds
          him. -->
     <developers>
         <developer>

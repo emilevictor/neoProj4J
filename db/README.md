@@ -28,8 +28,10 @@ fields differ between two runs that produce identical rows.
 Transcoding buys three things instead:
 
 1. **Determinism.** Every ordering in the file is a total order over the data, so two generations from
-   the same input are byte-identical and CI proves it with `git diff --exit-code`. This runs in Spark
-   executors that require bit-reproducible output.
+   the same input are byte-identical, and `git diff --exit-code` after a regeneration proves it. That
+   is a contributor step, not a CI gate — no workflow under `.github/` regenerates, because doing so
+   needs `sqlite3` and a built `proj.db`. See the Regeneration section below, and task #102. This
+   runs in Spark executors that require bit-reproducible output.
 2. **The bytes we do not need are gone** — the write path, the b-tree interior pages, the page slack, and
    the 798 KB `idx_usage_object` whose job is done here by a 20-byte-per-row sorted array.
 3. **Strings are shared.** `'EPSG'` appears in tens of thousands of rows upstream; here it appears once,
@@ -138,17 +140,20 @@ the verifier's first run, and is why they are now named apart.
 **Default build, on every machine and in CI:**
 
 ```
-mvn -B -Dmaven.repo.local=/tmp/m2 -pl db -am install -Dmaven.javadoc.skip=true
+mvn -B -pl db -am install -Dmaven.javadoc.skip=true
 ```
 
 Nothing but a SHA-256 check happens: **no `sqlite3`, no `cmake`, no Python, no PROJ checkout, no
 network.** A machine without the toolchain builds successfully and cannot silently use a stale artifact.
-`-am` is needed because the root pom sets `maven.install.skip=true`.
+`-am` is needed because the root pom sets `maven.install.skip=true`, so `core` is never placed in the
+local repository and a `-pl db` on its own has nothing to resolve against.
 
-**Regeneration**, manual plus CI on any `db/**` or pin change:
+**Regeneration**, manual. Substitute the path to your own `proj.db`:
 
 ```
-mvn -Pregen-db -pl db -am validate -Dproj.db.source=/opt/homebrew/share/proj/proj.db
+SOURCE_DATE_EPOCH=1775865600 \
+  mvn -Pregen-db -pl db -am process-classes -Dproj.db.source=/path/to/proj.db
+git diff --exit-code
 ```
 
 1. `src/gen/dump.sh` fails fast if `sqlite3` is absent, with a message pointing at omitting the profile.
@@ -158,13 +163,30 @@ mvn -Pregen-db -pl db -am validate -Dproj.db.source=/opt/homebrew/share/proj/pro
    `<proj4j.db.sha256>`.
 3. `VerifyIndex` runs the exhaustive round-trip and fails the build on any mismatch.
 
-CI then runs `git diff --exit-code`. Two consecutive runs are byte-identical — verified.
+`git diff --exit-code` is the reproducibility proof: a clean exit means regeneration reproduced the
+checked-in bytes. Verified to exit 0.
+
+**Both halves of that command line are load-bearing, and getting either wrong makes the proof
+vacuous rather than failing loudly:**
+
+- **`process-classes`, not `validate`.** The three `-Pregen-db` executions bind to
+  `generate-resources`, and `validate` runs before it. `mvn -Pregen-db validate` is BUILD SUCCESS in
+  half a second having run nothing at all, after which `git diff` passes because nothing was
+  written — it reports "reproducible" in exactly the case where no regeneration occurred. This
+  README documented that command until it was measured. Naming `generate-resources` as the target
+  phase does not work either: with `-am` the reactor has not produced a `core` jar by then, and
+  dependency resolution fails. `install` also works, and additionally runs the tests.
+- **`SOURCE_DATE_EPOCH`.** It sets `generatedAtUtc`. Leave it out and that field takes the wall
+  clock, so `git diff` is non-empty after every run, including a bit-perfect one. The value above
+  is the one that reproduces the checked-in `db.properties`; the index itself does not depend on it.
+
+No workflow under `.github/` runs regeneration. It is a contributor step, not a CI gate.
 
 | machine | invocation | outcome |
 |---|---|---|
 | no sqlite3, no PROJ checkout | `mvn install` | **builds**; verifies checksum |
 | no sqlite3 | `mvn install -Pregen-db` | fails fast, message points at omitting the profile |
-| full toolchain | `mvn install -Pregen-db` | regenerates; byte-identical or CI fails |
+| full toolchain | `mvn install -Pregen-db` | regenerates; `git diff --exit-code` is the check |
 | tampered artifact | `mvn install` | fails on SHA-256 mismatch |
 
 `proj4j.db.max.jar.bytes` is 2,600,000: a data bump that blows the budget fails the build here rather

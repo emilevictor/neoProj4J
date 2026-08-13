@@ -90,8 +90,9 @@ public class BulkTransformEquivalenceTest {
             new CoordinateTransformFactory();
 
     /**
-     * The eight representative pairs from {@code reference/performance.md}. Each is here because it
-     * exercises a distinct stage of the pipeline, not for coverage.
+     * The eight representative pairs, the same set and order as the
+     * {@code org.locationtech.proj4j.benchmark.CrsPair} enum the benchmarks use. Each is here
+     * because it exercises a distinct stage of the pipeline, not for coverage.
      */
     private static final String[][] PAIRS = {
         {"EPSG:4326", "EPSG:4326"},     // the floor: envelope only

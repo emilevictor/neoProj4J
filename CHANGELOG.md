@@ -9,13 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Pending — in flight, not yet released
 
-- **⏳ `conus` folded into `neoproj4j-epsg`.** Verified: `epsg/src/main/resources/proj4/nad/` currently
-  ships `ntv1_can.dat` and no other grid, whose footprint is 40°N–84°N, 142°W–44°W. `9.8.1:data/tests/conus`
-  is 264,424 B of CTABLE V2, a format `datum/CTABLEV2.java` already reads. Until it lands, a released
-  build needs `neoproj4j-grids-us-legacy` (1,192,986 B jar, `conus` + `alaska`) on the classpath. **No
-  `neoproj4j-epsg` artifact size is quoted anywhere in these notes on purpose** — the figure recorded in
-  the project's own packaging notes was measured today as 7,603,235 B against a long-standing claim of
-  2,518,313 B
 - **⏳ Relaxing `ClasspathResourceResolver.isSafeName`** to permit interior path segments while still
   rejecting a leading `/` or `\`, spaces, and any `.` / `..` / empty segment. The corpus writes
   `+file=tests/…` and `+grids=tests/…`, which PROJ resolves by appending the token to a search
@@ -122,12 +115,12 @@ These change the answer, or the reported error, for existing callers.
   five JDK/architecture combinations. **Faster than `StrictMath` on every JDK tested**, by 3.97× on
   Java 8 — which is why no multi-release JAR is needed
 - **Conformance harness** for PROJ's own `gie` corpus and the IOGP GIGS suite: 7,923 assertions across
-  42 files, with a checked-in expected-outcome manifest (`gie-expected-failures.tsv`, 545 rows, and
+  42 files, with a checked-in expected-outcome manifest (`gie-expected-failures.tsv`, 482 rows, and
   `gie-corpus-index.tsv`, 7,923 keys) so a pass→fail regression fails the build. Current verdict
   against the full index: `regressed 0, unexpected passes 0, new 0, disappeared 0`
 - **Golden-master behaviour-diffing gate** (`golden/`) over 53,430 rows against a frozen 1.4.3
   baseline, with `golden/rules.yaml` requiring every changed row to be claimed by a rule that names a
-  mechanism and pins an exact row count. **42 of 42 rules are pinned**, and a rule that matches the
+  mechanism and pins an exact row count. **44 of 44 rules are pinned**, and a rule that matches the
   wrong number of rows fails the build rather than silently absorbing another rule's rows
 - **Allocation and operation-count gate** (`benchmark/`), **245 arms, 245 gated, 0 excluded**, with a
   recorded baseline of 25 rules and 171 per-benchmark ratchets
@@ -197,9 +190,8 @@ Silent wrong answers:
   result far enough to look like a bug
 - **NAD27 → NAD83 in CONUS: 95.573 m at San Francisco.** The code half is fixed — the parser called
   `setGrids(null)` on the *static* `Datum.NAD27` singleton, destroying the grid list process-wide.
-  **The data half is a packaging question that is still open**: `neoproj4j-epsg` ships `ntv1_can.dat`
-  and nothing else, so `conus` reaches a released build only through `neoproj4j-grids-us-legacy`. See
-  *Pending* under [Unreleased]
+  **The data half is settled too**: `neoproj4j-epsg` now ships PROJ 9.8.1's `conus` verbatim at
+  `proj4/nad/conus` alongside `ntv1_can.dat`, and `neoproj4j-grids-us-legacy` adds `alaska`
 - **NTv2**: "only 1 subfile supported" silently used subgrid 1 for the whole file, and interpolation
   read the captured *parent* table after descending into a child. A point in Alberta got no shift at
   all while the transform reported success
@@ -275,17 +267,21 @@ Determinism and locale:
 
 ### Conformance
 
-- **PROJ 9.8.1 gie corpus: 7,378 / 7,895 — 93.5 %**, up from a **1,066 / 6,845 — 15.6 %** baseline.
-  **At least 29 of the 42 active corpus files are at 100 %.** Remainder: 515 failing, 2 skipped
+- **PROJ 9.8.1 gie corpus: 7,441 / 7,900 — 94.19 %.** **30 of the 42 active corpus files are at
+  100 %.** Remainder: 457 failing, 2 skipped
 - **The denominator excludes vacuous rows, and says so.** The corpus holds **7,923** assertions
-  (6,962 `expect` + 961 `roundtrip`, counted with a port of gie's own lexer, not with `grep`). **28
+  (6,962 `expect` + 961 `roundtrip`, counted with a port of gie's own lexer, not with `grep`). **23
   are vacuous `expect failure` rows** — proj4j could not construct the operation at all, so "both
   failed" is evidence about neither engine — and they are excluded from **numerator and denominator
-  alike** rather than banked as passes, giving 7,895. **2 skips are reported separately and are never
-  passes.** 94 out-of-block lines in `DHDN_ETRS89.gie` are reported as excluded. Note that the two
-  percentages sit on different denominators on purpose: the baseline's 6,845 is smaller because far
-  more rows were vacuous then, so the measured population grew by 1,050 assertions as well as the
-  ratio improving
+  alike** rather than banked as passes, giving 7,900. **2 skips are reported separately and are never
+  passes.** 94 out-of-block lines in `DHDN_ETRS89.gie` are reported as excluded
+- **No 1.4.3 conformance baseline is quoted, because none can be reproduced.** Earlier drafts
+  headlined a `1,066 / 6,845 — 15.6 %` baseline; nothing in the tree reproduces those two numbers, so
+  they are withdrawn rather than reworded. What *can* be derived is an upper bound: 1.4.3 could only
+  build an operation whose `+proj=` name appears in the `register(…)` list of `Registry.java` — 93
+  names at tag `v1.4.3` — and it had no `+proj=pipeline`. Matching that list against the `operation`
+  governing each of the 7,923 in-block assertions leaves **at most 1,830, or 23 %**, counting every
+  ambiguous case in its favour. See [RELEASE-NOTES.md](RELEASE-NOTES.md) for the derivation
 - **GIGS: 1,170 / 1,170 — 100 %**, all 20 files
 - **Zero rows in the 4,280-row MetaCRS corpus where proj4j and PROJ 9.8.1 both produce a coordinate
   and the coordinates differ.** The ~1,195 apparent regressions against 1.4.3 are a stale reference
@@ -316,7 +312,8 @@ Operator families that are **not implemented**. Each is a refusal, not a silent 
 Other boundaries:
 
 - **Vertical and height support is thinly evidenced.** GTX and GeoTIFF readers ship, but **only 356 of
-  7,923 corpus assertions — 4.5 % — score a third ordinate at all** (194 pass, 160 fail, 2 skip); for
+  7,923 corpus assertions — 4.5 % — score a third ordinate at all** (225 with three numbers, 131
+  with four); for
   the other 5,419 coordinate expects `gie.cpp` zeroes the third ordinate on both sides, so z
   contributes exactly zero to the deviation. For a height through the *datum* stage specifically the
   corpus reaches **8 assertions and none passes**. Test your own heights
@@ -338,9 +335,11 @@ Other boundaries:
   / 4 skipped** (`core` 1,917 · `conformance` 345 · `db` 52 · `geoapi` 6). The `MetaCRSTest`
   expectation that used to make this red no longer applies
 - **conformance** — live and CI-wired, **green** against a committed 7,923-key index, **7,441 / 7,900**
-- **golden** — live, blocking, and **RED on 2,291 UNEXPLAINED rows** of 53,430
-  (12,012 UNCHANGED · 41,418 CHANGED · 0 ADDED · 0 REMOVED · 39,127 INTENDED), down from 18,168 →
-  3,304 → 2,291 over two triage passes, with **42 of 42** rules pinned. **Red is the intended state**:
+- **golden** — live and **RED on 2,291 UNEXPLAINED rows** of 53,430
+  (12,005 UNCHANGED · 41,425 CHANGED · 0 ADDED · 0 REMOVED · 39,134 INTENDED), down from 18,168 →
+  3,304 → 2,291 over two triage passes, with **44 of 44** rules pinned. Since commit `052e627`
+  (2026-08-05) it runs weekly and on demand rather than on every push and pull request.
+  **Red is the intended state**:
   the gate fails on any changed row that no rule claims with a named mechanism and a pinned count, so
   those 2,291 are changes somebody must *explain*, not changes somebody must *undo*
 - **allocation** — **0 breaches, 245 gated, 0 EXCLUDED, 245/245 arms**. The claim that

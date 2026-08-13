@@ -52,7 +52,7 @@ diff. That is the sharpest argument on record that a change-detecting gate canno
 
 The change is not merely "an exception where a number used to be": the number was **wrong**. The 40
 witness rows that motivated the fix all probe latitude exactly `40.000000` — the southern edge of
-`ntv1_can.dat`, the only NAD27 grid `neoproj4j-epsg` ships. The forward finds the point inside the box
+`ntv1_can.dat`, the Canadian NAD27 grid `neoproj4j-epsg` ships. The forward finds the point inside the box
 and shifts it *south* of 40°N, out of the box; the `else` branch then returned it unchanged, so the
 inverse leg never ran. `epsg:26721` probe 2 moved `fx` by −92.756 m and `ix` by +0.001090° ≈ 93.1 m —
 the residue *equals* the forward shift, which is what proves the inverse was not running rather than
@@ -93,8 +93,9 @@ rows did **not** move, because `BETA2007.gsb` is absent, the grid list resolves 
 list is correctly a no-op. *"The grid file is not there"* stays silent; only *"outside a grid that
 loaded"* errors.
 
-**What to do about it** depends on an unresolved packaging question — see
-[Pending, not done](#pending-not-done-two-changes-in-flight).
+**What to do about it** is to make sure the grid your data needs is reachable: `neoproj4j-epsg` ships
+`conus` and `ntv1_can.dat`, and `neoproj4j-grids-us-legacy` adds `alaska`. A point outside every grid on
+your classpath is now refused rather than silently echoed back, and that is the intended answer.
 
 ### 2. `ErrorCause` for an unreadable or missing grid changed — update any code matching on it
 
@@ -279,7 +280,7 @@ plausible-looking finite number now throws.
 | **Containment tolerance**: `1e-4` → `1e-5` (`REL_TOLERANCE_HGRIDSHIFT`) | proj4j accepted and **extrapolated** 2e-5° outside `conus`'s south edge where PROJ reports a transformation error |
 | **Antimeridian extents** now handled | `us_noaa_alaska.tif` declares `west = -194°`, so its whole western half was unreachable |
 | **Inverse grid shift** declared success when only *one* ordinate had converged (`&&` where PROJ tests the squared 2-norm), and on exhaustion returned the input unchanged | now throws `ConvergenceFailureException` (`ErrorCause.NUMERICAL_FAILURE`) |
-| **NAD27 → NAD83 in CONUS** | **95.573 m at San Francisco.** Two independent causes, both fixed in code: a parser bug that destroyed the grid list on a static singleton, and the absence of the `conus` grid. **The second half is a packaging question that is still open — see [Pending, not done](#pending-not-done-two-changes-in-flight).** |
+| **NAD27 → NAD83 in CONUS** | **95.573 m at San Francisco.** Two independent causes, both fixed: a parser bug that destroyed the grid list on a static singleton, and the absence of the `conus` grid. The second half was a packaging question, and it is settled — `neoproj4j-epsg` ships PROJ 9.8.1's `conus` verbatim at `proj4/nad/conus`, which is one of the built-in classpath grid prefixes. |
 
 Neither NTv1 error alone, nor the pair together, moved a result far enough to look like a bug. That is
 why it survived. **If you have stored coordinates computed through an NTv1 grid, they are wrong by
@@ -295,36 +296,47 @@ control.
 
 ---
 
-## Conformance: 15.6 % → 93.5 %, and what the denominator excludes
+## Conformance: 94.19 % of the gie corpus, and what the denominator excludes
 
 | | |
 |---|---|
-| **gie corpus** | **7,378 / 7,895 genuine passes — 93.5 %** |
-| **baseline (1.4.3-era harness)** | **1,066 / 6,845 — 15.6 %** |
+| **gie corpus** | **7,441 / 7,900 genuine passes — 94.19 %** |
 | **GIGS** | **1,170 / 1,170 — 100 %**, all 20 files |
-| complete files | **at least 29 of the 42** active corpus files are at 100 % |
-| the rest | 515 failing · 2 skipped · 28 vacuous · 94 excluded (out of block) |
+| complete files | **30 of the 42** active corpus files are at 100 % |
+| the rest | 457 failing · 2 skipped · 23 vacuous · 94 excluded (out of block) |
 
 **The denominator is not the corpus size, and this is the honest part of the number.** The corpus holds
 **7,923 assertions** across 42 active files — 6,962 `expect` plus 961 `roundtrip` — counted with a port
 of gie's own lexer rather than with `grep`, because `grep '^expect'` models neither block boundaries nor
 left-trimming. From that:
 
-- **28 rows are *vacuous* `expect failure` rows and are excluded from both numerator and denominator.**
+- **23 rows are *vacuous* `expect failure` rows and are excluded from both numerator and denominator.**
   A vacuous row is one where proj4j could not construct the operation *at all*: PROJ built it and
   rejected the coordinate, proj4j failed to build it, both "failed", and a naive harness scores a pass.
   **That is failure-to-implement counting as conformance**, and it is excluded rather than banked.
-  7,923 − 28 = **7,895**.
+  7,923 − 23 = **7,900**, and 7,441 + 457 + 2 + 23 = 7,923 exactly.
 - **2 skips are reported separately and are never passes.**
 - **94 out-of-block lines** in `DHDN_ETRS89.gie` (which closes `</gie-strict>` at line 161 of 375) are
   reported as `94 excluded (out of block)`, not as "not run".
 
-**What this means for reading the two percentages together.** The baseline denominator is 6,845, not
-7,895, because far more rows were vacuous then — proj4j could not build the operation for most of the
-`adams` family, `guyou`, `peirce_q` and `spilhaus`. So the ratio improved **and** the measured
-population grew by 1,050 assertions. Both halves are progress; neither is visible in the percentage
-alone. Under-counting is visible in the report; over-counting would not be, which is why the rule
-resolves ambiguity to vacuous.
+Under-counting is visible in the report; over-counting would not be, which is why the rule resolves
+ambiguity to vacuous.
+
+**There is no reproducible 1.4.3 baseline, and the one this section used to quote is withdrawn.**
+Earlier drafts headlined a `1,066 / 6,845 — 15.6 %` baseline for a 1.4.3-era harness. Nothing in the
+tree reproduces those two numbers — no harness, script or recorded run that produced them survives, and
+6,845 matches no count in the corpus — so they are removed rather than reworded. A comparison that
+cannot be re-derived is not evidence.
+
+**What can be derived is an upper bound on what 1.4.3 could possibly have scored, and it is worth
+having.** 1.4.3 could only build an operation whose `+proj=` name appears in the `register(…)` list of
+`Registry.java` — 93 names at tag `v1.4.3` — and it had no `+proj=pipeline` at all. Matching that list
+against the `operation` governing each of the 7,923 in-block assertions leaves **at most 1,830, or
+23 %**, that 1.4.3 could have constructed, counting every ambiguous case in its favour. The other 6,093
+name something it did not have: 1,279 are pipelines, and the largest blocks after those are `adams_ws2`
+(724), `guyou` (705), `adams_hemi` (703), `adams_ws1` (703) and `peirce_q` (592). Constructing an
+operation is not the same as agreeing with PROJ to tolerance, so the true 1.4.3 figure is below 1,830 —
+by how much, this tree cannot say.
 
 ### Zero disagreements with PROJ 9.8.1 on the MetaCRS corpus
 
@@ -351,18 +363,18 @@ what will be done.
 
 ## The gates: what is enforced, and what is red
 
-Five regimes now gate this work, and **one** of them is **red on purpose**. Reading a red gate as a
-defect would be exactly backwards: they were all green once for the same reason a scan that cannot fail
-always passes. *(This said "four regimes … two of them red"; `ci` is a fifth, and it went green when
-`proj4-epsg.csv` was regenerated, so `golden` is the only intentional red left.)*
+Five regimes now measure this work. Four of them — `ci`, `conformance`, `allocation` and `determinism` —
+gate every push and pull request and are green. The fifth, `golden`, is **red on purpose**, and since
+2026-08-05 it is no longer a push or pull-request check. Reading a red gate as a defect would be exactly
+backwards: they were all green once for the same reason a scan that cannot fail always passes.
 
 *Every figure below re-measured 2026-08-03 in the pinned container (Temurin 21.0.11 / aarch64).*
 
 | gate | state | figure |
 |---|---|---|
 | **ci** | **green** | whole 7-module reactor, `BUILD SUCCESS` with javadoc, **2,320 tests / 0 failures / 4 skipped** in 223 report files (`core` 1,917 · `conformance` 345 · `db` 52 · `geoapi` 6) |
-| **conformance** | **live, CI-wired, green** | baseline pair committed — `gie-expected-failures.tsv` (545 rows) and `gie-corpus-index.tsv` (**7,923 keys**). **7,441 / 7,900**, verdict `regressed 0, unexpected passes 0, new 0, disappeared 0` against the full index |
-| **golden** | **live, blocking, RED** | **12,012 UNCHANGED · 41,418 CHANGED · 0 ADDED · 0 REMOVED · 39,127 INTENDED · 2,291 UNEXPLAINED** over 53,430 rows; **42 of 42** rules pinned with `expected_rows` (was 38, then 41) |
+| **conformance** | **live, CI-wired, green** | baseline pair committed — `gie-expected-failures.tsv` (482 rows) and `gie-corpus-index.tsv` (**7,923 keys**). **7,441 / 7,900**, verdict `regressed 0, unexpected passes 0, new 0, disappeared 0` against the full index |
+| **golden** | **live, RED, and no longer a push or PR check** | **12,005 UNCHANGED · 41,425 CHANGED · 0 ADDED · 0 REMOVED · 39,134 INTENDED · 2,291 UNEXPLAINED** over 53,430 rows; **44 of 44** rules pinned with `expected_rows` (this figure has read 38, 41 and 42 at various points — count `golden/rules.yaml`, do not assume) |
 | **allocation** | **live, green** | **0 breaches**; **245 gated, 0 EXCLUDED**, 245 / 245 arms, Tier 2 green. Was `172 gated / 9 excluded / 181 arms`: `BulkTransformBenchmark` joined the gate (+64) and `crs-parse` rejoined Tier 1 (−9 exclusions) |
 | **determinism** | **runs per leg, green** | **22** tests, 0 failures, 0 skips (was 15; the count is a floor, and the workflow now reports upward drift as a notice rather than failing) |
 | **bench** | baseline captured 2026-08-02 | **171 per-benchmark ratchets, all enforced, none reported-only**; 25 rules; 8 CRS pairs × 20 operations pinned; 2 remaining `TBD`s are `targetBytesPerOp` policy cells on rules whose ratchet is a real number |
@@ -375,6 +387,17 @@ two triage passes. Every one of them is a change somebody must *explain*, not a 
 thousands of kilometres outside their own zones where both series are meaningless, and a handful of
 `cass` / `omerc` / `merc` clusters. Turning the gate green by relaxing it would discard the only
 instrument that has caught a silent behaviour change on this project — twice.
+
+**Why it no longer runs on push and pull request** (commit `052e627`, 2026-08-05). A check that fails on
+every PR for a known backlog trains people to ignore it. The two ways to make it pass — `continue-on-error`,
+or a catch-all rule in `rules.yaml` — both make it report success while seeing nothing, and the second
+would absorb genuine future regressions as well. Removing the trigger makes the gate *absent* rather than
+dishonest: the job still exists, still fails on the real backlog, and now runs weekly and on demand
+(`gh workflow run golden.yaml`). What that costs is stated in the workflow header, and it is not small —
+golden is the only check that compares this tree against genuinely released 1.4.3, so while it is off the
+PR path, breaking something that used to work will not be caught there until the next weekly run. What is
+watched in the meantime is the report itself: the backlog figure must not grow. Restore the triggers once
+the backlog is triaged; do not soften the job instead.
 
 **Two honesty notes about the instruments themselves**, because a gate that cannot fail is worse than no
 gate:
@@ -511,7 +534,7 @@ grids, and the real `us_nga_egm96_15.tif` and `us_nga_egm08_25.tif`). But the *c
 heights is much weaker than the headline suggests, and the honest figures are:
 
 - **Only 356 of 7,923 corpus assertions — 4.5 % — score a third ordinate at all** (225 with three
-  numbers, 131 with four): **194 pass, 160 fail, 2 skip.** For the other 5,419 coordinate expects,
+  numbers, 131 with four). For the other 5,419 coordinate expects,
   `gie.cpp:1117` zeroes the third ordinate on both sides, so **z contributes exactly zero to the
   deviation regardless of what the operation writes.** That is upstream's masking, not proj4j's
   insulation.
@@ -556,32 +579,15 @@ The invented-height fix in §5 above is covered by a dedicated unit test, not by
 
 ---
 
-## Pending, not done: two changes in flight
+## Pending, not done: one change in flight
 
-**Neither of the following is in this build.** They are listed here so that nobody reads their absence
-as a decision, and so that no figure below is quoted before it exists.
+**The following is not in this build.** It is listed here so that nobody reads its absence as a
+decision, and so that no figure is quoted before it exists.
 
-> ### ⏳ PLACEHOLDER — `conus` in `neoproj4j-epsg`
->
-> **Status: in flight, not landed.** Verified today: `epsg/src/main/resources/proj4/nad/` ships
-> `ntv1_can.dat` and no other grid.
->
-> `Datum.NAD27` requests `@conus,@alaska,@ntv2_0.gsb,@ntv1_can.dat`. Only `ntv1_can.dat` ships, and its
-> footprint is **40°N–84°N, 142°W–44°W** — Canada. So in a default deployment San Francisco (37.8°N) and
-> Kansas (39.0°N) are *south* of every grid proj4j has, and with the §1 fix in place they now raise
-> `COORDINATE_OUTSIDE_GRID` rather than silently returning the input. Everything in CONUS *north* of 40°N
-> — Chicago 41.9, Boston 42.4, Minneapolis 45.0, Seattle 47.6 — is inside the box and is interpolated
-> from a Canada-authoritative grid.
->
-> `9.8.1:data/tests/conus` is **264,424 bytes** of CTABLE V2, a format `datum/CTABLEV2.java` already
-> reads, so folding it in costs zero new parsing code. Today it is available only through the separate
-> `neoproj4j-grids-us-legacy` artifact (**1,192,986 B** as a jar, `conus` + `alaska`, resources only) and,
-> at *test* scope, to `core`.
->
-> **This section will state the artifact contents and a measured size when the change lands. No
-> `neoproj4j-epsg` size is quoted here on purpose** — the figure that stood in the project's own packaging
-> notes was measured today as **7,603,235 B** against a long-recorded 2,518,313 B, a 3× error, and it is
-> exactly the kind of number that goes straight into release material.
+*(The `conus` grid used to be listed here too. It landed: `neoproj4j-epsg` ships PROJ 9.8.1's
+`data/tests/conus` verbatim — 264,424 bytes of CTABLE V2 — at `proj4/nad/conus`, and
+`neoproj4j-grids-us-legacy` carries `conus` and `alaska` for anyone who does not want the EPSG
+dictionaries. See [Grid handling](#grid-handling).)*
 
 > ### ⏳ PLACEHOLDER — relaxing `ClasspathResourceResolver.isSafeName`
 >
@@ -694,8 +700,9 @@ What to check, in order:
 
 1. **If you use `+nadgrids` or `+datum=NAD27` anywhere near the edge of your grid coverage**, expect
    `COORDINATE_OUTSIDE_GRID` where you previously got the input coordinate back. 1,949 golden-master
-   rows that reported `OK` now raise. Decide whether you need the grid shipped (see the `conus`
-   placeholder) or whether refusing is the right answer for your data.
+   rows that reported `OK` now raise. Check that the grids your data needs are on the classpath —
+   `neoproj4j-epsg` carries `conus` and `ntv1_can.dat`, `neoproj4j-grids-us-legacy` adds `alaska` — and
+   decide whether refusing is the right answer where they are not.
 2. **If you match on `ErrorCause`**, an unreadable or missing grid is now `MISSING_GRID`
    (`Group.OPERATION`), not `INVALID_PARAM_VALUE` (`Group.CRS`).
 3. **Find every place you swallow an exception or treat a finite result as success.** The

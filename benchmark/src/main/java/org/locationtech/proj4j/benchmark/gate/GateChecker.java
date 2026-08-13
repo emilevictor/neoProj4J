@@ -70,8 +70,10 @@ import org.locationtech.proj4j.benchmark.counting.OpCounters;
  * <h2>The ratchet</h2>
  *
  * <p>Each Tier 1 rule carries two numbers. {@code targetBytesPerOp} is the <b>policy</b>: what the
- * number should be once {@code reference/performance.md}'s work has landed (0 for every bulk method, 40
- * for single-point, 0 for {@code GridShiftBenchmark.inverseShift}). {@code maxBytesPerOp} is the
+ * number should be - 0 for every bulk and grid-shift rule, 40 (one {@code ProjCoordinate}) for the
+ * single-point path, and {@code "TBD"} where no figure has been settled. Each rule's own {@code why}
+ * field in {@code allocation-baseline.json} records where its target came from, and says so plainly
+ * where the target is an aim that nothing has yet measured. {@code maxBytesPerOp} is the
  * <b>ratchet</b>: what it actually is today. The gate fails on exceeding the <i>ratchet</i>, warns
  * while the ratchet is above the target, and reports when an observation comes in low enough that the
  * ratchet can be tightened.
@@ -460,7 +462,7 @@ public final class GateChecker {
                             + "        delta:     %+d%n"
                             + "        This is deterministic, so it is a real algorithmic change, not "
                             + "noise.%n"
-                            + "        If it is intended (e.g. a numerics.md rewrite landed), refresh "
+                            + "        If it is intended (e.g. a deliberate numerical change landed), refresh "
                             + "with `--record`%n"
                             + "        and say so in the commit message. If it is not, an iteration "
                             + "count changed.",
@@ -521,7 +523,7 @@ public final class GateChecker {
                 "Fully deterministic - one transform of the pinned sample point in CrsPair.",
                 "Regenerate with: java -cp target/benchmarks.jar "
                         + "org.locationtech.proj4j.benchmark.gate.GateChecker --record",
-                "A count that DROPS is the expected outcome of a numerics.md rewrite; say so in the "
+                "A count that DROPS is the expected outcome of a deliberate numerical change; say so in the "
                         + "commit message.",
                 "A count that RISES is an extra iteration or a reintroduced transcendental."));
         opDoc.put("capturedAt", capturedAt);

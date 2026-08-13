@@ -17,13 +17,17 @@ an intended change from an accidental one.
 ## Commands
 
 Everything is profile-gated; a plain `mvn install` compiles this module and runs only its fast
-self-tests (~50 tests, under a second). Always pass an isolated local repository — concurrent Maven
-runs in this repo have truncated the `epsg` jar mid-read and produced 34 spurious repo-wide failures.
+self-tests (~50 tests, under a second). Build on JDK 21.
+
+If you run more than one Maven build against this repo at a time, give each an isolated local
+repository — concurrent runs sharing one have truncated the `epsg` jar mid-read and produced 34
+spurious repo-wide failures. A single build at a time needs no such flag. The commands below use a
+shell variable so you can set it either way:
 
 ```bash
-export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
-export PATH="$JAVA_HOME/bin:/opt/homebrew/bin:$PATH"
-M2="-Dmaven.repo.local=/tmp/m2-golden -Dmaven.javadoc.skip=true"
+M2="-Dmaven.javadoc.skip=true"
+# ...or, if another Maven build may run concurrently, isolate the local repository:
+# M2="-Dmaven.javadoc.skip=true -Dmaven.repo.local=/tmp/m2-golden"
 ```
 
 ### Run the gate
@@ -37,7 +41,9 @@ Generates a table from the working tree into `golden/target/golden/`, merge-join
 row, `DEAD_RULE`, `PENDING_RULE_FIRED`, `EXPIRED_RULE` or `COUNT_MISMATCH`. The full per-row verdict
 lands in `golden/target/golden/golden-report.tsv`.
 
-`-am` is required: `-pl golden` alone cannot resolve `proj4j-epsg` from the reactor.
+`-am` is required. The root POM sets `maven.install.skip=true`, so no amount of prior building puts
+`proj4j` or `proj4j-epsg` into your local repository; `-pl golden` alone therefore has nothing to
+resolve them from and fails. `-am` builds them in the same reactor.
 
 ### Re-pin the baseline against released 1.4.3
 
@@ -314,20 +320,21 @@ in `reason`.
 
 ## Seeded rules, and the counts that are honestly unknown
 
-> **SUPERSEDED 2026-08-01: there are no unknown counts left. All 42 rules are `status: active` with
+> **SUPERSEDED 2026-08-01: there are no unknown counts left. All 44 rules are `status: active` with
 > a pinned integer `expected_rows`, and `GoldenRulesTest.noActiveRuleMayLeaveItsExpectedRowsUnpinned`
-> now makes that a build failure rather than a convention.** *(This said 38 until 2026-08-02 and 41
-> until 2026-08-03; the file grows and the prose does not, which is why the count is re-derived here
-> rather than copied. Three independent methods that agree as of 2026-08-03: a YAML parse of
-> `golden/rules.yaml` gives **42** rules, 42 unique `id`s, 42 with `status: active` and 42 with
-> `expected_rows`; `grep -ac '^  - id:'` gives **42**; and the gate itself prints
-> `rules.yaml: 42/42 rules carry a pinned expected_rows`. Note a bare `grep -ac 'id:'` overcounts —
+> now makes that a build failure rather than a convention.** *(This said 38 until 2026-08-02, 41
+> until 2026-08-03 and 42 until 2026-08-11; the file grows and the prose does not, which is why the
+> count is re-derived here rather than copied. Two anchored counts that agree as of 2026-08-11: a
+> YAML parse of `golden/rules.yaml` gives **44** rules, 44 unique `id`s, 44 with `status: active` and
+> 44 with `expected_rows`; and `grep -cE '^  - id:'` gives **44**. Note a bare `grep -c 'id:'`
+> overcounts —
 > some occurrences are prose inside `reason` blocks and comments — which is exactly the kind of
-> unanchored count that put a wrong number here in the first place. The nine remaining `TBD` tokens
-> in the file are all inside comments explaining why something is **not** TBD.)*
+> unanchored count that put a wrong number here in the first place. The six remaining `TBD` tokens
+> in the file are all in prose — `reason` text and comments — and none is in an `expected_rows`
+> field.)*
 >
-> *The 42nd rule is **`NUM-LAEA-HYPOT-TO-NORM2`**, and how it was discovered is the argument for
-> pinning in one line: `LambertAzimuthalEqualAreaProjection`'s `Math.hypot` → `MathHelpers.norm2`
+> *One of the 44, **`NUM-LAEA-HYPOT-TO-NORM2`**, is the argument for pinning in one line, and how it
+> was discovered shows why: `LambertAzimuthalEqualAreaProjection`'s `Math.hypot` → `MathHelpers.norm2`
 > moved 2 rows into `NUM-KARNEY-LATITUDE-CORE`'s territory, which raised a `COUNT_MISMATCH` at 19,326
 > against its pin of 19,324. **A globbed rule would have absorbed them in silence.** The new rule
 > sits immediately before `NUM-KARNEY-LATITUDE-CORE` so that rule keeps its 19,324, carries
@@ -441,18 +448,39 @@ errors are either sub-metre or enormous, with no long tail of subtle drift.
 
 ### Current state of the gate: red, by design
 
-As of this commit, `mvn -Pgolden -pl golden -am verify` reports:
+`mvn -Pgolden -pl golden -am verify` is **expected to fail**. Its current expected report is:
 
 ```
-32,397 UNCHANGED · 21,033 CHANGED · 0 ADDED · 0 REMOVED · 18,304 INTENDED · 2,729 UNEXPLAINED
+12,005 UNCHANGED · 41,425 CHANGED · 0 ADDED · 0 REMOVED · 39,134 INTENDED · 2,291 UNEXPLAINED
 ```
 
-The 2,729 unexplained rows are **the backlog**, not a defect in this module. They are other streams'
+The same line is pinned in `.github/workflows/golden.yaml`. A green golden run would mean the
+expectation had been edited, not that the backlog had gone.
+
+**Be precise about what is and is not automated here, because an earlier wording overstated it.**
+The criterion a reviewer applies is that those six figures are unchanged. That comparison is made
+**by eye**, from the job's failure output — nothing in the test or the workflow diffs the produced
+report against the pinned line. What the job does enforce on its own:
+
+- `GoldenMasterTest` fails on any UNEXPLAINED row, and on `DEAD_RULE`, `PENDING_RULE_FIRED`,
+  `EXPIRED_RULE` or `COUNT_MISMATCH`. The last four mean the rule set has stopped describing the
+  tree, and they are real failures rather than backlog.
+- The workflow's non-vacuity step requires that the test existed, ran exactly once and was not
+  skipped; that at least 40 tests ran in this module with none skipped; and that the generated table
+  has the same line count as the committed baseline.
+
+Because the test is already red, its pass/fail bit carries no information about a change — it was
+red before and is red after. The consequence is worth stating plainly: a drift of a few hundred rows
+between UNCHANGED and UNEXPLAINED would satisfy every automated check in this job and be caught only
+by someone reading the numbers. See task #104.
+
+The unexplained rows are **the backlog**, not a defect in this module. They are other streams'
 in-flight changes, and each stream owner adds the rule that claims theirs. This module deliberately
 does not declare another agent's change intended on their behalf — that would be exactly the failure
 mode it exists to prevent.
 
-Notable shapes in the unexplained set, worth routing to their owners:
+The breakdown below is from the `2,729 UNEXPLAINED` snapshot taken when this module landed, kept
+because the shapes are still the ones worth routing to their owners:
 
 * ~1,700 rows of `OK → OK` numeric movement above `1e-5`, i.e. above the numerical-core band.
 * `23` rows `OK → EXC:java.lang.IllegalStateException` in `PAIR` — a **new** non-`Proj4jException`
@@ -1390,7 +1418,7 @@ together with a freshly generated baseline (see [Commands](#commands)).
 * **A rule must never be written to make a gie failure go away.** If gie says we diverge from PROJ
   9.8.1 and a golden rule says the change was intended, gie is the one that decides whether to ship.
   The golden rule's only job was to prove the change was not an accident.
-* Conversely, a green gie run does **not** license an unexplained golden row. gie covers ~8,017
+* Conversely, a green gie run does **not** license an unexplained golden row. gie covers 7,923
   assertions; the `REG` section alone is 45,065 rows over CRS the corpus never mentions. "gie is green"
   is not an answer to "why did 12,000 rows move".
 * Tolerances belong to gie. There is no epsilon anywhere in this comparison: a 1-ULP move is a change.

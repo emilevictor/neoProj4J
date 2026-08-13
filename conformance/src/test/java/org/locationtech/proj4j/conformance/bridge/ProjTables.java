@@ -39,7 +39,7 @@ import java.util.Set;
  *
  * <p>Extracted at rev {@code 9.8.1} =
  * {@code f08fa86c478c4bbbf003b1ec751dd84aa6eca486} with
- * {@code git -C /Volumes/git/PROJ show 9.8.1:<path>}. Counts are asserted by
+ * {@code git -C <your PROJ checkout> show 9.8.1:<path>}. Counts are asserted by
  * {@code ProjTablesTest} so a silent transcription slip cannot pass.
  */
 public final class ProjTables {

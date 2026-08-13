@@ -238,7 +238,7 @@ different terms, and proj4j's existing `LICENSE.EPSG` covers only the EPSG porti
 ## Refreshing
 
 ```sh
-conformance/sync-upstream.sh [/path/to/PROJ]     # default /Volumes/git/PROJ
+conformance/sync-upstream.sh [/path/to/PROJ]     # default: a PROJ checkout beside this repo
 ```
 
 The script fails loudly if `9.8.1^{commit}` in the given checkout is not
