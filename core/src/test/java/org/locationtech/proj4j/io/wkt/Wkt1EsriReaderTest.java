@@ -266,6 +266,196 @@ public class Wkt1EsriReaderTest {
                 + "+datum=NAD83 +units=m +no_defs", proj(oneParallel));
     }
 
+    // ------------------------------------------------ the ESRI oblique Mercator skew angle
+    //
+    // ESRI's Hotine_Oblique_Mercator_Azimuth_Center and _Natural_Origin have no skew parameter in
+    // ESRI's own tables, so PROJ sets the angle from the rectified to the skew grid equal to the
+    // azimuth of the initial line and discards whatever skew angle the document supplied
+    // (io.cpp:4065-4077). Rectified_Skew_Orthomorphic_Center and _Natural_Origin map to the same
+    // two EPSG methods but do carry XY_Plane_Rotation, and are excluded by name.
+    //
+    // The trigger is not the dialect guess. It is either of two things said in the document: a
+    // GEOGCS named GCS_something, or a DATUM named D_something. Either alone is enough, and both
+    // are case-sensitive. Every expected value below was measured against PROJ 9.8.1.
+
+    /**
+     * A {@code D_} datum alone flips it, even where the {@code GEOGCS} is spelled the GDAL way. The
+     * document's 17.5 is discarded and the azimuth, 30, is used instead.
+     */
+    @Test
+    public void esriDatumPrefixMakesGammaTheAzimuth() {
+        assertEquals(30.0, effectiveGamma(obliqueMercator("North_American_1983",
+                "D_North_American_1983", "Hotine_Oblique_Mercator_Azimuth_Center",
+                "rectified_grid_angle", "17.5")), 0.0);
+        // Same under ESRI's own spelling of the parameter.
+        assertEquals(30.0, effectiveGamma(obliqueMercator("GCS_North_American_1983",
+                "D_North_American_1983", "Hotine_Oblique_Mercator_Azimuth_Center",
+                "XY_Plane_Rotation", "17.5")), 0.0);
+        // And where no skew angle was given at all, which is the ESRI-conformant document.
+        assertEquals(30.0, effectiveGamma(obliqueMercator("GCS_North_American_1983",
+                "D_North_American_1983", "Hotine_Oblique_Mercator_Azimuth_Center", null, null)),
+                0.0);
+    }
+
+    /**
+     * A {@code GCS_} geographic CRS name flips it on its own, with an unremarkable GDAL datum name
+     * beneath it. This is the trigger it is easiest to forget, since nothing else in such a document
+     * looks like ESRI.
+     */
+    @Test
+    public void esriGeogcsPrefixAloneMakesGammaTheAzimuth() {
+        assertEquals(30.0, effectiveGamma(obliqueMercator("GCS_North_American_1983",
+                "North_American_Datum_1983", "Hotine_Oblique_Mercator_Azimuth_Center",
+                "rectified_grid_angle", "17.5")), 0.0);
+    }
+
+    /**
+     * Both comparisons are case-sensitive, because PROJ's {@code starts_with} is a {@code memcmp}
+     * and the {@code ci_starts_with} beside it is deliberately not used. A lower-case {@code d_}
+     * datum is therefore an ordinary GDAL document and keeps its own skew angle. PROJ 9.8.1 agrees:
+     * it gives 17.5 here and 30 for the upper-case version above.
+     */
+    @Test
+    public void lowerCaseDatumPrefixIsNotEsriStyle() {
+        assertEquals(17.5, effectiveGamma(obliqueMercator("North_American_1983",
+                "d_north_american_1983", "Hotine_Oblique_Mercator_Azimuth_Center",
+                "rectified_grid_angle", "17.5")), 0.0);
+    }
+
+    /** With no ESRI marker anywhere, the skew angle is the document's. */
+    @Test
+    public void plainGdalObliqueMercatorKeepsItsRectifiedGridAngle() {
+        assertEquals(17.5, effectiveGamma(obliqueMercator("North_American_1983",
+                "North_American_Datum_1983", "Hotine_Oblique_Mercator_Azimuth_Center",
+                "rectified_grid_angle", "17.5")), 0.0);
+    }
+
+    /**
+     * The rule covers both EPSG methods: variant A, {@code _Natural_Origin} and {@code +no_uoff},
+     * as well as variant B, {@code _Center}.
+     */
+    @Test
+    public void esriRuleCoversBothHotineVariants() {
+        String variantA = obliqueMercator("GCS_North_American_1983", "D_North_American_1983",
+                "Hotine_Oblique_Mercator_Azimuth_Natural_Origin", "rectified_grid_angle", "17.5");
+        assertTrue(proj(variantA), proj(variantA).contains("+no_uoff"));
+        assertEquals(30.0, effectiveGamma(variantA), 0.0);
+
+        String variantB = obliqueMercator("GCS_North_American_1983", "D_North_American_1983",
+                "Hotine_Oblique_Mercator_Azimuth_Center", "rectified_grid_angle", "17.5");
+        assertTrue(proj(variantB), !proj(variantB).contains("+no_uoff"));
+        assertEquals(30.0, effectiveGamma(variantB), 0.0);
+    }
+
+    /**
+     * Neither {@code Rectified_Skew_Orthomorphic} variant is affected, however ESRI the rest of the
+     * document is: those two names do have an {@code XY_Plane_Rotation}, so it is honoured. This is
+     * the whole reason PROJ excludes them by name rather than by EPSG method code, which they share
+     * with the two above.
+     */
+    @Test
+    public void rectifiedSkewOrthomorphicKeepsItsRotation() {
+        assertEquals(17.5, effectiveGamma(obliqueMercator("GCS_North_American_1983",
+                "D_North_American_1983", "Rectified_Skew_Orthomorphic_Center",
+                "XY_Plane_Rotation", "17.5")), 0.0);
+
+        String naturalOrigin = obliqueMercator("GCS_North_American_1983", "D_North_American_1983",
+                "Rectified_Skew_Orthomorphic_Natural_Origin", "XY_Plane_Rotation", "17.5");
+        assertTrue(proj(naturalOrigin), proj(naturalOrigin).contains("+no_uoff"));
+        assertEquals(17.5, effectiveGamma(naturalOrigin), 0.0);
+    }
+
+    /**
+     * EPSG:29873, RSO Borneo, as GDAL spells it: the CRS whose azimuth and skew angle genuinely
+     * differ, by 0.1857181111 degrees. Nothing above may collapse the two into one.
+     * <p>
+     * Asserts the two angles rather than a coordinate, because a coordinate here would also be
+     * measuring the datum shift: PROJ resolves {@code AUTHORITY["EPSG","6298"]} to a seven-parameter
+     * Timbalai 1948 transformation and this library emits a bare {@code +ellps=evrstSS}, a separate
+     * gap worth about 343 m that has nothing to do with the skew angle.
+     */
+    @Test
+    public void epsg29873KeepsAzimuthAndSkewAngleApart() {
+        String wkt = "PROJCS[\"Timbalai 1948 / RSO Borneo (m)\",GEOGCS[\"Timbalai 1948\","
+                + "DATUM[\"Timbalai_1948\",SPHEROID[\"Everest 1830 (1967 Definition)\","
+                + "6377298.556,300.8017,AUTHORITY[\"EPSG\",\"7016\"]],"
+                + "AUTHORITY[\"EPSG\",\"6298\"]],PRIMEM[\"Greenwich\",0,"
+                + "AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,"
+                + "AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4298\"]],"
+                + "PROJECTION[\"Hotine_Oblique_Mercator_Azimuth_Center\"],"
+                + "PARAMETER[\"latitude_of_center\",4],PARAMETER[\"longitude_of_center\",115],"
+                + "PARAMETER[\"azimuth\",53.3158204722222],"
+                + "PARAMETER[\"rectified_grid_angle\",53.1301023611111],"
+                + "PARAMETER[\"scale_factor\",0.99984],PARAMETER[\"false_easting\",590476.87],"
+                + "PARAMETER[\"false_northing\",442857.65],UNIT[\"metre\",1,"
+                + "AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],"
+                + "AXIS[\"Northing\",NORTH],AUTHORITY[\"EPSG\",\"29873\"]]";
+        String p = proj(wkt);
+        assertEquals(p, 53.3158204722222, token(p, "+alpha="), 0.0);
+        assertEquals(p, 53.1301023611111, effectiveGamma(wkt), 0.0);
+    }
+
+    /**
+     * An ESRI-style document that puts a GDAL {@code rectified_grid_angle} inside a
+     * {@code Rectified_Skew_Orthomorphic_Center} — a spelling neither ESRI nor GDAL writes — is a
+     * known divergence, pinned here rather than left unstated. PROJ does not recognise that
+     * parameter for that method and falls back to the azimuth, 30; this library's parameter matching
+     * is dialect-blind and honours the 17.5. Nothing an exporter produces takes this path.
+     */
+    @Test
+    public void mixedSpellingIsAKnownDivergence() {
+        assertEquals(17.5, effectiveGamma(obliqueMercator("GCS_North_American_1983",
+                "D_North_American_1983", "Rectified_Skew_Orthomorphic_Center",
+                "rectified_grid_angle", "17.5")), 0.0);
+    }
+
+    /**
+     * An oblique Mercator {@code PROJCS} with azimuth 30, varying only what these tests vary: the
+     * {@code GEOGCS} name, the {@code DATUM} name, the projection name, and a skew angle parameter
+     * whose name and value may both be {@code null} for "no skew parameter at all".
+     */
+    private static String obliqueMercator(String geogcs, String datum, String projection,
+                                          String skewName, String skewValue) {
+        String skew = skewName == null ? ""
+                : "PARAMETER[\"" + skewName + "\"," + skewValue + "],";
+        return "PROJCS[\"probe\",GEOGCS[\"" + geogcs + "\",DATUM[\"" + datum
+                + "\",SPHEROID[\"GRS_1980\",6378137.0,298.257222101]],PRIMEM[\"Greenwich\",0.0],"
+                + "UNIT[\"Degree\",0.0174532925199433]],PROJECTION[\"" + projection + "\"],"
+                + "PARAMETER[\"latitude_of_center\",40.0],PARAMETER[\"longitude_of_center\",-74.0],"
+                + "PARAMETER[\"azimuth\",30.0]," + skew + "PARAMETER[\"scale_factor\",1.0],"
+                + "PARAMETER[\"false_easting\",0.0],PARAMETER[\"false_northing\",0.0],"
+                + "UNIT[\"Meter\",1.0]]";
+    }
+
+    /**
+     * The skew angle the projection will actually use, in degrees: the {@code +gamma} token if there
+     * is one, and otherwise the azimuth, which is what {@code omerc} defaults to
+     * ({@code omerc.cpp:224-226}).
+     * <p>
+     * Asserting the effective value rather than the text is what makes these tests comparable with
+     * PROJ at all: PROJ's exporter deliberately omits {@code +gamma} for the
+     * {@code Rectified_Skew_Orthomorphic_*} spelling ({@code conversion.cpp:4375-4383}), so a test
+     * that matched on the token would disagree with PROJ about cases where the two agree.
+     */
+    private static double effectiveGamma(String wkt) {
+        String p = proj(wkt);
+        Double alpha = token(p, "+alpha=");
+        assertTrue("no +alpha in " + p, alpha != null);
+        Double gamma = token(p, "+gamma=");
+        return gamma != null ? gamma.doubleValue() : alpha.doubleValue();
+    }
+
+    /** The value of a {@code +key=} token in a PROJ string, or {@code null} if it has none. */
+    private static Double token(String projString, String key) {
+        int at = projString.indexOf(key);
+        if (at < 0) {
+            return null;
+        }
+        int from = at + key.length();
+        int end = projString.indexOf(' ', from);
+        return Double.valueOf(projString.substring(from, end < 0 ? projString.length() : end));
+    }
+
     /** An ESRI foot unit is honoured by its factor even though the name is ESRI's own. */
     @Test
     public void esriFootUnit() {
