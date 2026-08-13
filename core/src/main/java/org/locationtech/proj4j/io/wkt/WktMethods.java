@@ -745,8 +745,9 @@ final class WktMethods {
         if ((method.flags & FLAG_HOTINE) != 0) {
             String alpha = values.get("alpha");
             String gamma = values.get("gamma");
-            if (alpha != null && gamma == null) {
-                // PROJ synthesises gamma from alpha when WKT1 omits rectified_grid_angle.
+            if (alpha != null && (gamma == null || esriGammaComesFromAzimuth(conv))) {
+                // PROJ synthesises gamma from alpha when WKT1 omits rectified_grid_angle, and also
+                // when ESRI WKT supplies one that the ESRI method does not have.
                 gamma = alpha;
                 values.put("gamma", gamma);
             }
@@ -816,6 +817,35 @@ final class WktMethods {
         }
         return AxisDefinition.SOUTH.equals(cs.getAxes().get(0).getDirection())
                 && AxisDefinition.WEST.equals(cs.getAxes().get(1).getDirection());
+    }
+
+    /**
+     * Whether an ESRI-style Hotine Oblique Mercator takes its {@code +gamma} from the azimuth,
+     * discarding any skew angle the document happened to give.
+     * <p>
+     * PROJ does this at {@code io.cpp:4065-4077}: when the document has confirmed itself ESRI-style
+     * and the method is Hotine Oblique Mercator variant A (EPSG 9812) or variant B (EPSG 9815), the
+     * angle from the rectified to the skew grid is set equal to the azimuth of the initial line. The
+     * reason is in ESRI's own parameter tables: {@code Hotine_Oblique_Mercator_Azimuth_Center} and
+     * {@code Hotine_Oblique_Mercator_Azimuth_Natural_Origin} have no skew parameter at all, so a
+     * {@code rectified_grid_angle} or {@code XY_Plane_Rotation} sitting inside one of them is
+     * something ESRI would not have written and ESRI's own reader would not honour.
+     * <p>
+     * The two {@code Rectified_Skew_Orthomorphic_*} names map to the same two EPSG methods but
+     * <em>do</em> carry {@code XY_Plane_Rotation}, so PROJ excludes them by name and so does this.
+     * They are the only two such names in PROJ.
+     * <p>
+     * Note that both branches produce a projection with a {@code +gamma}; PROJ's own exporter simply
+     * omits the token for the {@code Rectified_Skew_Orthomorphic_*} spelling, where the value it
+     * would print equals the default {@code omerc} would pick anyway.
+     */
+    private static boolean esriGammaComesFromAzimuth(ConversionDefinition conv) {
+        if (!conv.isEsriStyle()) {
+            return false;
+        }
+        String name = conv.getMethodName();
+        return !WktNames.equalsRelaxed(name, "Rectified_Skew_Orthomorphic_Natural_Origin")
+                && !WktNames.equalsRelaxed(name, "Rectified_Skew_Orthomorphic_Center");
     }
 
     private static void refuseNonZero(Map<String, String> values, String key,
