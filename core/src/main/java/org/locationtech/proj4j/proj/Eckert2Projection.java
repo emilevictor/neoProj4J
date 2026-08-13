@@ -43,7 +43,13 @@ public class Eckert2Projection extends Projection {
 		out.x = xyx / (FXC * ( out.y = 2. - Math.abs(xyy) / FYC) );
 		out.y = (4. - out.y * out.y) * C13;
 		if (Math.abs(out.y) >= 1.) {
-			if (Math.abs(out.y) > ONEEPS)	throw new ProjectionException("I");
+			// The message used to be "I", upstream's pj_errno mnemonic, which tells a Java
+			// caller nothing. Same throw, same type, same cause -- only the text changed.
+			if (Math.abs(out.y) > ONEEPS)	throw new ProjectionException(
+					"eck2: northing " + xyy + " is off the map. Working back from it gives "
+							+ "sin(latitude) = " + out.y + ", and anything bigger than " + ONEEPS
+							+ " is too far outside -1..1 to be rounded to a pole "
+							+ "(eck2.cpp, eck2_s_inverse)");
 			else
 				out.y = out.y < 0. ? -ProjectionMath.HALFPI : ProjectionMath.HALFPI;
 		} else

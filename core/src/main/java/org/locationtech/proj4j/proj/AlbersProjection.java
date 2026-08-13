@@ -60,8 +60,14 @@ public class AlbersProjection extends Projection {
 
 	public ProjCoordinate project(double lplam, double lpphi, ProjCoordinate out) {
 		double rho;
+		// The message used to be "F", upstream's pj_errno mnemonic, which tells a Java
+		// caller nothing. Same throw, same type, same cause -- only the text changed.
 		if ((rho = c - (!spherical ? n * authalic.q(Math.sin(lpphi)) : n2 * Math.sin(lpphi))) < 0.)
-			throw new ProjectionException("F");
+			throw new ProjectionException(
+					"aea: latitude " + lpphi + " rad is past the far edge of the cone. The "
+							+ "radius of the parallel is the square root of c - n*q(sin(latitude)), "
+							+ "and that came out negative at " + rho
+							+ " (aea.cpp, aea_e_forward)");
 		rho = dd * Math.sqrt(rho);
 		out.x = rho * Math.sin( lplam *= n );
 		out.y = rho0 - rho * Math.cos(lplam);
@@ -141,7 +147,12 @@ public class AlbersProjection extends Projection {
 		phi2 = secondStandardParallel();
 
 		if (Math.abs(phi1 + phi2) < EPS10)
-			throw new ProjectionException("-21");
+			throw new ProjectionException(
+					"aea: the two standard parallels are equal and opposite, so this projection "
+							+ "cannot be set up. lat_1 = " + phi1 + " rad and lat_2 = " + phi2
+							+ " rad cancel to within " + EPS10
+							+ ", which makes the cone degenerate. Upstream's legacy pj_errno -21 "
+							+ "was \"conic lat_1 = -lat_2\" (aea.cpp, setup)");
 		n = sinphi = Math.sin(phi1);
 		cosphi = Math.cos(phi1);
 		secant = Math.abs(phi1 - phi2) >= EPS10;

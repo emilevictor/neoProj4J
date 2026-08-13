@@ -131,6 +131,56 @@ package org.locationtech.proj4j.util;
  * on an 8/11 baseline, where an x87 FPU could otherwise evaluate intermediates in 80-bit
  * extended precision.
  *
+ * <h2>The limit of the guarantee: what still calls {@code Math}, counted</h2>
+ *
+ * <p>This class removes the platform dependence only where it is actually called. Seven
+ * {@code java.lang.Math} methods are {@code @IntrinsicCandidate} and are therefore
+ * platform-variant: <b>{@code sin cos tan log log10 exp pow}</b>. HotSpot substitutes a
+ * hand-written implementation for each, and those implementations do not agree bit-for-bit
+ * between x86-64 and AArch64. The rest of {@code Math} that proj4j uses — {@code sqrt abs asin
+ * acos atan atan2 hypot floor} and so on — either delegates to {@code StrictMath} or is exactly
+ * specified by IEEE 754, and is already deterministic. (That set of seven is the same one named
+ * in {@code LandsatProjection} and in {@code RepointBitIdentityTest}; it is not the naive
+ * "all the trig functions" set.)
+ *
+ * <p>Counted on 2026-08-13 over <b>{@code core/src/main/java}</b> (366 files), with comments and
+ * string literals removed before matching: <b>673 calls</b> to those seven methods remain, in 74
+ * files. By method: {@code sin} 246, {@code cos} 231, {@code tan} 85, {@code log} 50,
+ * {@code pow} 49, {@code exp} 12, {@code log10} 0. The heaviest files:
+ *
+ * <table>
+ *   <caption>remaining platform-variant {@code Math} calls, top of the list</caption>
+ *   <tr><th>file</th><th>calls</th></tr>
+ *   <tr><td>{@code KrovakProjection}</td><td><b>49</b> ({@code sin} 17, {@code cos} 12,
+ *       {@code pow} 12, {@code tan} 8)</td></tr>
+ *   <tr><td>{@code SwissObliqueMercatorProjection}</td><td>33</td></tr>
+ *   <tr><td>{@code ObliqueMercatorProjection}</td><td>31</td></tr>
+ *   <tr><td>{@code SimpleConicProjection}</td><td>30</td></tr>
+ *   <tr><td>{@code ProjectionMath}</td><td>29</td></tr>
+ *   <tr><td>the other 69 files</td><td>501</td></tr>
+ * </table>
+ *
+ * <p><b>{@code KrovakProjection} is named separately because a grep will not find it.</b> That
+ * file has {@code import static java.lang.Math.*} at the top, so its calls are spelled
+ * {@code sin(x)}, not {@code Math.sin(x)}. Searching it for {@code Math\.} matches 12 lines and
+ * <em>none</em> of its 49 platform-variant calls. Any future audit has to count both spellings or
+ * it will silently under-report.
+ *
+ * <p>Two independent instruments produced the 673, and they agree exactly — per method, and per
+ * file across all 74: a comment-stripped regex sweep of the sources, and a {@code javap -c} scan
+ * of the 445 compiled classes in {@code core/target/classes} counting every
+ * {@code invokestatic} whose target is {@code java/lang/Math} and one of the seven names.
+ * {@code KrovakProjection}'s 49 was also counted by hand,
+ * line by line. A single un-stripped grep gives 665 and is wrong in both directions: it counts
+ * javadoc mentions and misses every bare call.
+ *
+ * <p><b>What this means for a caller.</b> A transform whose path reaches one of those 673 sites
+ * can return different bits on a different JVM or a different CPU architecture. The difference is
+ * last-bit — one ulp of a radian is about 2 pm — but it is real, and it is outside the
+ * bit-identity guarantee stated above, which covers only what goes through this class or
+ * {@code StrictMath}. Code that needs identical bits across a mixed-architecture cluster should
+ * treat those 673 sites as the remaining exposure, and the counts above as the work list.
+ *
  * @see StrictMath#sin(double)
  */
 public final strictfp class FastStrictTrig {

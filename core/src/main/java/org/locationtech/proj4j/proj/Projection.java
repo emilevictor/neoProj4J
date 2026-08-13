@@ -344,7 +344,7 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
      *     finiteness <b>before</b> the affine post-multiply.</li>
      * </ol>
      *
-     * <h2>Step 1 before step 2, which is not where they used to be</h2>
+     * <h4>Step 1 before step 2, which is not where they used to be</h4>
      *
      * <p>{@code project(ProjCoordinate, ProjCoordinate)} and
      * {@code projectRadians(ProjCoordinate, ProjCoordinate)} each used to do the subtraction and the
@@ -384,7 +384,7 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
      * a projection whose {@code totalScale} was zero, and {@code NaN} otherwise — one of the two
      * shapes a caller cannot detect.
      *
-     * <h2>{@code NaN} input is propagated, not rejected — and that is deliberate</h2>
+     * <h4>{@code NaN} input is propagated, not rejected — and that is deliberate</h4>
      *
      * <p>A {@code NaN} the caller supplied is <em>propagated</em>, by an early return taken
      * <b>before</b> {@link #project(double, double, ProjCoordinate)}: the checks are skipped, the

@@ -35,7 +35,13 @@ public class CentralCylindricalProjection extends CylindricalProjection {
 	}
 
 	public ProjCoordinate project(double lplam, double lpphi, ProjCoordinate out) {
-		if (Math.abs(Math.abs(lpphi) - ProjectionMath.HALFPI) <= EPS10) throw new ProjectionException("F");
+		// The message used to be "F", upstream's pj_errno mnemonic, which tells a Java
+		// caller nothing. Same throw, same type, same cause -- only the text changed.
+		if (Math.abs(Math.abs(lpphi) - ProjectionMath.HALFPI) <= EPS10) throw new ProjectionException(
+				"cc: the point is at a pole. Latitude " + lpphi + " rad is within " + EPS10
+						+ " rad of " + ProjectionMath.HALFPI + " rad, and the central "
+						+ "cylindrical northing is tan(latitude), which is infinite there "
+						+ "(cc.cpp, cc_s_forward)");
 		out.x = lplam;
 		out.y = Math.tan(lpphi);
 		return out;

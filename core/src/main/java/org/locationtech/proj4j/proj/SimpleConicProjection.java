@@ -221,8 +221,20 @@ public class SimpleConicProjection extends ConicProjection {
 			n = Math.sin(sig);
 			c2 = Math.cos(del);
 			c1 = 1./Math.tan(sig);
+			// The message used to be "-43", a legacy proj.4 pj_errno code, which tells a Java
+			// caller nothing. Same throw, same type, same cause -- only the text changed.
+			// The assignment to del stays inside the condition: the next line reads it.
 			if (Math.abs(del = projectionLatitude - sig) - EPS10 >= ProjectionMath.HALFPI)
-				throw new ProjectionException("-43");
+				throw new ProjectionException(
+						"pconic: +lat_0 is too far from the standard parallels, so this "
+								+ "projection cannot be set up. lat_0 = " + projectionLatitude
+								+ " rad minus their mean of " + sig + " rad comes to " + del
+								+ " rad, and the size of that gap has to stay below "
+								+ ProjectionMath.HALFPI + " rad, give or take " + EPS10
+								+ ". Upstream's legacy pj_errno -43 "
+								+ "was \"lat_0 is pi/2 from mean lat\"; 9.8.1 words it "
+								+ "\"|lat_0 - 0.5 * (lat_1 + lat_2)| should be < 90 degrees\" "
+								+ "(sconics.cpp, pj_sconics_setup)");
 			rho_0 = c2 * (c1 - Math.tan(del));
 			break;
 		case VITK1:

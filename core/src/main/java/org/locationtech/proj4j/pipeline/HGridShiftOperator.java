@@ -74,13 +74,23 @@ final class HGridShiftOperator implements PipelineOperator {
      * resolver chain.
      *
      * @param gridSpec a comma-separated grid list, {@code @}-prefixed entries optional
+     * @param key      the parameter name the spec was written under, for error messages. This
+     *                 operator is reached from {@code +proj=hgridshift +grids=} and, via
+     *                 {@code Cs2csOperator}, from {@code +nadgrids=}; passing the real name keeps
+     *                 a {@code +nadgrids=} user from being told about {@code +grids=}.
      * @return the operator; never {@code null}
      * @throws PipelineDefinitionException {@code MISSING_ARG} when {@code gridSpec} is
      *                                     absent, {@code FILE_NOT_FOUND_OR_INVALID}
      *                                     when a required grid cannot be resolved
      */
+    static HGridShiftOperator fromGrids(final String gridSpec, final String key) {
+        return new HGridShiftOperator(HorizontalGrids.open(gridSpec, key));
+    }
+
+    /** @return the operator, for a spec written as {@code +grids=}.
+     *  @param gridSpec a comma-separated grid list, {@code @}-prefixed entries optional */
     static HGridShiftOperator fromGrids(final String gridSpec) {
-        return new HGridShiftOperator(HorizontalGrids.open(gridSpec, "grids"));
+        return fromGrids(gridSpec, "grids");
     }
 
     /** @return the {@code +grids=} list as written. */

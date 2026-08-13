@@ -125,14 +125,24 @@ public class EqualAreaAzimuthalProjection extends AzimuthalProjection {
 			switch (mode) {
 			case EQUATOR:
 				xy.y = 1. + cosphi * coslam;
-				if (xy.y <= EPS10) throw new ProjectionException();
+				if (xy.y <= EPS10) throw new ProjectionException(
+						"laea: the point is antipodal to the centre of projection. "
+								+ "1 + cos(angular distance from the centre) has come to "
+								+ xy.y + ", so the point is on the far side of the sphere and "
+								+ "the azimuth from the centre is undefined "
+								+ "(laea.cpp, laea_s_forward, equatorial aspect)");
 				xy.x = (xy.y = Math.sqrt(2. / xy.y)) * cosphi * Math.sin(lam);
 				xy.y *= mode == EQUATOR ? sinphi :
 				   cosphi0 * sinphi - sinphi0 * cosphi * coslam;
 				break;
 			case OBLIQUE:
 				xy.y = 1. + sinphi0 * sinphi + cosphi0 * cosphi * coslam;
-				if (xy.y <= EPS10) throw new ProjectionException();
+				if (xy.y <= EPS10) throw new ProjectionException(
+						"laea: the point is antipodal to the centre of projection. "
+								+ "1 + cos(angular distance from the centre) has come to "
+								+ xy.y + ", so the point is on the far side of the sphere and "
+								+ "the azimuth from the centre is undefined "
+								+ "(laea.cpp, laea_s_forward, oblique aspect)");
 				xy.x = (xy.y = Math.sqrt(2. / xy.y)) * cosphi * Math.sin(lam);
 				xy.y *= mode == EQUATOR ? sinphi :
 				   cosphi0 * sinphi - sinphi0 * cosphi * coslam;
@@ -140,7 +150,11 @@ public class EqualAreaAzimuthalProjection extends AzimuthalProjection {
 			case NORTH_POLE:
 				coslam = -coslam;
 			case SOUTH_POLE:
-				if (Math.abs(phi + projectionLatitude) < EPS10) throw new ProjectionException();
+				if (Math.abs(phi + projectionLatitude) < EPS10) throw new ProjectionException(
+						"laea: latitude " + phi + " rad is the pole opposite the centre of "
+								+ "projection at lat_0 = " + projectionLatitude + " rad. That "
+								+ "antipode is the whole rim of the map at once, so it has no "
+								+ "single position (laea.cpp, laea_s_forward, polar aspect)");
 				xy.y = ProjectionMath.QUARTERPI - phi * .5;
 				xy.y = 2. * (mode == SOUTH_POLE ? Math.cos(xy.y) : Math.sin(xy.y));
 				xy.x = xy.y * Math.sin(lam);
@@ -176,7 +190,12 @@ public class EqualAreaAzimuthalProjection extends AzimuthalProjection {
 				q = qp + q;
 				break;
 			}
-			if (Math.abs(b) < EPS10) throw new ProjectionException();
+			if (Math.abs(b) < EPS10) throw new ProjectionException(
+					"laea: the point is antipodal to the centre of projection. b -- which is "
+							+ "1 + cos(angular distance from the centre) for the oblique and "
+							+ "equatorial aspects, and the angular distance from the far pole for "
+							+ "the polar ones -- has come to " + b + ", and the next step takes "
+							+ "sqrt(2/b) (laea.cpp, laea_e_forward)");
 			switch (mode) {
 			case OBLIQUE:
 				xy.y = ymf * ( b = Math.sqrt(2. / b) )
@@ -209,7 +228,10 @@ public class EqualAreaAzimuthalProjection extends AzimuthalProjection {
 			double  cosz = 0, rh, sinz = 0;
 
 			rh = ProjectionMath.distance(x, y);
-			if ((lp.y = rh * .5 ) > 1.) throw new ProjectionException();
+			if ((lp.y = rh * .5 ) > 1.) throw new ProjectionException(
+					"laea: the point lies outside the map. The whole sphere fits inside a disc of "
+							+ "radius 2 about the centre of projection, and this point is " + rh
+							+ " out (laea.cpp, laea_s_inverse)");
 			lp.y = 2. * Math.asin(lp.y);
 			if (mode == OBLIQUE || mode == EQUATOR) {
 				sinz = Math.sin(lp.y);

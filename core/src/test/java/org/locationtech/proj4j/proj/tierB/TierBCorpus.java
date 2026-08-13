@@ -67,8 +67,10 @@ import org.locationtech.proj4j.units.Angle;
  *     four Tier B groups here have one and the assertion is that Proj4J <em>throws</em>. A skipped
  *     failure row is the "failure-to-implement scoring as conformance" trap that cost this project
  *     a retracted baseline once already.</li>
- * <li><b>Parameters {@code Proj4Parser} does not dispatch can be applied</b>, for the three
- *     operators whose corpus lines need them. See {@link #build(String)}.</li>
+ * <li><b>Three operators are built by hand instead of through the parser</b>, because their
+ *     corpus lines carry parameters {@code Proj4Parser} did not dispatch when this was written.
+ *     It dispatches all of them now; the manual path is kept anyway, and
+ *     {@link #build(String)} says why.</li>
  * </ul>
  */
 final class TierBCorpus {
@@ -272,21 +274,39 @@ final class TierBCorpus {
      * Builds the {@link Projection} an operation line describes.
      *
      * <p>Most Tier B operation lines go straight through {@link CRSFactory}, which is the honest
-     * path: it exercises the real parser. Three operators cannot, because
-     * {@code Proj4Parser.parseProjection} has no dispatch for the parameters their corpus lines
-     * carry, and Proj4J's parse mode is {@code PROJ_COMPATIBLE} — an unrecognised key is retained
-     * and silently ignored, exactly as PROJ does. For those three the parser's job is done here,
-     * explicitly:
+     * path: it exercises the real parser. Three operators — {@code som}, {@code misrsom} and
+     * {@code ob_tran} — are built here by hand instead, as {@code needsUndispatchedParameters}
+     * decides.
+     *
+     * <p><b>That name no longer describes the code.</b> When this was written
+     * {@code Proj4Parser.parseProjection} had no dispatch for the parameters those three corpus
+     * lines carry, and Proj4J's parse mode is {@code PROJ_COMPATIBLE} — an unrecognised key is
+     * retained and silently ignored, exactly as PROJ does — so the rows would have run on default
+     * parameters and quietly produced the wrong numbers. The parser dispatches every one of those
+     * keys today:
      *
      * <table>
-     * <caption>the undispatched keys, per operator</caption>
-     * <tr><th>{@code +proj=}</th><th>keys the parser drops</th></tr>
-     * <tr><td>{@code som}</td><td>{@code +inc_angle}, {@code +ps_rev}, {@code +asc_lon}</td></tr>
-     * <tr><td>{@code misrsom}</td><td>{@code +path}</td></tr>
+     * <caption>where each key is dispatched now</caption>
+     * <tr><th>{@code +proj=}</th><th>keys</th><th>dispatched on</th></tr>
+     * <tr><td>{@code som}</td><td>{@code +inc_angle}, {@code +ps_rev}, {@code +asc_lon}</td>
+     *     <td>{@code SpaceObliqueMercatorProjection}</td></tr>
+     * <tr><td>{@code misrsom}</td><td>{@code +path}</td>
+     *     <td>{@code MisrSpaceObliqueMercatorProjection}</td></tr>
      * <tr><td>{@code ob_tran}</td><td>{@code +o_proj}, {@code +o_lat_p}, {@code +o_lon_p},
      *     {@code +o_alpha}, {@code +o_lon_c}, {@code +o_lat_c},
-     *     {@code +o_lon_1/2}, {@code +o_lat_1/2}</td></tr>
+     *     {@code +o_lon_1/2}, {@code +o_lat_1/2}</td>
+     *     <td>{@code ObliqueTransformationProjection}, in one {@code setParameters(args)}
+     *     call</td></tr>
      * </table>
+     *
+     * <p>The manual path is kept anyway, on purpose, because it is not the same path and swapping
+     * to {@link CRSFactory} would change what these rows test. It reads {@code +path} with
+     * {@code Integer.parseInt}, where the parser uses {@code parseIntStrict} — digits and nothing
+     * else, so {@code +path=-5} is an error there and not here. It sets only the keys tabulated
+     * above plus {@code +lon_0}, where the parser would also apply {@code +x_0}, {@code +y_0} and
+     * the rest of the common set. And it takes the ellipsoid from {@code ellipsoidOf}. Routing
+     * these three through the parser is a behaviour change with its own evidence to gather, not a
+     * tidy-up.
      *
      * <p><b>This is not a private parser and must not grow into one.</b> The ellipsoid still comes
      * from the real {@code Proj4Parser}, obtained by parsing the same line with {@code proj=}
@@ -325,6 +345,19 @@ final class TierBCorpus {
         return p;
     }
 
+    /**
+     * True selects the hand-built path in {@link #build(String)}; false sends the line through
+     * {@link CRSFactory} and the real parser.
+     *
+     * <p>The name is now a historical one. All three of these operators have their parameters
+     * dispatched by {@code Proj4Parser} — {@code +inc_angle}/{@code +ps_rev}/{@code +asc_lon} for
+     * {@code som}, {@code +path} for {@code misrsom}, the whole {@code +o_*} set for
+     * {@code ob_tran} — so "undispatched" is no longer literally true of any of them. The method
+     * still returns true for all three deliberately: flipping one of them to false does not make
+     * the test stricter, it moves the row onto different code (see the {@code +path} parsing and
+     * common-parameter differences listed on {@link #build(String)}), and that is a change to
+     * measure, not to slip in with a comment fix.
+     */
     static boolean needsUndispatchedParameters(String projName) {
         return "som".equals(projName) || "misrsom".equals(projName) || "ob_tran".equals(projName);
     }

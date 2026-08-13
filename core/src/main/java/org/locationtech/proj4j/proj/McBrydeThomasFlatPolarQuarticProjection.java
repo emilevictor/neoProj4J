@@ -81,7 +81,14 @@ public class McBrydeThomasFlatPolarQuarticProjection extends PseudoCylindricalPr
 
 		double lpphi = RYC * xyy;
 		if (Math.abs(lpphi) > 1.) {
-			if (Math.abs(lpphi) > ONETOL)	throw new ProjectionException("I");
+			// The message used to be "I", upstream's pj_errno mnemonic, which tells a Java
+			// caller nothing. Same throw, same type, same cause -- only the text changed.
+			if (Math.abs(lpphi) > ONETOL)	throw new ProjectionException(
+					"mbtfpq: the northing is off the map. The northing times " + RYC
+							+ " has come to " + lpphi + ", and the next step takes asin of "
+							+ "it, so it has to be within 1 -- only values up to " + ONETOL
+							+ " are read as rounding error and pulled back to the limit "
+							+ "(mbtfpq.cpp, mbtfpq_s_inverse)");
 			else if (lpphi < 0.) { t = -1.; lpphi = -Math.PI; }
 			else { t = 1.; lpphi = Math.PI; }
 		} else
@@ -90,7 +97,12 @@ public class McBrydeThomasFlatPolarQuarticProjection extends PseudoCylindricalPr
 		lpphi = RC * (t + Math.sin(lpphi));
 		if (Math.abs(lpphi) > 1.)
 			if (Math.abs(lpphi) > ONETOL)
-				throw new ProjectionException("I");
+				throw new ProjectionException(
+						"mbtfpq: no latitude matches this point. The sine of the latitude, "
+								+ RC + " * (t + sin(parametric latitude)), has come to " + lpphi
+								+ ", and the next step takes asin of it, so it has to be within "
+								+ "1 -- only values up to " + ONETOL + " are rounded to the pole "
+								+ "(mbtfpq.cpp, mbtfpq_s_inverse)");
 			else
 				lpphi = lpphi < 0. ? -ProjectionMath.HALFPI : ProjectionMath.HALFPI;
 		else

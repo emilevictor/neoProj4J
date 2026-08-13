@@ -74,8 +74,14 @@ public class HatanoProjection extends Projection {
 		double th;
 
 		th = xyy * ( xyy < 0. ? RYCS : RYCN);
+		// The message used to be "I", upstream's pj_errno mnemonic, which tells a Java
+		// caller nothing. Same throw, same type, same cause -- only the text changed.
 		if (Math.abs(th) > 1.)
-			if (Math.abs(th) > ONETOL)	throw new ProjectionException("I");
+			if (Math.abs(th) > ONETOL)	throw new ProjectionException(
+					"hatano: northing " + xyy + " is off the map. Scaling it gives " + th
+							+ " for the sine of half the parametric latitude, and anything "
+							+ "bigger than " + ONETOL + " is too far outside -1..1 to be rounded "
+							+ "to a pole (hatano.cpp, hatano_s_inverse)");
 			else			th = th > 0. ? ProjectionMath.HALFPI : - ProjectionMath.HALFPI;
 		else
 			th = Math.asin(th);
@@ -83,7 +89,11 @@ public class HatanoProjection extends Projection {
 		th += th;
 		out.y = (th + Math.sin(th)) * (xyy < 0. ? RCS : RCN);
 		if (Math.abs(out.y) > 1.)
-			if (Math.abs(out.y) > ONETOL)	throw new ProjectionException("I");
+			if (Math.abs(out.y) > ONETOL)	throw new ProjectionException(
+					"hatano: the point is off the map. The parametric latitude recovered from "
+							+ "northing " + xyy + " gives sin(latitude) = " + out.y
+							+ ", and anything bigger than " + ONETOL + " is too far outside "
+							+ "-1..1 to be rounded to a pole (hatano.cpp, hatano_s_inverse)");
 			else			out.y = out.y > 0. ? ProjectionMath.HALFPI : - ProjectionMath.HALFPI;
 		else
 			out.y = Math.asin(out.y);

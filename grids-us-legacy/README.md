@@ -1,4 +1,4 @@
-# proj4j-grids-us-legacy
+# neoproj4j-grids-us-legacy
 
 The interim US datum-shift grid pack. **1,318,365 bytes unpacked** (264,424 + 1,053,928 + 13),
 ~1.13 MiB as a jar. Resources only:
@@ -6,8 +6,8 @@ no code, no dependencies, nothing to compile.
 
 > ## ⚠️ This pack now adds only `alaska`
 >
-> **`conus` ships in `proj4j-epsg` as of 2026-08-01**, at `proj4/nad/conus`. The conterminous United
-> States is therefore covered by `proj4j` + `proj4j-epsg` alone, with no opt-in artifact and no
+> **`conus` ships in `neoproj4j-epsg` as of 2026-08-01**, at `proj4/nad/conus`. The conterminous United
+> States is therefore covered by `neoproj4j` + `neoproj4j-epsg` alone, with no opt-in artifact and no
 > configuration — which is what retires the headline defect for a *default* deployment rather than for
 > the subset of users who knew to add a grid pack.
 >
@@ -16,19 +16,50 @@ no code, no dependencies, nothing to compile.
 > costs 1,053,928 further bytes to extend coverage to Alaska. Decide on that basis.
 >
 > The two copies live at **different resource paths on purpose** — `proj4j-data/grids/conus` here,
-> `proj4/nad/conus` in `proj4j-epsg` — so the two jars never collide. That matters most for `INDEX`:
+> `proj4/nad/conus` in `neoproj4j-epsg` — so the two jars never collide. That matters most for `INDEX`:
 > `ClasspathResourceResolver.loadIndex()` reads it with `ClassLoader.getResource`, which returns the
 > **first** match only, so two artifacts publishing `/proj4j-data/grids/INDEX` would make
 > `Proj.availableGrids()` depend on classpath order. This pack keeps sole ownership of that prefix.
 
 Adding this artifact to a classpath extends real datum-shift coverage to **Alaska**. Its `conus` is
-redundant with `proj4j-epsg`'s (identical bytes) but harmless.
+redundant with `neoproj4j-epsg`'s (identical bytes) but harmless.
 
-| resource | bytes | format | extent | nodes | also in `proj4j-epsg`? |
+| resource | bytes | format | extent | nodes | also in `neoproj4j-epsg`? |
 |---|---:|---|---|---:|---|
 | `proj4j-data/grids/conus` | 264,424 | CTABLE V2 | 131°W–63°W, 20°N–50°N, 0.25° | 273 × 121 | **yes**, as `proj4/nad/conus` |
 | `proj4j-data/grids/alaska` | 1,053,928 | CTABLE V2 | 194°W–128°W, 46°N–77°N, 0.125° | 529 × 249 | no — **the reason to add this pack** |
 | `proj4j-data/grids/INDEX` | 13 | manifest | — | — | no |
+
+## The duplicated `conus` is deliberate
+
+This section records a decision that was already taken; it is not an invitation to re-take it. The
+same grid ships twice:
+
+| copy | bytes |
+|---|---:|
+| `epsg/src/main/resources/proj4/nad/conus` | 264,424 |
+| `grids-us-legacy/src/main/resources/proj4j-data/grids/conus` | 264,424 |
+
+Both are SHA-256 `504d184f9a9f6e6c6b76df753346fd236b74772f52a8a5c90d8a43d3651d274d`, and both are
+PROJ 9.8.1 blob `44b4900f3168a5b87794f41d201d03d5aea0b964`, redistributed verbatim. Byte identity
+re-verified on 2026-08-13:
+
+```
+$ cmp epsg/src/main/resources/proj4/nad/conus \
+      grids-us-legacy/src/main/resources/proj4j-data/grids/conus
+$ echo $?
+0
+```
+
+`cmp` printed nothing and exited 0, which is what it does when two files match to the byte.
+
+**Why both copies exist.** Each artifact is self-contained, so neither module depends on the other.
+`neoproj4j` + `neoproj4j-epsg` covers the conterminous United States with no opt-in artifact and no
+configuration, and this pack still works on its own, for the sake of `alaska`. Neither jar has to
+reach into the other's resources, and neither has to be on the classpath for the other to be
+correct. The resource paths differ on purpose as well (see the box above), so the two jars never
+collide. 264,424 bytes is the price of that independence, and it was accepted knowingly. The same
+note is in `epsg/pom.xml`, for a reader who arrives from that side.
 
 ## Why these files, and why "legacy"
 
@@ -40,7 +71,7 @@ directory name. `org.locationtech.proj4j.datum.CTABLEV2` **already reads that fo
 The modern equivalents are GeoTIFF (`us_noaa_conus.tif`, 173,029 B; `us_noaa_hawaii.tif`;
 `us_noaa_prvi.tif`; …), which are smaller and cover more regions, but need a GeoTIFF reader that Proj4J
 does not have yet. Hence *legacy*: this pack is the cheap interim, to be superseded by
-`proj4j-grids-us` once the GeoTIFF reader lands.
+`neoproj4j-grids-us` once the GeoTIFF reader lands.
 
 **`hawaii`, `prvi`, `stgeorge`, `stlrnc` and `stpaul` are not here**, and not because they were forgotten:
 PROJ 9.8.1's tree contains no CTABLE V2 form of them. `git ls-tree 9.8.1:data/tests/` holds exactly two of
@@ -72,7 +103,7 @@ are ever in doubt.
 PROJ's `COPYING` at 9.8.1 states that "all source, **data files** and other contents of the PROJ package"
 are available under its MIT licence, so these two grids are MIT, not Apache 2.0. MIT requires the notice
 to travel with the file, so the repository-root **`LICENSE.PROJ`** is embedded in this jar at
-`META-INF/LICENSE.PROJ` and declared in `pom.xml`'s `<licenses>`. The same file covers `proj4j-epsg`'s
+`META-INF/LICENSE.PROJ` and declared in `pom.xml`'s `<licenses>`. The same file covers `neoproj4j-epsg`'s
 copy of `conus`.
 
 ## Size budget
@@ -88,4 +119,4 @@ This module is listed in the root `pom.xml` `<modules>` and is published, unlike
 
 The root pom sets `maven.install.skip=true`, so nothing this build produces lands in your local
 repository and inter-module dependencies can only resolve from the reactor. Any `-pl <module>`
-command must therefore also pass `-am`, or it fails to resolve `proj4j`.
+command must therefore also pass `-am`, or it fails to resolve `neoproj4j`.

@@ -40,7 +40,12 @@ public class VanDerGrintenProjection extends Projection {
 		double  al, al2, g, g2, p2;
 
 		p2 = Math.abs(lpphi / ProjectionMath.HALFPI);
-		if ((p2 - TOL) > 1.) throw new ProjectionException("F");
+		// The message used to be "F", upstream's pj_errno mnemonic, which tells a Java
+		// caller nothing. Same throw, same type, same cause -- only the text changed.
+		if ((p2 - TOL) > 1.) throw new ProjectionException(
+				"vandg: latitude " + lpphi + " rad is beyond the pole. As a fraction of a right "
+						+ "angle it is " + p2 + ", and only " + TOL
+						+ " of slack past 1 is allowed (vandg.cpp, vandg_s_forward)");
 		/*
 		 * vandg.cpp:25-27. This operator's forward reads P->over ITSELF, which is unusual -
 		 * for every other projection +over is purely a fwd_prepare/inv_finalize concern. Past
@@ -81,7 +86,11 @@ public class VanDerGrintenProjection extends Projection {
 			if (lplam < 0.) out.x = -out.x;
 			out.y = Math.abs(out.x / Math.PI);
 			out.y = 1. - out.y * (out.y + 2. * al);
-			if (out.y < -TOL) throw new ProjectionException("F");
+			if (out.y < -TOL) throw new ProjectionException(
+					"vandg: the point is off the map. The northing is pi times the square root of "
+							+ out.y + ", computed from easting " + out.x
+							+ ", and only " + TOL + " of slack below zero is allowed "
+							+ "(vandg.cpp, vandg_s_forward)");
 			if (out.y < 0.)
 				out.y = 0.;
 			else
@@ -119,7 +128,11 @@ public class VanDerGrintenProjection extends Projection {
 			out.x = Math.abs(xyx) <= TOL ? 0. :
 			   .5 * (r - PISQ + (t <= 0. ? 0. : Math.sqrt(t))) / xyx;
 		} else
-			throw new ProjectionException("I");
+			throw new ProjectionException(
+					"vandg: no point on the map projects to (" + xyx + ", " + xyy
+							+ "). Recovering the latitude means taking the arc cosine of " + d
+							+ ", whose size is " + t + ", and only " + TOL
+							+ " of slack past 1 is allowed (vandg.cpp, vandg_s_inverse)");
 		return out;
 	}
 

@@ -36,9 +36,16 @@ import org.locationtech.proj4j.proj.Projection;
 import org.locationtech.proj4j.proj.Urmaev5Projection;
 
 /**
- * The parts of this batch that the corpus cannot reach: the {@code expect failure} rows, the
- * forward-only projections' refusal to invent an inverse, and the three operators whose
- * required parameters {@code Proj4Parser} does not dispatch.
+ * The parts of this batch that the corpus cannot reach: the {@code expect failure} rows and the
+ * forward-only projections' refusal to invent an inverse.
+ *
+ * <p>The name is half out of date. Three of the tests below — {@code col_urban}, {@code gn_sinu}
+ * and {@code urm5} — were written when {@code Proj4Parser} had no dispatch for {@code +h_0},
+ * {@code +m}/{@code +n} and {@code +n}/{@code +q}, so their corpus rows could not be reached from
+ * a definition string at all. The parser dispatches every one of those keys now, so the rows are
+ * reachable. The tests stay as they are because they go straight at the projection classes: they
+ * pin the arithmetic and the setup rejections one layer below the parser, where a parser change
+ * cannot mask a numerical regression.
  */
 public class TierADomainAndParserGapTest {
 
@@ -151,13 +158,15 @@ public class TierADomainAndParserGapTest {
                 Projection.class, p.getClass());
     }
 
-    // ------------------------------------------------------------ parser gaps
+    // -------------------------------------------- parameters the parser used to drop
 
     /**
-     * {@code col_urban} requires {@code +h_0} ({@code col_urban.cpp:65}) and the parser does
-     * not dispatch it, so the corpus row is unreachable. The arithmetic is verified here
-     * through {@link ColombiaUrbanProjection#setH0(double)} against the expected values from
-     * {@code builtins.gie:8303-8310}, which come from IOGP Publication 373-7-2.
+     * {@code col_urban} requires {@code +h_0} ({@code col_urban.cpp:65}). {@code Proj4Parser}
+     * dispatches it on {@code ColombiaUrbanProjection}, so the corpus row is reachable from a
+     * definition string; it was not when this test was written. The arithmetic is still verified
+     * here through {@link ColombiaUrbanProjection#setH0(double)}, with the parser out of the way,
+     * against the expected values from {@code builtins.gie:8303-8310}, which come from IOGP
+     * Publication 373-7-2.
      *
      * <p>Read from the corpus rather than transcribed, so that this test and the eventual
      * conformance row cannot disagree.
@@ -187,12 +196,16 @@ public class TierADomainAndParserGapTest {
 
     /**
      * {@code gn_sinu} requires {@code +m} and {@code +n} — undocumented, and rejected when
-     * absent by {@code gn_sinu.cpp:178-198}. Neither is a {@code Proj4Keyword} nor dispatched
-     * by {@code Proj4Parser}, so {@code builtins.gie:2220}
-     * ({@code +proj=gn_sinu +a=6400000 +m=1 +n=2}) is unreachable from a definition string.
+     * absent by {@code gn_sinu.cpp:178-198}. Both are {@code Proj4Keyword}s now
+     * ({@code Proj4Keyword.m}, {@code Proj4Keyword.n}) and {@code Proj4Parser} dispatches both,
+     * on {@code GeneralSinusoidalProjection} and on nothing else, so {@code builtins.gie:2220}
+     * ({@code +proj=gn_sinu +a=6400000 +m=1 +n=2}) is reachable from a definition string. It was
+     * not when this test was written.
      *
      * <p>The arithmetic is checked here against that row's expected values, and the two
-     * validations are checked too.
+     * validations are checked too. Setting {@code m} and {@code n} on the class rather than
+     * through a definition string is deliberate: it keeps this a test of the projection, not of
+     * the parser.
      */
     @Test
     public void gnSinuArithmeticIsCorrectOnceMAndNAreSupplied() {
@@ -238,8 +251,9 @@ public class TierADomainAndParserGapTest {
 
     /**
      * {@code urm5} requires {@code +n} in {@code (0, 1]} and accepts optional {@code +q} and
-     * {@code +alpha}. Only {@code +alpha} is dispatched by the parser, so both corpus
-     * operations are unreachable.
+     * {@code +alpha}. The parser dispatches all three — {@code +n} and {@code +q} on
+     * {@code Urmaev5Projection}, {@code +alpha} on every projection — so both corpus operations
+     * are reachable. Only {@code +alpha} was dispatched when this test was written.
      *
      * <p>The second corpus operation, {@code +n=1 +alpha=90}, sits exactly on upstream's
      * setup rejection: {@code sqrt(1 - (n sin(alpha))^2)} is exactly zero there, tested with

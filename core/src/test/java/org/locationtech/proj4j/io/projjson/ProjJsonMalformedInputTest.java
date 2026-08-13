@@ -337,10 +337,14 @@ public class ProjJsonMalformedInputTest {
                 geographicWithEllipsoid("{\"name\":\"e\",\"semi_major_axis\":6378137}"));
     }
 
-    /** ProjJsonReader.ellipsoid, "\"semi_minor_axis\" has no value". */
+    /**
+     * ProjJsonReader.ellipsoid, "ellipsoid ... has a \"semi_minor_axis\" with no \"value\"" — and
+     * it names the ellipsoid, as its two sibling refusals above do.
+     */
     @Test
     public void aSemiMinorAxisMeasureWithoutAValueIsRefused() {
-        assertRefusal("a valueless semi_minor_axis", "\"semi_minor_axis\" has no value",
+        assertRefusal("a valueless semi_minor_axis",
+                "ellipsoid \"e\" has a \"semi_minor_axis\" with no \"value\"",
                 geographicWithEllipsoid("{\"name\":\"e\",\"semi_major_axis\":6378137,"
                         + "\"semi_minor_axis\":{\"unit\":\"metre\"}}"));
     }
@@ -353,11 +357,14 @@ public class ProjJsonMalformedInputTest {
                 geographicWithPrimeMeridian("{\"name\":\"p\"}"));
     }
 
-    /** ProjJsonReader.primeMeridian, "prime meridian longitude has no value". */
+    /**
+     * ProjJsonReader.primeMeridian, "prime meridian ... has a \"longitude\" with no \"value\"" —
+     * and it names the prime meridian, as the refusal above it does.
+     */
     @Test
     public void aPrimeMeridianLongitudeMeasureWithoutAValueIsRefused() {
         assertRefusal("a valueless prime meridian longitude",
-                "prime meridian longitude has no value",
+                "prime meridian \"p\" has a \"longitude\" with no \"value\"",
                 geographicWithPrimeMeridian(
                         "{\"name\":\"p\",\"longitude\":{\"unit\":\"degree\"}}"));
     }
@@ -412,10 +419,15 @@ public class ProjJsonMalformedInputTest {
                 withExtraMember("\"id\":{\"authority\":\"EPSG\"}"));
     }
 
-    /** ProjJsonReader.required, "missing numeric member" — and it names which one. */
+    /**
+     * ProjJsonReader.required, "missing numeric member" — and it names which one, plus the
+     * members the object did have, which is the only thing in scope there that points at the
+     * object the member is missing from.
+     */
     @Test
     public void aBoundingBoxMissingACornerIsRefused() {
-        assertRefusal("an incomplete bbox", "missing numeric member \"south_latitude\"",
+        assertRefusal("an incomplete bbox",
+                "missing numeric member \"south_latitude\"; the object's members are []",
                 withExtraMember("\"bbox\":{}"));
     }
 

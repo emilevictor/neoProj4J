@@ -81,7 +81,7 @@ public class Registry {
     /**
      * The ellipsoids reachable by {@code +ellps=}, searched by {@link #getEllipsoid(String)}.
      *
-     * <h2>Every entry is a reference, never a re-declaration</h2>
+     * <h4>Every entry is a reference, never a re-declaration</h4>
      *
      * <p>Twenty-seven of these were once spelled out again as {@code new Ellipsoid(...)} literals
      * here, alongside the {@code Ellipsoid} constants of the same name, and keeping two copies of
@@ -101,7 +101,7 @@ public class Registry {
      * {@code GeocentProjection.converter()}, a cache guard, where sharing means more cache hits and
      * never a different answer.
      *
-     * <h2>This array's order is deliberate and is not {@code Ellipsoid.ellipsoids}' order</h2>
+     * <h4>This array's order is deliberate and is not {@code Ellipsoid.ellipsoids}' order</h4>
      *
      * <p>The two arrays hold the same 49 ellipsoids, but in different orders, and the order of
      * {@code Ellipsoid.ellipsoids} is load-bearing in a way this one's is not:

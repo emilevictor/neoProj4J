@@ -14,6 +14,26 @@
     <description>EPSG, ESRI, world, NAD83 and NAD27 init dictionaries for neoProj4J, plus PROJ's
         `conus` CTABLE V2 grid.</description>
 
+    <!-- `conus` is deliberately duplicated, and this is a record of that decision, not a re-opening
+         of it.
+
+         The same grid ships twice in this repository:
+
+           epsg/src/main/resources/proj4/nad/conus
+           grids-us-legacy/src/main/resources/proj4j-data/grids/conus
+
+         The two files are byte-identical. Verified with `cmp`, which exits 0 and prints nothing;
+         both are 264,424 bytes; both are SHA-256
+         504d184f9a9f6e6c6b76df753346fd236b74772f52a8a5c90d8a43d3651d274d. Both are PROJ 9.8.1 blob
+         44b4900f3168a5b87794f41d201d03d5aea0b964, redistributed verbatim.
+
+         The duplication is on purpose: each artifact is self-contained, so neither module depends
+         on the other. `neoproj4j` plus `neoproj4j-epsg` covers the conterminous United States with
+         no opt-in artifact; `neoproj4j-grids-us-legacy` stays usable on its own and its reason to
+         exist is `alaska`. The resource paths differ on purpose too, so the two jars never collide
+         on a classpath. Do not "fix" the duplication by making one module read the other's copy.
+         See grids-us-legacy/README.md for the same note from the other side. -->
+
     <!-- Repeated rather than inherited: Maven appends this module's artifactId to an inherited
          <url> and <scm>. See the long note in the root POM; keep the values in step with it. -->
     <url>https://github.com/emilevictor/neoProj4J</url>
