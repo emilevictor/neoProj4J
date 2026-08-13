@@ -29,6 +29,7 @@ public final class ConversionDefinition {
     private Identifier methodId;
     private final List<ParameterDefinition> parameters = new ArrayList<ParameterDefinition>();
     private Identifier id;
+    private boolean esriStyle;
 
     public String getName() {
         return name;
@@ -86,6 +87,27 @@ public final class ConversionDefinition {
 
     public void setId(Identifier id) {
         this.id = id;
+    }
+
+    /**
+     * Whether the document this conversion came from confirmed itself to be ESRI-flavoured WKT1, by
+     * naming a {@code GEOGCS} {@code GCS_something} or a {@code DATUM} {@code D_something}.
+     * <p>
+     * Deliberately not the same question as {@link CrsDefinition#getSourceDialect()}: that is a
+     * guess from the shape of the document, this is a confirmation from its content. PROJ carries
+     * both, as {@code maybeEsriStyle_} and {@code esriStyle_}, and only the latter is allowed to
+     * change how methods and parameters are read.
+     * <p>
+     * Package-private for now. It changes how one method's parameters are interpreted, and the
+     * larger question of dialect-aware parameter matching is still open, so this is not yet a
+     * public commitment.
+     */
+    boolean isEsriStyle() {
+        return esriStyle;
+    }
+
+    void setEsriStyle(boolean esriStyle) {
+        this.esriStyle = esriStyle;
     }
 
     public String toString() {
