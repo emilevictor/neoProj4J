@@ -86,12 +86,21 @@ public final class VGridShiftOperator implements PipelineOperator {
     public static final double DEFAULT_MULTIPLIER = -1.0;
 
     private final String gridSpec;
+    /**
+     * The parameter name the spec was written under, for error messages only. This operator is
+     * reached from {@code +proj=vgridshift +grids=} and, via {@code Cs2csOperator}, from
+     * {@code +geoidgrids=}; without this the second kind of user is told about a parameter they
+     * never wrote and which {@code +proj=vgridshift} would reject.
+     */
+    private final String key;
     private final List<VerticalGrid> grids;
     private final double forwardMultiplier;
 
-    private VGridShiftOperator(final String gridSpec, final List<VerticalGrid> grids,
+    private VGridShiftOperator(final String gridSpec, final String key,
+                               final List<VerticalGrid> grids,
                                final double forwardMultiplier) {
         this.gridSpec = gridSpec;
+        this.key = key;
         this.grids = grids;
         this.forwardMultiplier = forwardMultiplier;
     }
@@ -102,14 +111,16 @@ public final class VGridShiftOperator implements PipelineOperator {
      *
      * @param gridSpec   a comma-separated grid list, {@code @}-prefixed entries optional
      * @param multiplier {@code +multiplier}; pass {@link #DEFAULT_MULTIPLIER} for PROJ's default
+     * @param key        the parameter name the spec was written under, for error messages
      * @return the operator; never {@code null}
      * @throws CrsTransformException with {@link ErrorCause#MISSING_GRID} if a required grid
      *                              cannot be resolved or parsed
      */
-    public static VGridShiftOperator fromGrids(final String gridSpec, final double multiplier) {
+    public static VGridShiftOperator fromGrids(final String gridSpec, final double multiplier,
+                                               final String key) {
         if (gridSpec == null || gridSpec.isEmpty()) {
             throw new CrsTransformException(ErrorCause.MISSING_PARAM,
-                    "+proj=vgridshift needs +grids=");
+                    "+proj=vgridshift needs +" + key + "=");
         }
         final List<VerticalGrid> resolved;
         try {
@@ -119,10 +130,17 @@ public final class VGridShiftOperator implements PipelineOperator {
             // PROJ_ERR_INVALID_OP_FILE_NOT_FOUND_OR_INVALID, raised at *construction*, which is
             // the whole point - a missing grid must not become a per-row surprise.
             throw new CrsTransformException(ErrorCause.MISSING_GRID,
-                    "+grids=" + gridSpec + ": " + e.getMessage(), e);
+                    "+" + key + "=" + gridSpec + ": " + e.getMessage(), e);
         }
-        return new VGridShiftOperator(gridSpec,
+        return new VGridShiftOperator(gridSpec, key,
                 Collections.unmodifiableList(new ArrayList<VerticalGrid>(resolved)), multiplier);
+    }
+
+    /** @return the operator, for a spec written as {@code +grids=}.
+     *  @param gridSpec   a comma-separated grid list
+     *  @param multiplier {@code +multiplier}; pass {@link #DEFAULT_MULTIPLIER} for PROJ's default */
+    public static VGridShiftOperator fromGrids(final String gridSpec, final double multiplier) {
+        return fromGrids(gridSpec, multiplier, "grids");
     }
 
     /** @return the same operator with PROJ's default {@code +multiplier=-1}.
@@ -207,7 +225,7 @@ public final class VGridShiftOperator implements PipelineOperator {
         }
         throw new CrsTransformException(ErrorCause.COORDINATE_OUTSIDE_GRID,
                 "(" + Math.toDegrees(lam) + ", " + Math.toDegrees(phi)
-                        + ") is outside every grid of +grids=" + gridSpec);
+                        + ") is outside every grid of +" + key + "=" + gridSpec);
     }
 
     /** {@code P-&gt;left = PJ_IO_UNITS_RADIANS} ({@code vgridshift.cpp:250}). */

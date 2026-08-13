@@ -36,8 +36,15 @@ public class TranverseCentralCylindricalProjection extends CylindricalProjection
         double b, bt;
 
         b = Math.cos(lpphi) * Math.sin(lplam);
+        // The message used to be "F", upstream's pj_errno mnemonic, which tells a Java
+        // caller nothing. Same throw, same type, same cause -- only the text changed.
         if ((bt = 1. - b * b) < EPS10)
-            throw new ProjectionException("F");
+            throw new ProjectionException(
+                    "tcc: the point is 90 degrees away from the central meridian, where the "
+                            + "transverse central cylindrical easting is infinite. "
+                            + "1 - (cos(latitude)*sin(longitude))^2 came to " + bt
+                            + ", and it has to stay above " + EPS10
+                            + " (tcc.cpp, tcc_s_forward)");
         out.x = b / Math.sqrt(bt);
         out.y = Math.atan2(Math.tan(lpphi), Math.cos(lplam));
         return out;

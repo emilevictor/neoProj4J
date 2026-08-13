@@ -71,8 +71,15 @@ public class UrmaevFlatPolarSinusoidalProjection extends Projection {
 
 	public void initialize() { // urmfps
 		super.initialize();
+		// The message used to be "-40", a legacy proj.4 pj_errno code, which tells a Java
+		// caller nothing. Same throw, same type, same cause -- only the text changed.
 		if (n <= 0. || n > 1.)
-			throw new ProjectionException("-40");
+			throw new ProjectionException(
+					"urmfps: +n=" + n + " is out of range, so this projection cannot be set up. "
+							+ "It has to be greater than 0 and no more than 1. Upstream's legacy "
+							+ "pj_errno -40 was \"n <= 0, n > 1 or not specified\"; 9.8.1 words it "
+							+ "\"Invalid value for n: it should be in ]0,1] range\" "
+							+ "(urmfps.cpp, PJ_PROJECTION(urmfps))");
 		C_y = Cy / n;
 	}
 

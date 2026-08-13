@@ -291,7 +291,8 @@ final class Cs2csOperator extends OverridableUnitsOperator {
         final String nadgrids = nadgridsSpec(params);
         this.hgridshift = nadgrids == null || nadgrids.isEmpty()
                 ? null
-                : HGridShiftOperator.fromGrids(nadgrids);
+                // "nadgrids", not "grids", for the same reason as the +geoidgrids= step below.
+                : HGridShiftOperator.fromGrids(nadgrids, "nadgrids");
 
         // create.cpp:125: `p = P->hgridshift ? nullptr : pj_param_exists(params, "towgs84")`.
         // A grid shift suppresses the Helmert *and* the do_cart branch below it, because
@@ -336,7 +337,10 @@ final class Cs2csOperator extends OverridableUnitsOperator {
         final String geoidGrids = params.value("geoidgrids");
         this.vgridshift = geoidGrids == null || geoidGrids.isEmpty()
                 ? null
-                : VGridShiftOperator.fromGrids(geoidGrids, VGridShiftOperator.DEFAULT_MULTIPLIER);
+                // "geoidgrids", not "grids": this step is auto-inserted from +geoidgrids=, and a
+                // runtime message naming +grids= would point at a parameter the user never wrote.
+                : VGridShiftOperator.fromGrids(geoidGrids, VGridShiftOperator.DEFAULT_MULTIPLIER,
+                        "geoidgrids");
 
         // create.cpp:70-88. The +axis helper is built whenever +axis is present:
         // upstream's guard compares the whole token "axis=enu" against "enu" and so

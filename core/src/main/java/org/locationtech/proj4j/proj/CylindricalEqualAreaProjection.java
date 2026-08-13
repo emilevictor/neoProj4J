@@ -86,7 +86,11 @@ public class CylindricalEqualAreaProjection extends Projection {
 				else
 					lp.y = Math.asin(y);
 				lp.x = x / scaleFactor;
-			} else throw new ProjectionException();
+			} else throw new ProjectionException(
+					"cea: the northing is off the top or bottom of the map. Scaled by k_0 it "
+							+ "comes to " + y + ", but the spherical inverse needs the magnitude "
+							+ "to be at most 1 -- that is the whole span from pole to pole -- and "
+							+ "here it is " + t + " (cea.cpp, cea_s_inverse)");
 		} else {
 			lp.y = authalic.inverse(Math.asin( 2. * y * scaleFactor / qp));
 			lp.x = x / scaleFactor;

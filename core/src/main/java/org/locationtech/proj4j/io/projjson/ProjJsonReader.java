@@ -222,9 +222,6 @@ public final class ProjJsonReader {
             datum.setFrameEpoch(epoch.doubleValue());
         }
         Map<String, Object> e = object(d, "ellipsoid");
-        if (e == null && ensemble) {
-            e = object(d, "ellipsoid");
-        }
         if (e != null) {
             datum.setEllipsoid(ellipsoid(e));
         } else if (!ensemble) {
@@ -272,7 +269,8 @@ public final class ProjJsonReader {
             Map<String, Object> m = asObject(minor, "semi_minor_axis");
             Double b = number(m, "value");
             if (b == null) {
-                throw new WktParseException("\"semi_minor_axis\" has no value");
+                throw new WktParseException("ellipsoid \"" + e.getName()
+                        + "\" has a \"semi_minor_axis\" with no \"value\"");
             }
             UnitDefinition u = unit(m.get("unit"), UnitDefinition.LINEAR);
             // Both axes must be in the same unit before a flattening can be computed from them.
@@ -311,7 +309,8 @@ public final class ProjJsonReader {
         Map<String, Object> m = asObject(longitude, "longitude");
         Double v = number(m, "value");
         if (v == null) {
-            throw new WktParseException("prime meridian longitude has no value");
+            throw new WktParseException("prime meridian \"" + pm.getName()
+                    + "\" has a \"longitude\" with no \"value\"");
         }
         pm.setLongitude(v.doubleValue());
         pm.setUnit(unit(m.get("unit"), UnitDefinition.ANGULAR));
@@ -566,7 +565,8 @@ public final class ProjJsonReader {
     private double required(Map<String, Object> o, String key) {
         Double v = number(o, key);
         if (v == null) {
-            throw new WktParseException("missing numeric member \"" + key + "\"");
+            throw new WktParseException("missing numeric member \"" + key
+                    + "\"; the object's members are " + o.keySet());
         }
         return v.doubleValue();
     }

@@ -109,7 +109,12 @@ public class BonneProjection extends Projection {
 			double rh = Math.copySign(ProjectionMath.distance(xyx, dy), phi1);
 			out.y = cphi1 + phi1 - rh;
 			double absPhi = Math.abs(out.y);
-			if (absPhi > ProjectionMath.HALFPI) throw new ProjectionException("I");
+			// The message used to be "I", upstream's pj_errno mnemonic, which tells a Java
+			// caller nothing. Same throw, same type, same cause -- only the text changed.
+			if (absPhi > ProjectionMath.HALFPI) throw new ProjectionException(
+					"bonne: the point is off the map. Its distance from the cone's apex puts the "
+							+ "latitude at " + out.y + " rad, which is past the pole at "
+							+ ProjectionMath.HALFPI + " rad (bonne.cpp, bonne_s_inverse)");
 			if (ProjectionMath.HALFPI - absPhi <= EPS10)
 				out.x = 0.;
 			else {
@@ -128,7 +133,11 @@ public class BonneProjection extends Projection {
 				out.x = phi1 > 0 ? lm * Math.atan2(xyx, dy) : lm * Math.atan2(-xyx, -dy);
 			} else if (absPhi - ProjectionMath.HALFPI <= EPS10)
 				out.x = 0.;
-			else throw new ProjectionException("I");
+			else throw new ProjectionException(
+					"bonne: the point is off the map. Its distance from the cone's apex puts the "
+							+ "latitude at " + out.y + " rad, more than " + EPS10
+							+ " rad past the pole at " + ProjectionMath.HALFPI
+							+ " rad (bonne.cpp, bonne_e_inverse)");
 		}
 		return out;
 	}

@@ -111,8 +111,15 @@ public final class Ellipsoid implements Cloneable, java.io.Serializable {
     public final static Ellipsoid GRS80 = new Ellipsoid("GRS80", 6378137.0, 0.0,
             298.257222101, "GRS 1980 (IUGG, 1980)");
 
+    // Only the reciprocal flattening is used. The constructor below takes the rf branch
+    // and recomputes poleRadius, so the b = 6356774.7 that used to sit here was thrown
+    // away (Registry.java notes the same precedence at its AUSTRALIAN entry). It was a
+    // *rounded* value too: a = 6378160.0 with rf = 298.25 derives b = 6356774.719195, so
+    // the discarded literal was 19.2 mm out. Zeroing it changes nothing - poleRadius,
+    // eccentricity and eccentricity2 come out bit-identical, and equal to aust_SA, which
+    // is the same ellipsoid declared with rf alone.
     public final static Ellipsoid AUSTRALIAN = new Ellipsoid("australian",
-            6378160.0, 6356774.7, 298.25, "Australian");
+            6378160.0, 0.0, 298.25, "Australian");
 
     public final static Ellipsoid MERIT = new Ellipsoid("MERIT", 6378137.0, 0.0,
             298.257, "MERIT 1983");

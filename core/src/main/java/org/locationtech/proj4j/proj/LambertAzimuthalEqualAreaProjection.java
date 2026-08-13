@@ -198,7 +198,15 @@ public class LambertAzimuthalEqualAreaProjection extends Projection {
         else 
           out.y = 1. + sinph0 * sinphi + cosph0 * cosphi * coslam;
 
-        if (out.y <= EPS10) throw new ProjectionException("F");
+        // The message used to be "F", upstream's pj_errno mnemonic, which tells a Java
+        // caller nothing. Same throw, same type, same cause -- only the text changed.
+        if (out.y <= EPS10) throw new ProjectionException(
+            "laea: the point is antipodal to the centre of projection. "
+                + "1 + cos(angular distance from the centre) has come to "
+                + out.y + ", so the point is on the far side of the sphere and "
+                + "the azimuth from the centre is undefined "
+                + "(laea.cpp, laea_s_forward, "
+                + (mode == EQUIT ? "equatorial" : "oblique") + " aspect)");
         out.x = (out.y = Math.sqrt(2. / out.y)) * cosphi * FastStrictTrig.sin(lplam);
         out.y *= mode == EQUIT ? sinphi :
            cosph0 * sinphi - sinph0 * cosphi * coslam;
@@ -206,7 +214,11 @@ public class LambertAzimuthalEqualAreaProjection extends Projection {
       case N_POLE:
         coslam = -coslam;
       case S_POLE:
-        if (Math.abs(lpphi + phi0) < EPS10) throw new ProjectionException("F");;
+        if (Math.abs(lpphi + phi0) < EPS10) throw new ProjectionException(
+            "laea: latitude " + lpphi + " rad is the pole opposite the centre of "
+                + "projection at lat_0 = " + phi0 + " rad. That "
+                + "antipode is the whole rim of the map at once, so it has no "
+                + "single position (laea.cpp, laea_s_forward, polar aspect)");
         out.y = ProjectionMath.QUARTERPI - lpphi * .5;
         out.y = 2. * (mode == S_POLE ? FastStrictTrig.cos(out.y) : FastStrictTrig.sin(out.y));
         out.x = out.y * FastStrictTrig.sin(lplam);
@@ -246,7 +258,12 @@ public class LambertAzimuthalEqualAreaProjection extends Projection {
         q = qp + q;
         break;
       }
-      if (Math.abs(b) < EPS10) throw new ProjectionException("F");
+      if (Math.abs(b) < EPS10) throw new ProjectionException(
+          "laea: the point is antipodal to the centre of projection. b -- which is "
+              + "1 + cos(angular distance from the centre) for the oblique and "
+              + "equatorial aspects, and the angular distance from the far pole for "
+              + "the polar ones -- has come to " + b + ", and the next step takes "
+              + "sqrt(2/b) (laea.cpp, laea_e_forward)");
       
       switch (mode) {
       case OBLIQ:
@@ -327,7 +344,12 @@ public class LambertAzimuthalEqualAreaProjection extends Projection {
       // order 1 -- squaring them cannot overflow or underflow. Same substitution etmerc
       // already carries; SolverBenchmark measures the pair head to head.
       rh = MathHelpers.norm2(xyx, xyy);
-      if ((lpphi = rh * .5 ) > 1.) throw new ProjectionException("I_ERROR");
+      if ((lpphi = rh * .5 ) > 1.) throw new ProjectionException(
+          "laea: no point on the map projects to (" + xyx + ", " + xyy + "). Its distance "
+              + "from the centre is " + rh + ", and half of that, " + lpphi
+              + ", is the sine of half the angular distance, so it cannot exceed 1 -- the "
+              + "whole sphere fits inside a disc of radius 2 "
+              + "(laea.cpp, laea_s_inverse)");
       lpphi = 2. * Math.asin(lpphi);
       if (mode == OBLIQ || mode == EQUIT) {
         sinz = FastStrictTrig.sin(lpphi);

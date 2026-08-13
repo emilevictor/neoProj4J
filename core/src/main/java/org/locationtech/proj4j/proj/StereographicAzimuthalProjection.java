@@ -174,14 +174,23 @@ public class StereographicAzimuthalProjection extends AzimuthalProjection {
 			case EQUATOR:
 				xy.y = 1. + cosphi * coslam;
 				if (xy.y <= EPS10)
-					throw new ProjectionException();
+					throw new ProjectionException(
+							"stere: the point is antipodal to the centre of projection. "
+									+ "1 + cos(angular distance from the centre) has come to "
+									+ xy.y + ", and the stereographic map sends that one point "
+									+ "to infinity (stere.cpp, stere_s_forward, equatorial "
+									+ "aspect)");
 				xy.x = (xy.y = akm1 / xy.y) * cosphi * sinlam;
 				xy.y *= sinphi;
 				break;
 			case OBLIQUE:
 				xy.y = 1. + sinphi0 * sinphi + cosphi0 * cosphi * coslam;
 				if (xy.y <= EPS10)
-					throw new ProjectionException();
+					throw new ProjectionException(
+							"stere: the point is antipodal to the centre of projection. "
+									+ "1 + cos(angular distance from the centre) has come to "
+									+ xy.y + ", and the stereographic map sends that one point "
+									+ "to infinity (stere.cpp, stere_s_forward, oblique aspect)");
 				xy.x = (xy.y = akm1 / xy.y) * cosphi * sinlam;
 				xy.y *= cosphi0 * sinphi - sinphi0 * cosphi * coslam;
 				break;
@@ -190,7 +199,14 @@ public class StereographicAzimuthalProjection extends AzimuthalProjection {
 				phi = - phi;
 			case SOUTH_POLE:
 				if (Math.abs(phi - ProjectionMath.HALFPI) < TOL)
-					throw new ProjectionException();
+					// phi has been negated above for the north-polar aspect, so it is no longer
+					// the caller's latitude and the message must not quote it.
+					throw new ProjectionException(
+							"stere: the point is within " + TOL + " rad of the pole opposite the "
+									+ "centre of projection at lat_0 = " + projectionLatitude
+									+ " rad. That antipode is the point the stereographic map "
+									+ "sends to infinity (stere.cpp, stere_s_forward, polar "
+									+ "aspect)");
 				xy.x = sinlam * ( xy.y = akm1 * Math.tan(ProjectionMath.QUARTERPI + .5 * phi) );
 				xy.y *= coslam;
 				break;

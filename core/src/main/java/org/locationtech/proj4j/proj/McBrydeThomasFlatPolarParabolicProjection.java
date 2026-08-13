@@ -55,13 +55,25 @@ public class McBrydeThomasFlatPolarParabolicProjection extends Projection {
 	public ProjCoordinate projectInverse(double xyx, double xyy, ProjCoordinate out) {
 		out.y = xyy / FYC;
 		if (Math.abs(out.y) >= 1.) {
-			if (Math.abs(out.y) > ONEEPS)	throw new ProjectionException("I");
+			// The message used to be "I", upstream's pj_errno mnemonic, which tells a Java
+			// caller nothing. Same throw, same type, same cause -- only the text changed.
+			if (Math.abs(out.y) > ONEEPS)	throw new ProjectionException(
+					"mbtfpp: the northing is off the map. The northing divided by " + FYC
+							+ " has come to " + out.y + ", and the next step takes asin of "
+							+ "it, so it has to be within 1 -- only values up to " + ONEEPS
+							+ " are read as rounding error and pulled back to the limit "
+							+ "(mbtfpp.cpp, mbtfpp_s_inverse)");
 			else	out.y = (out.y < 0.) ? -ProjectionMath.HALFPI : ProjectionMath.HALFPI;
 		} else
 			out.y = Math.asin(out.y);
 		out.x = xyx / ( FXC * (2. * Math.cos(C23 * (out.y *= 3.)) - 1.) );
 		if (Math.abs(out.y = Math.sin(out.y) / CS) >= 1.) {
-			if (Math.abs(out.y) > ONEEPS)	throw new ProjectionException("I");
+			if (Math.abs(out.y) > ONEEPS)	throw new ProjectionException(
+					"mbtfpp: no latitude matches this point. The sine of the latitude, "
+							+ "sin(3 * parametric latitude) / " + CS + ", has come to "
+							+ out.y + ", and the next step takes asin of it, so it has to be "
+							+ "within 1 -- only values up to " + ONEEPS + " are rounded to the "
+							+ "pole (mbtfpp.cpp, mbtfpp_s_inverse)");
 			else	out.y = (out.y < 0.) ? -ProjectionMath.HALFPI : ProjectionMath.HALFPI;
 		} else
 			out.y = Math.asin(out.y);

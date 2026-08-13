@@ -53,8 +53,14 @@ public class Eckert6Projection extends PseudoCylindricalProjection {
             }
             --i;
         }
+        // The message used to be "F_ERROR", upstream's pj_errno mnemonic, which tells a Java
+        // caller nothing. Same throw, same type, same cause -- only the text changed.
         if (i == 0) {
-            throw new ProjectionException("F_ERROR");
+            throw new ProjectionException(
+                    "eck6: the forward solver did not converge. After " + MAX_ITER
+                            + " Newton steps on phi + sin(phi) = " + n
+                            + " * sin(latitude), the correction was still bigger than "
+                            + LOOP_TOL + " (gn_sinu.cpp, gn_sinu_s_forward)");
         }
 
         xy.x = C_x * lam * (1 + Math.cos(phi));

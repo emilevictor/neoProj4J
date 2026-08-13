@@ -100,6 +100,33 @@ import static org.junit.Assert.fail;
  *       26 they do; on JDK 11 they do not differ anywhere in this probe set. The separate rule that
  *       nothing on the transform path may call it is enforced by the benchmark module's
  *       {@code CountingMath} tier, not here.</li>
+ *   <li><b>Not a claim that nothing in the library calls {@code Math} any more — 673 sites still
+ *       do.</b> Seven {@code java.lang.Math} methods are {@code @IntrinsicCandidate} and therefore
+ *       platform-variant: {@code sin cos tan log log10 exp pow}. (That is the set this codebase
+ *       treats as variant, and it is the one named in {@code LandsatProjection} and
+ *       {@code RepointBitIdentityTest} - not the naive "all the trig functions" set;
+ *       {@code asin acos atan atan2 sqrt abs} already delegate to {@code StrictMath} or are exactly
+ *       specified by IEEE 754.) Counted on 2026-08-13 over {@code core/src/main/java} (366 files),
+ *       with comments and string literals removed first: <b>673 calls remain, in 74 files</b> -
+ *       {@code sin} 246, {@code cos} 231, {@code tan} 85, {@code log} 50, {@code pow} 49,
+ *       {@code exp} 12, {@code log10} 0. The heaviest single file is {@code KrovakProjection} with
+ *       <b>49</b> ({@code sin} 17, {@code cos} 12, {@code pow} 12, {@code tan} 8), then
+ *       {@code SwissObliqueMercatorProjection} 33, {@code ObliqueMercatorProjection} 31,
+ *       {@code SimpleConicProjection} 30 and {@code ProjectionMath} 29.
+ *       <p><b>{@code KrovakProjection} is invisible to a grep.</b> It has
+ *       {@code import static java.lang.Math.*}, so its calls read {@code sin(x)} rather than
+ *       {@code Math.sin(x)}: a search for {@code Math\.} in that file matches 12 lines and none of
+ *       its 49 calls. Count both spellings or under-report.
+ *       <p>Two independent instruments agree on the 673, per method and per file across all 74: a
+ *       comment-stripped regex sweep of the sources, and a {@code javap -c} scan of the 445
+ *       compiled classes in {@code core/target/classes} counting every {@code invokestatic} into
+ *       {@code java/lang/Math} with one of the seven names. {@code KrovakProjection}'s 49 was also
+ *       hand-counted line by line.
+ *       <p><b>The practical limitation for a caller:</b> a transform reaching any of those 673
+ *       sites may return different bits on a different JVM or a different CPU architecture. The
+ *       divergence is last-bit - one ulp of a radian is about 2 pm - but it is real, and the golden
+ *       table in this class says nothing about it. The bit-identity guarantee covers only what goes
+ *       through {@code StrictMath} or {@link FastStrictTrig}.</li>
  *   <li><b>Not, on its own, a cross-architecture result.</b> A committed table pins the answer
  *       across time on whatever runner executed it. The cross-architecture claim needs the matrix in
  *       {@code .github/workflows/determinism.yaml}, which runs this same class on

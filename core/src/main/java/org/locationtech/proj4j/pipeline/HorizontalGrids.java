@@ -99,10 +99,21 @@ import org.locationtech.proj4j.datum.Grid;
 final class HorizontalGrids {
 
     private final String spec;
+
+    /**
+     * The parameter this list was written under — {@code grids} for
+     * {@code +proj=hgridshift}, {@code xy_grids} for {@code +proj=deformation}. Kept only
+     * so that {@link #outsideGrid} names the parameter the caller actually wrote; a
+     * deformation user has no {@code +grids=} to go and look at, and {@code +grids=} is in
+     * fact refused outright for that operator.
+     */
+    private final String key;
+
     private final List<Grid> grids;
 
-    private HorizontalGrids(final String spec, final List<Grid> grids) {
+    private HorizontalGrids(final String spec, final String key, final List<Grid> grids) {
         this.spec = spec;
+        this.key = key;
         this.grids = grids;
     }
 
@@ -119,7 +130,9 @@ final class HorizontalGrids {
      * {@code @}-optional and absent.
      *
      * @param spec the comma-separated list as written
-     * @param key  the parameter name, for the error message
+     * @param key  the parameter name the list was written under, used in every message
+     *             this class produces: the two below, and the runtime
+     *             {@code COORDINATE_OUTSIDE_GRID}
      * @return the resolved list, possibly empty
      * @throws PipelineDefinitionException {@code FILE_NOT_FOUND} if a required grid is
      *                                     missing, unreadable or in a format proj4j
@@ -138,7 +151,7 @@ final class HorizontalGrids {
                     "+" + key + "=" + spec + ": could not find required grid(s): "
                             + e.getMessage(), e);
         }
-        return new HorizontalGrids(spec,
+        return new HorizontalGrids(spec, key,
                 Collections.unmodifiableList(new ArrayList<Grid>(resolved)));
     }
 
@@ -147,7 +160,7 @@ final class HorizontalGrids {
         return grids.isEmpty();
     }
 
-    /** @return the {@code +grids=} list as written. */
+    /** @return the grid list as written, without the parameter name in front of it. */
     String spec() {
         return spec;
     }
@@ -247,7 +260,7 @@ final class HorizontalGrids {
     private CrsTransformException outsideGrid(final double lam, final double phi) {
         return new CrsTransformException(ErrorCause.COORDINATE_OUTSIDE_GRID,
                 "(" + Math.toDegrees(lam) + ", " + Math.toDegrees(phi)
-                        + ") is outside every grid of +grids=" + spec);
+                        + ") is outside every grid of +" + key + "=" + spec);
     }
 
     private static boolean isFinite(final double v) {

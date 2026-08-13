@@ -106,7 +106,13 @@ public class PolyconicProjection extends Projection {
 						.5 * ( lpphi * lpphi + B) * tp) /
 						((lpphi - xyy) / tp - 1.));
 				} while (Math.abs(dphi) > CONV && --i > 0);
-				if (i == 0) throw new ProjectionException("I");
+				// The message used to be "I", upstream's pj_errno mnemonic, which tells a Java
+				// caller nothing. Same throw, same type, same cause -- only the text changed.
+				if (i == 0) throw new ProjectionException(
+						"poly: the spherical inverse did not converge. After " + N_ITER
+								+ " Newton steps the latitude was still moving by " + dphi
+								+ " rad, and it has to settle to within " + CONV
+								+ " rad (poly.cpp, poly_s_inverse)");
 				out.x = Math.asin(xyx * Math.tan(lpphi)) / Math.sin(lpphi);
 				out.y = lpphi;
 			}
@@ -122,7 +128,12 @@ public class PolyconicProjection extends Projection {
 					sp = Math.sin(lpphi);
 					s2ph = sp * ( cp = Math.cos(lpphi));
 					if (Math.abs(cp) < ITOL)
-						throw new ProjectionException("I");
+						throw new ProjectionException(
+								"poly: the ellipsoidal inverse walked to a trial latitude of "
+										+ lpphi + " rad, where cos(latitude) is " + cp
+										+ " and the next step divides by it. The polyconic "
+										+ "inverse is undefined at the pole "
+										+ "(poly.cpp, poly_e_inverse)");
 					c = sp * (mlp = Math.sqrt(1. - es * sp * sp)) / cp;
 					ml = meridian.mlfn(lpphi, sp, cp);
 					mlb = ml * ml + r;
@@ -137,7 +148,11 @@ public class PolyconicProjection extends Projection {
 						break;
 				}
 				if (i == 0)
-					throw new ProjectionException("I");
+					throw new ProjectionException(
+							"poly: the ellipsoidal inverse did not converge. After " + I_ITER
+									+ " steps the latitude was still moving by more than "
+									+ ITOL + " rad, ending at " + lpphi
+									+ " rad (poly.cpp, poly_e_inverse)");
 				c = Math.sin(lpphi);
 				out.x = Math.asin(xyx * Math.tan(lpphi) * Math.sqrt(1. - es * c * c)) / Math.sin(lpphi);
 				out.y = lpphi;

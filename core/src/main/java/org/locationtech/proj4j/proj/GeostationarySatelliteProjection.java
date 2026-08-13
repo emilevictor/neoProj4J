@@ -1,6 +1,17 @@
 /*
- * To change this template, choose Tools | Templates
- * and open the template in the editor.
+ * Copyright 2022 The Proj4J Contributors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 package org.locationtech.proj4j.proj;
 
@@ -12,6 +23,37 @@ import org.locationtech.proj4j.ProjectionException;
 import org.locationtech.proj4j.util.ProjectionMath;
 
 /**
+ * Geostationary satellite view, {@code +proj=geos}, a port of
+ * {@code 9.8.1:src/projections/geos.cpp}. Registered as {@code "geos"} in
+ * {@code org.locationtech.proj4j.Registry}.
+ *
+ * <p>This is not a map projection in the usual sense: it is what a camera on a satellite in a
+ * circular equatorial orbit actually sees. The forward direction casts a ray from the satellite,
+ * which sits {@code +h} metres above the point where {@code +lon_0} crosses the equator, to the
+ * point on the figure of the Earth, and reports the two scan angles of that ray, scaled by the
+ * orbit height so the result is in metres. The inverse reverses it: the plane coordinates become
+ * scan angles, and the ray they define is intersected with the figure of the Earth by solving a
+ * quadratic. That quadratic is where both inverses can fail, when the discriminant is negative
+ * and the ray misses the Earth entirely.
+ *
+ * <p>Because it is a view rather than a mapping, most of the plane has no pre-image. Only the
+ * visible disc does, so both directions refuse points outside it rather than returning a
+ * plausible-looking coordinate; see {@link #project_s} for the one place where that refusal is a
+ * deliberate divergence from upstream. Instruments whose imagery is georeferenced this way include
+ * Meteosat, GOES and Himawari.
+ *
+ * <p>Two parameters matter beyond the usual {@code +lon_0} and ellipsoid:
+ * <ul>
+ * <li><b>{@code +h}</b>, the height of the orbit in metres, reaching {@link #setHeightOfOrbit}.
+ *     Upstream has no default and rejects a definition that omits it; this class defaults
+ *     {@link #heightOfOrbit} to 35785831 m, the nominal geostationary height, and
+ *     {@code Proj4Parser} assigns the keyword only when it is present, so that field value is the
+ *     effective default for a bare {@code +proj=geos}.</li>
+ * <li><b>{@code +sweep}</b>, which chooses whether the scan angles are taken about the x or the y
+ *     axis. It is <em>not</em> implemented here. Upstream defaults it to {@code y} and flips the
+ *     two angles when it is {@code x}; this class always behaves as {@code +sweep=y}, which is the
+ *     Meteosat and Himawari convention. GOES-R sweeps about x and so cannot be expressed here.</li>
+ * </ul>
  *
  * @author yaqiang
  */
@@ -189,7 +231,11 @@ public class GeostationarySatelliteProjection extends Projection {
         double a = vy * vy + vz * vz + vx * vx;
         double b = 2 * _radiusG * vx;
         if ((det = (b * b) - 4 * a * _c) < 0) {
-            throw new ProjectionException();
+            throw new ProjectionException(
+                    "geos: the line of sight for (" + xyx + ", " + xyy + ") misses the globe. "
+                            + "Intersecting that ray with the sphere has no real solution -- the "
+                            + "quadratic's discriminant is " + det + " -- so the point is off the "
+                            + "visible disc (geos.cpp, geos_s_inverse)");
         }
 
         /* Calculation of three components of vector from satellite to position.*/
@@ -219,7 +265,11 @@ public class GeostationarySatelliteProjection extends Projection {
         a = vy * vy + a * a + vx * vx;
         double b = 2 * _radiusG * vx;
         if ((det = (b * b) - 4 * a * _c) < 0) {
-            throw new ProjectionException();
+            throw new ProjectionException(
+                    "geos: the line of sight for (" + xyx + ", " + xyy + ") misses the globe. "
+                            + "Intersecting that ray with the ellipsoid has no real solution -- "
+                            + "the quadratic's discriminant is " + det + " -- so the point is off "
+                            + "the visible disc (geos.cpp, geos_e_inverse)");
         }
 
         /* Calculation of three components of vector from satellite to position.*/

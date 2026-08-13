@@ -225,7 +225,14 @@ public class EquidistantAzimuthalProjection extends AzimuthalProjection {
 				coslam = -coslam;
 			case SOUTH_POLE:
 				if (Math.abs(phi - ProjectionMath.HALFPI) < EPS10)
-					throw new ProjectionException();
+					// phi has been negated above for the north-polar aspect, so it is not the
+					// caller's latitude any more and the message must not quote it.
+					throw new ProjectionException(
+							"aeqd: the point is the pole opposite the centre of projection at "
+									+ "lat_0 = " + projectionLatitude + " rad. On a polar "
+									+ "azimuthal equidistant map that antipode is the entire rim "
+									+ "at once, so it has no single position "
+									+ "(aeqd.cpp, aeqd_s_forward, polar aspect)");
 				xy.x = (xy.y = (ProjectionMath.HALFPI + phi)) * Math.sin(lam);
 				xy.y *= coslam;
 				break;
@@ -298,7 +305,12 @@ public class EquidistantAzimuthalProjection extends AzimuthalProjection {
 
 			if ((c_rh = ProjectionMath.distance(x, y)) > Math.PI) {
 				if (c_rh - EPS10 > Math.PI)
-					throw new ProjectionException(); 
+					throw new ProjectionException(
+							"aeqd: the point lies outside the map. Distance from the centre of "
+									+ "projection is the radius here, and the far side of the "
+									+ "sphere is pi away, so nothing sits beyond a radius of pi; "
+									+ "this point is at " + c_rh
+									+ " (aeqd.cpp, aeqd_s_inverse)");
 				c_rh = Math.PI;
 			} else if (c_rh < EPS10) {
 				lp.y = projectionLatitude;

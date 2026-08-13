@@ -99,7 +99,13 @@ public class SwissObliqueMercatorProjection extends Projection {
 	    lpphi = phip;
 	    lplam = lamp / c;
 	  } else {
-	    throw new ProjectionException("I_ERROR");
+	    // The message used to be "I_ERROR", upstream's pj_errno mnemonic, which tells a Java
+	    // caller nothing. Same throw, same type, same cause -- only the text changed.
+	    throw new ProjectionException(
+	        "somerc: the inverse did not converge. After " + NITER
+	            + " steps solving for the geodetic latitude from the isometric one, the "
+	            + "correction was still bigger than " + ProjectionMath.EPS10
+	            + " (somerc.cpp, somerc_e_inverse)");
 	  }
     lp.x = lplam;
     lp.y = lpphi;
