@@ -1,0 +1,31 @@
+# The six headline figures of the golden diff, pinned.
+#
+# GoldenMasterTest asserts this file against GoldenDiff.Result. Until it did, the six figures were
+# printed and compared to nothing, so "41,425 CHANGED" could become "44,000 CHANGED" and the run
+# would look exactly the same to anyone who was not counting by eye.
+#
+# EXACTLY ONE data line. Everything blank or starting with # is a comment. One line so that a re-pin
+# is a one-line edit and reads as one line in the diff.
+#
+# FORMAT: whatever GoldenDiff.Result.summary() prints - paste it in unaltered. Figures are read by
+# LABEL, not by position or separator, so the trailing "(baseline N rows, current N rows)" is
+# carried as context and is NOT asserted here; the row counts are already asserted against the
+# committed table by docker/run.sh and by .github/workflows/golden.yaml. All six labels must be
+# present or the load fails.
+#
+# TO RE-PIN, WHICH IS ALLOWED AND WILL HAPPEN: replace the data line with the `actual` line the
+# failure message prints. The edit is deliberately trivial. What is NOT optional is that the PR body
+# attributes the rows behind every figure that moved - which rule now claims them, or why they
+# changed. A figure that moves with no explanation in the PR is the regression this module exists to
+# catch, and a re-pin without one is how that regression gets waved through.
+#
+# The INTENDED figure is also asserted a second way, and more tightly: every rule in rules.yaml
+# carries an exact, two-sided expected_rows, and as of this pin those 44 pins sum to exactly 39134.
+# A change that moves INTENDED without moving a rule's expected_rows is therefore already a
+# COUNT_MISMATCH. It is pinned here as well so that all six figures are visible in one place.
+#
+# The 2291 UNEXPLAINED is the pre-existing triage backlog, not a target of zero. Pinning it means a
+# PR that resolves some of it must say so here, and a PR that quietly adds to it cannot.
+#
+# Pinned 2026-08-13 against baseline 1.4.3.
+golden diff: 12005 UNCHANGED, 41425 CHANGED, 0 ADDED, 0 REMOVED; 39134 INTENDED, 2291 UNEXPLAINED (baseline 53430 rows, current 53430 rows)
