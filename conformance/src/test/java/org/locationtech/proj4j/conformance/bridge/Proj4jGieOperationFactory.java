@@ -15,7 +15,6 @@
  */
 package org.locationtech.proj4j.conformance.bridge;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -219,23 +218,16 @@ public final class Proj4jGieOperationFactory implements GieOperationFactory {
             //    prevent. Every non-emulation token must therefore still be vouched for;
             //    only the emulation keys are exempted, and only because the engine we are
             //    routing to is where they are implemented.
-            //    `+zone` and `+path` still need a projection to judge, and the pipeline
-            //    engine does not hand one back - so it is resolved from the `+proj=` name
-            //    alone, which is all the two rules ask (`instanceof` on the two transverse
-            //    Mercator classes, and on misrsom). A name Registry cannot resolve leaves
-            //    it null, and the rule then refuses, which is the fail-closed direction.
-            Projection byName = registry.getProjection(a.peek("proj"));
-            List<GieToken> conditionals = new ArrayList<GieToken>();
-            GieFailure gap = classifyTokens(a, conditionals, true);
+            //    There used to be a second pass here, over the conditionals whose verdict
+            //    needed a constructed projection (`+zone` and `+path`), resolving one from
+            //    the `+proj=` name because the pipeline engine hands none back. Both keys
+            //    are now HONOURED unconditionally - `Proj4Parser` keys `+zone` on
+            //    `+proj=utm` and dispatches `+path` to both readers - so no conditional
+            //    rule looks at a projection any more and classifyTokens judges all of them
+            //    in one pass.
+            GieFailure gap = classifyTokens(a, true);
             if (gap != null) {
                 return new UnusableOperation(gap);
-            }
-            for (int i = 0; i < conditionals.size(); i++) {
-                GieToken t = conditionals.get(i);
-                GieFailure f = Proj4jCapabilities.conditionalFailure(t.key(), t.value(), byName);
-                if (f != null) {
-                    return new UnusableOperation(f);
-                }
             }
             return createFromPipelineEngine(args);
         }
@@ -250,8 +242,7 @@ public final class Proj4jGieOperationFactory implements GieOperationFactory {
         }
 
         // 3. Token-level gaps: anything the bridge does not vouch for.
-        List<GieToken> conditionals = new ArrayList<GieToken>();
-        GieFailure tokenGap = classifyTokens(a, conditionals, false);
+        GieFailure tokenGap = classifyTokens(a, false);
         if (tokenGap != null) {
             return new UnusableOperation(tokenGap);
         }
@@ -278,15 +269,10 @@ public final class Proj4jGieOperationFactory implements GieOperationFactory {
         }
         Projection projection = crs.getProjection();
 
-        // 5. Conditional keys whose verdict needs the constructed projection
-        //    (+zone is applied only to the two transverse Mercator classes).
-        for (int i = 0; i < conditionals.size(); i++) {
-            GieToken t = conditionals.get(i);
-            GieFailure f = Proj4jCapabilities.conditionalFailure(t.key(), t.value(), projection);
-            if (f != null) {
-                return new UnusableOperation(f);
-            }
-        }
+        // Step 5 used to be a second conditional pass, for the keys whose verdict needed
+        // this constructed projection. There are none left: +zone's rule was the last one
+        // that asked, and Proj4Parser now keys +zone on the +proj= name rather than on the
+        // projection's class, so the rule was true for every input and is gone.
 
         boolean angular = ProjTables.ANGULAR_BOTH_SIDES.contains(projName);
         GieIoUnits left = GieIoUnits.RADIANS;
@@ -478,19 +464,20 @@ public final class Proj4jGieOperationFactory implements GieOperationFactory {
     /**
      * Walk the definition's tokens and report the first that proj4j cannot honour.
      *
-     * <p>Conditional keys are collected rather than judged, because some of them
-     * ({@code +zone}) need the constructed projection.
+     * <p>Every conditional key is judged here and now. Two of them used to be collected
+     * and deferred instead, because their rule was an {@code instanceof} on the
+     * constructed projection: {@code +zone} on the two transverse Mercator classes and
+     * {@code +path} on misrsom. Both are {@code HONOURED} unconditionally now — the
+     * parser dispatches {@code +path} to both of upstream's readers, and keys
+     * {@code +zone} on {@code +proj=utm}, which is the only operator that reads it — so
+     * there is nothing left to defer.
      *
      * @param forEmulationRoute when {@code true} the cs2cs-emulation keys are exempted,
      *                          because the definition is on its way to the pipeline
      *                          engine, which implements them. Everything else is judged
-     *                          exactly as on the single-projection path — including
-     *                          {@code +zone} and {@code +path}, whose verdict is
-     *                          {@code Proj4Parser}'s dispatch table and is therefore the
-     *                          same on both paths.
+     *                          exactly as on the single-projection path.
      */
-    private GieFailure classifyTokens(GieProjArgs a, List<GieToken> conditionals,
-            boolean forEmulationRoute) {
+    private GieFailure classifyTokens(GieProjArgs a, boolean forEmulationRoute) {
         List<GieToken> tokens = a.tokens();
         for (int i = 0; i < tokens.size(); i++) {
             GieToken t = tokens.get(i);
@@ -505,24 +492,15 @@ public final class Proj4jGieOperationFactory implements GieOperationFactory {
             }
             if (Proj4jCapabilities.CONDITIONAL.contains(key)) {
                 t.markUsed();
-                if ("zone".equals(key) || "path".equals(key)) {
-                    // The two conditionals whose verdict needs the constructed
-                    // projection: Proj4Parser applies +zone to the two transverse
-                    // Mercator classes and no others, and +path to misrsom and
-                    // nothing else (upstream som.cpp reads it for lsat too).
-                    conditionals.add(t);
-                } else {
-                    // Judged now, before construction, so that the reported reason
-                    // is the primary one. Otherwise
-                    // `+proj=latlong +nadgrids=ntf_r93.gsb` would be reported
-                    // MISSING_GRID (Grid.fromNadGrids failing on a file we do not
-                    // ship) when the real reason is that PROJ turns +nadgrids into
-                    // a +proj=hgridshift step that proj4j's operation path has no
-                    // notion of - a missing file would be the least of it.
-                    GieFailure f = Proj4jCapabilities.conditionalFailure(key, t.value(), null);
-                    if (f != null) {
-                        return f;
-                    }
+                // Judged now, before construction, so that the reported reason is the
+                // primary one. Otherwise `+proj=latlong +nadgrids=ntf_r93.gsb` would be
+                // reported MISSING_GRID (Grid.fromNadGrids failing on a file we do not
+                // ship) when the real reason is that PROJ turns +nadgrids into a
+                // +proj=hgridshift step that proj4j's operation path has no notion of -
+                // a missing file would be the least of it.
+                GieFailure f = Proj4jCapabilities.conditionalFailure(key, t.value());
+                if (f != null) {
+                    return f;
                 }
                 continue;
             }
@@ -535,13 +513,22 @@ public final class Proj4jGieOperationFactory implements GieOperationFactory {
             }
             t.markUsed();
 
-            // A boolean key whose value says false: Proj4Parser tests
-            // Map.containsKey, so it would switch the feature ON.
+            // A boolean key whose value says false. This used to say "Proj4Parser tests
+            // Map.containsKey, so it would switch the feature ON", and for most of
+            // BOOLEAN_KEYS that is no longer the reason: +south joined +over, +approx,
+            // +no_cut and +guam on Proj4Parser.parseBoolean, so those five now read the
+            // value and agree with PROJ. What is left is a mixed bag - +no_uoff, +no_off,
+            // +no_rot and +hyperbolic are still tested by presence, as their 't' sigil
+            // upstream is - and the refusal is kept as a blanket one because it errs in
+            // the harmless direction: a false NOT_IMPLEMENTED costs a skip, whereas
+            // executing a definition whose flag we read backwards returns a plausible
+            // wrong answer. It costs nothing measurable either, since all 102 boolean-key
+            // occurrences in the corpus are bare and none of them reaches this branch.
             if (contains(ProjDefinitionValidator.BOOLEAN_KEYS, key)
                     && !ProjDefinitionValidator.projBooleanValue(t.value())) {
                 return GieFailures.notImplemented(
-                        "+" + key + "=" + t.value() + " is PROJ-false, but Proj4Parser tests "
-                                + "Map.containsKey and would enable the feature");
+                        "+" + key + "=" + t.value() + " is PROJ-false, and the bridge does not "
+                                + "vouch for proj4j reading a false boolean the same way");
             }
 
             GieFailure grammar = Proj4jCapabilities.valueGrammarFailure(key, t.value());
@@ -676,10 +663,12 @@ public final class Proj4jGieOperationFactory implements GieOperationFactory {
      * <li><b>{@code IllegalStateException}</b> — {@code GeocentricConverter}
      *     ({@code :122-125}) → {@link GieFailureKind#NUMERICAL}.</li>
      * <li><b>{@code NumberFormatException}</b> — historically raw from
-     *     {@code Double.parseDouble}. proj4j now wraps most of these in
-     *     {@code InvalidValueException}, but the mapping stays because
-     *     {@code Integer.parseInt} on {@code +zone} and
-     *     {@code PrimeMeridian.forName} can still surface it. PROJ's
+     *     {@code Double.parseDouble}. This arm no longer has a named source: the two
+     *     it used to cite are both closed. {@code Proj4Parser.parseInt}, the only
+     *     reader of {@code +zone}, wraps {@code Integer.parseInt} in an
+     *     {@code InvalidValueException}, and {@code PrimeMeridian.forName} catches
+     *     the exception itself and falls back to Greenwich. The mapping is kept as a
+     *     backstop rather than because anything is known to reach it. PROJ's
      *     {@code pj_atof} never fails on garbage, so a parse failure is a
      *     narrower value grammar, not a bad definition →
      *     {@link GieFailureKind#NOT_IMPLEMENTED}.</li>

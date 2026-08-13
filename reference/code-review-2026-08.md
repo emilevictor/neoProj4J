@@ -749,10 +749,11 @@ for the wrong-answers group.
 - **`PrimeMeridian.forName` fails open.** `+pm=pari` silently becomes Greenwich — a 260 km error —
   where PROJ refuses at `src/init.cpp:774-778`. Its own pull request, after this one, so this one's
   bit-identity claim stays clean.
-- **`Units.DEGREES.format(-0.5)`** returns `"0d30 deg"`, losing the sign whenever the whole-degree
-  part is zero.
-- **`Angle.parse("123d")`** returns 123.0 where `AngleFormat.parse("123d")` throws
-  `NumberFormatException`.
+- ~~**`Units.DEGREES.format(-0.5)`** returns `"0d30 deg"`, losing the sign whenever the whole-degree
+  part is zero.~~ **Fixed.** It returns `"-0d30 deg"`.
+- ~~**`Angle.parse("123d")`** returns 123.0 where `AngleFormat.parse("123d")` throws
+  `NumberFormatException`.~~ **Fixed.** Both return 123.0; the empty-minutes guard is now in both
+  parsers.
 - **`InitFileCache` retains failed loads forever**, unaccounted and unevictable — the exact hole
   `GridCache`'s Javadoc claims to have closed — and charges phantom bytes on interrupt, on a path
   that then does more I/O rather than less.
@@ -1270,6 +1271,12 @@ Three items were deliberately **not** written, and the reasons are as much a par
 - `AngleFormat`'s known sign defect was pinned, not fixed. The tests assert today's wrong output and
   say so, because fixing it belongs with the other six defects in the same family, in one change
   that can be reviewed as a behaviour change rather than smuggled in beside test additions.
+  **That change has since landed** and the pins were flipped with it, so the assertions in
+  `AngleFormatParseTest` and `AngleFormatFormatTest` now record the corrected output. The one
+  place the two parsers still part company with `dmstor` is a trailing `s` closing a lettered
+  seconds field, kept so `AngleFormat` can read back the `12d34m57s` it writes; the three shapes
+  are listed in `AngleFormat.isHemisphereLetter`'s Javadoc and none occurs in the registries or
+  the gie corpus.
 - No committed test input was edited. Where a test needed malformed input, new fixtures were added.
 
 ### A verification gate that was not running

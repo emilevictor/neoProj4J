@@ -37,27 +37,47 @@ import static org.junit.Assert.assertTrue;
  * read. {@code AngleFormat.parse} is the same algorithm copied into a {@link java.text.NumberFormat},
  * reached through {@code Units.DEGREES.parse(String)}.
  *
- * <p>The two bodies are line-for-line alike apart from one guard, which is exactly the sort of
- * near-duplication that invites someone to delete one and forward it to the other. This file
- * measures how far apart they actually are, so that such a merge is a visible change rather than
- * a silent one: {@link #theTwoParsersAgreeOnEverythingExceptADegreesOnlyString()} holds both
- * against the same table of inputs, and the tests marked DEFECT record where they part company.
+ * <p>The two bodies are line-for-line alike, which is exactly the sort of near-duplication that
+ * invites someone to delete one and forward it to the other. This file measures how far apart
+ * they actually are, so that such a merge is a visible change rather than a silent one:
+ * {@link #theTwoParsersAgreeOnEveryFormAndEveryFailure()} holds both against the same table of
+ * inputs. They now agree on all of it; until this change they did not.
  *
- * <h2>Defects pinned rather than fixed</h2>
+ * <h2>Five defects that used to be pinned here, and are now fixed</h2>
  *
- * <p>Each is marked DEFECT with the answer the code ought to give. They stay unfixed in this
- * change; the assertions exist so a fix has a test to flip.
+ * <p>Each was marked DEFECT with the answer the code ought to give, and each has since been given
+ * it. The assertions below are the flipped versions and are now references rather than markers.
  *
  * <ol>
- * <li>{@code Angle.parse("123d")} returns 123 while {@code AngleFormat.parse("123d")} throws.</li>
- * <li>A trailing {@code s} — the class's own seconds abbreviation — is read as the southern
- *     hemisphere, so anything written with {@code ddmmssPattern4} reads back negated.</li>
- * <li>{@code "-0d30"} parses as positive: below one degree the minus sign is lost, the mirror of
- *     the formatting defect pinned in {@code AngleFormatFormatTest}.</li>
- * <li>Fractional minutes between 59 and 60 are rejected, although the matching seconds check
- *     allows them.</li>
- * <li>{@link ParsePosition} is left one character short when a hemisphere letter was consumed.</li>
+ * <li>{@code Angle.parse("123d")} returned 123 while {@code AngleFormat.parse("123d")} threw
+ *     {@code NumberFormatException: empty String}. {@code AngleFormat} was missing the
+ *     empty-minutes guard its twin had — {@link #aDegreesOnlyStringIsReadByBothParsers()}.</li>
+ * <li>A trailing {@code s} — the class's own seconds abbreviation — was read as the southern
+ *     hemisphere, so anything written with {@code ddmmssPattern4} read back negated. A lower-case
+ *     {@code s} is now the seconds abbreviation only where it closes a lettered seconds field:
+ *     a digit in front of it and an {@code m} minutes marker earlier in the string —
+ *     {@link #aTrailingSecondsAbbreviationIsNotReadAsSouth()}. Everywhere else it is still
+ *     South — {@link #aLowerCaseSThatClosesNoSecondsFieldIsStillSouth()}.</li>
+ * <li>{@code "-0d30"} parsed as positive, because the sign lived only in a negative-zero degrees
+ *     field and {@code dmsToDeg} tests {@code d >= 0}. It is now detected at the call site —
+ *     {@link #negativeZeroDegreesKeepsTheSign()}.</li>
+ * <li>Fractional minutes between 59 and 60 were rejected although the matching seconds check
+ *     allowed them, so the real angle {@code 123d59.5m} would not parse —
+ *     {@link #fractionalMinutesJustBelowSixtyAreAcceptedLikeSeconds()}.</li>
+ * <li>{@link ParsePosition} was left one character short when a hemisphere letter was consumed —
+ *     {@link #theReportedPositionIncludesTheHemisphereLetter()}.</li>
  * </ol>
+ *
+ * <h2>Where this parser deliberately does not match upstream</h2>
+ *
+ * <p>{@code dmstor} recognises {@code d}, {@code '} and {@code "} and nothing else, so an
+ * {@code m} ends the angle for it and the seconds after one are dropped. Here the two minute
+ * spellings are one grammar and the seconds are read either way, because
+ * {@link AngleFormat#ddmmssPattern4} is {@code DdMmSs} and this class would otherwise be unable
+ * to read back its own output. Pinned in {@link #theTwoMinuteSpellingsAreOneGrammar()} and
+ * {@link #bothMinuteSpellingsRoundTrip()}, with the full list of shapes where the two disagree
+ * in {@link #theThreeShapesWhereThisParserDivergesFromDmstor()}. No angular token in the shipped
+ * registries or the gie corpus contains an {@code m} at all, so nothing measurable turns on it.
  *
  * <p>If this file is deleted, {@code AngleFormat.parse} returns to having no direct test at all
  * and {@code Angle.parse} to being covered only incidentally, through the coordinates in the
@@ -138,7 +158,7 @@ public class AngleFormatParseTest {
     @Test
     public void fractionalDegreesAndMinutesAreSimplyAddedTogether() throws ParseException {
         // Not a form anyone should write, but it is accepted, and accepting it is what makes the
-        // "Minutes must be between 0 and 59" check the only guard on the value.
+        // "Minutes must be at least 0 and less than 60" check the only guard on the value.
         assertEquals(124.0, Angle.parse("123.5d30m"), TOLERANCE);
         assertEquals(124.0, parseAsDegrees("123.5d30m"), TOLERANCE);
     }
@@ -166,12 +186,17 @@ public class AngleFormatParseTest {
         assertEquals(-123.5, parseAsDegrees("123d30mw"), TOLERANCE);
     }
 
+    /**
+     * Re-pinned. This used to assert {@code +45.5}, on the reasoning that the suffix "is applied
+     * last and unconditionally rather than being reconciled with an explicit sign". The suffix is
+     * now reconciled with it: it assigns the sign, as {@code dmstor} does, so the minus is
+     * discarded and the answer is {@code -45.5}, which is 9.8.1's. The full case is in
+     * {@link #aTrailingCardinalOverrulesALeadingMinus}.
+     */
     @Test
-    public void aHemisphereSuffixOnAnAlreadyNegativeValueNegatesItAgain() throws ParseException {
-        // Nobody should write "-45.5S", but pinning it says the suffix is applied last and
-        // unconditionally rather than being reconciled with an explicit sign.
-        assertEquals(45.5, Angle.parse("-45.5S"), 0.0);
-        assertEquals(45.5, parseAsDegrees("-45.5S"), 0.0);
+    public void aHemisphereSuffixOverrulesAnAlreadyNegativeValue() throws ParseException {
+        assertEquals(-45.5, Angle.parse("-45.5S"), 0.0);
+        assertEquals(-45.5, parseAsDegrees("-45.5S"), 0.0);
     }
 
     // ------------------------------------------------------------------
@@ -194,190 +219,363 @@ public class AngleFormatParseTest {
     }
 
     // ------------------------------------------------------------------
-    // DEFECT 1: the two parsers disagree
+    // The two parsers, held against each other
     // ------------------------------------------------------------------
 
     /**
-     * DEFECT. {@code "123d"} — a whole number of degrees with nothing after the degree letter —
-     * is read by {@link Angle} and rejected by {@link AngleFormat}.
+     * {@code "123d"} — a whole number of degrees with nothing after the degree letter — is read by
+     * both parsers.
      *
-     * <p>The current behaviour is wrong on the {@code AngleFormat} side. {@code "123d"} is a
-     * well-formed angle of 123 degrees and both should return 123. {@code Angle.parse} does,
-     * because it guards the minutes field with {@code if (mmss.length() == 0) m = 0;}
-     * (Angle.java:88-90). {@code AngleFormat.parse} has the identical code with that guard
-     * missing (AngleFormat.java:193) and so hands an empty string to {@code Double.valueOf},
-     * which throws {@code NumberFormatException: empty String}. The fix is to copy the guard
-     * across — or better, to delete the duplicated body and have one call the other.
+     * <p>{@code AngleFormat} used to reject it with {@code NumberFormatException: empty String}.
+     * {@code Angle.parse} guarded the minutes field with a length check and {@code AngleFormat}
+     * had the identical code with that guard missing, so it handed an empty string to
+     * {@code Double.valueOf}. One library, two answers for one well-formed angle.
      *
-     * <p>It is not only the {@code d} form: every degrees-only string is affected, including the
-     * degree-sign spelling and the form with a hemisphere letter.
+     * <p>It was never only the {@code d} form: every degrees-only string was affected, including
+     * the degree-sign spelling and the forms with a hemisphere letter, which is why all six are
+     * asserted here.
      */
     @Test
-    public void DEFECT_aDegreesOnlyStringIsReadByAngleAndRejectedByAngleFormat() {
+    public void aDegreesOnlyStringIsReadByBothParsers() throws ParseException {
         String[] degreesOnly = {"123d", "123°", "0d", "-1d", "123dN", "123°W"};
-        double[] whatAngleReturns = {123.0, 123.0, 0.0, -1.0, 123.0, -123.0};
+        double[] expected = {123.0, 123.0, 0.0, -1.0, 123.0, -123.0};
 
         for (int i = 0; i < degreesOnly.length; i++) {
             String text = degreesOnly[i];
-            assertEquals("Angle.parse must keep accepting a degrees-only string: " + text,
-                    whatAngleReturns[i], Angle.parse(text), 0.0);
-
-            NumberFormatException thrown = assertThrows(
-                    "pins today's wrong answer for AngleFormat.parse(\"" + text + "\"); the right "
-                            + "answer is " + whatAngleReturns[i] + ", the same as Angle.parse",
-                    NumberFormatException.class,
-                    new ThrowingRunnable() {
-                        public void run() throws Exception {
-                            degreeParser().parse(text);
-                        }
-                    });
-            assertEquals("the failure comes out of Double.valueOf(\"\"), which is why the message "
-                    + "does not name the input the caller supplied",
-                    "empty String", thrown.getMessage());
+            assertEquals("Angle.parse: " + text, expected[i], Angle.parse(text), 0.0);
+            assertEquals("AngleFormat.parse must give the same answer: " + text,
+                    expected[i], parseAsDegrees(text), 0.0);
         }
     }
 
     /**
-     * The same defect where a caller meets it: {@code Units.DEGREES.parse} goes through
-     * {@code AngleFormat}, so it rejects a string that {@code Proj4Parser} — which goes through
-     * {@code Angle} — accepts. One library, two answers for {@code "123d"}.
+     * The same fix where a caller meets it. {@code Units.DEGREES.parse} goes through
+     * {@code AngleFormat} while {@code Proj4Parser} goes through {@code Angle}, so a degrees-only
+     * string used to be readable as a CRS parameter and unreadable as a user-supplied measurement.
      */
     @Test
-    public void DEFECT_unitsDegreesInheritsTheRejection() {
+    public void unitsDegreesAcceptsADegreesOnlyString() {
         assertEquals(45.5, Units.DEGREES.parse("45d30"), TOLERANCE);
         assertEquals(45.5, Units.DEGREES.parse("45.5"), 0.0);
-
-        NumberFormatException thrown = assertThrows(
-                "pins today's wrong answer; the right answer is 123.0, which is what "
-                        + "Angle.parse(\"123d\") returns for the same text",
-                NumberFormatException.class,
-                new ThrowingRunnable() {
-                    public void run() {
-                        Units.DEGREES.parse("123d");
-                    }
-                });
-        assertEquals("empty String", thrown.getMessage());
+        assertEquals(123.0, Units.DEGREES.parse("123d"), 0.0);
     }
 
     /**
-     * Everything else agrees. Holding the two implementations against one table is what makes the
-     * test above a statement about one missing guard rather than about one arbitrary string, and
-     * it is the net that catches a merge of the two bodies that changes any other case.
+     * Everything agrees, including every failure. Holding the two implementations against one
+     * table is the net that catches a merge of the two bodies — or an edit to one of them — that
+     * changes any case at all.
+     *
+     * <p>Before this change the table had to carve out the degrees-only strings; it no longer
+     * does, so any difference whatsoever is now a failure.
      */
     @Test
-    public void theTwoParsersAgreeOnEverythingExceptADegreesOnlyString() {
+    public void theTwoParsersAgreeOnEveryFormAndEveryFailure() {
         String[] inputs = {
                 "123", "123.12", "-123.12", "+123.12", "1e2", "  123 ",
                 "123d30m", "123d30", "123d30'", "123°30m", "123dm", "123d'",
+                "123d", "123°", "0d", "-1d", "123dN", "123°W",
                 "123d30'15\"", "123d44'44.555\"", "123.5d30m",
-                "123.12W", "123.12E", "123.12n", "45d30'00\"N", "45d30'00\"S", "123d30mw",
-                "-0d30", "-1d30m", "12d34m57s",
-                "123d60m", "123d-5m", "123d59.5m", "123d0'60\"", "123d30m-5s",
+                "123.12W", "123.12E", "123.12n", "123.12s", "45d30'00\"N", "45d30'00\"S",
+                "123d30mw", "18d54S", "18d54s",
+                "12d34's", "12d34'56\"s", "12d34'57s", "12d34m56\"s", "12d34m57S",
+                "-0d30", "-0d34S", "-12d34S", "-1d30m", "12d34m57s", "123d44m44.555s",
+                "123d0m59.5\"",
+                "123d60m", "123d-5m", "123d59.5m", "123d0'60\"", "123d30m-5s", "123d0'-5\"",
                 "", "d30m", "abc", "12dxxm", "123D30M", "12d ",
         };
         for (String input : inputs) {
             assertEquals("Angle.parse and AngleFormat.parse must not drift apart on \"" + input
-                            + "\"; only a degrees-only string is allowed to differ, and that "
-                            + "difference is pinned separately as a defect",
-                    angleOutcome(input), angleFormatOutcome(input));
+                            + "\"", angleOutcome(input), angleFormatOutcome(input));
         }
     }
 
     // ------------------------------------------------------------------
-    // DEFECT 2: the seconds abbreviation collides with South
+    // The seconds abbreviation and the southern hemisphere
     // ------------------------------------------------------------------
 
     /**
-     * DEFECT. A trailing {@code s} is taken for the southern hemisphere before anything else is
-     * looked at, so an angle written with the class's own seconds abbreviation comes back
-     * negated.
+     * A trailing lower-case {@code s} that closes a lettered seconds field is the seconds
+     * abbreviation, not the southern hemisphere, so an angle written with this class's own
+     * {@code ddmmssPattern4} no longer reads back negated.
      *
-     * <p>The current behaviour is wrong. {@code "12d34m57s"} is twelve and a half degrees north
-     * or east and should parse as {@code +12.5825}; it parses as {@code -12.5825}. The suffix
-     * test runs first and matches {@code 's'} case-insensitively, so the {@code s} that
-     * {@link AngleFormat#STR_SEC_ABBREV} writes is consumed as {@link AngleFormat#CH_S}. The
-     * later {@code endsWith(STR_SEC_ABBREV)} check, which exists precisely to strip that letter,
-     * never sees it.
+     * <p>The hemisphere test used to run first and match {@code 's'} case-insensitively, so the
+     * {@code s} that {@link AngleFormat#STR_SEC_ABBREV} writes was consumed as
+     * {@link AngleFormat#CH_S} and {@code "12d34m57s"} came back as {@code -12.57}. The later
+     * {@code endsWith(STR_SEC_ABBREV)} check, which exists precisely to strip that letter, never
+     * saw it.
      *
-     * <p>This is not a hypothetical spelling. {@code AngleFormat.ddmmssPattern4} produces exactly
-     * this text, and {@code Angle.parse}'s own Javadoc offers {@code 123d44m44.555s} as a
-     * supported example. The fix is to treat a trailing {@code s} as the hemisphere only when the
-     * string holds no minute or degree marker before it, or to drop {@code s} as a hemisphere
-     * spelling and require {@code S}.
+     * <p>The rule is not case alone. Two things have to hold before the {@code s} is read as
+     * seconds: an {@code m} minutes marker appears earlier in the string, and the character
+     * immediately in front of the {@code s} is a digit. Case alone was tried and cost three
+     * ordinary spellings — see {@link #aLowerCaseSThatClosesNoSecondsFieldIsStillSouth()} for
+     * what each of them returned. Upper-case {@code S} is always South, and the reason is in
+     * {@link #upperCaseSouthAfterADegreeMarkerIsStillTheHemisphere()}: the registry writes
+     * {@code 18d54S} and means South.
      */
     @Test
-    public void DEFECT_aTrailingSecondsAbbreviationIsReadAsSouth() throws ParseException {
-        assertEquals("pins today's wrong answer; the right answer is 12.5825",
-                -12.5825, Angle.parse("12d34m57s"), TOLERANCE);
-        assertEquals("pins today's wrong answer; the right answer is 12.5825",
-                -12.5825, parseAsDegrees("12d34m57s"), TOLERANCE);
-        assertEquals("pins today's wrong answer; the right answer is 123.74570972222223",
-                -123.74570972222223, Angle.parse("123d44m44.555s"), TOLERANCE);
-        assertEquals("even a plain decimal is negated by a trailing s; "
-                        + "the right answer is 123.12", -123.12, Angle.parse("123.12s"), 0.0);
+    public void aTrailingSecondsAbbreviationIsNotReadAsSouth() throws ParseException {
+        assertEquals(12.5825, Angle.parse("12d34m57s"), TOLERANCE);
+        assertEquals(12.5825, parseAsDegrees("12d34m57s"), TOLERANCE);
+        assertEquals(123.74570972222223, Angle.parse("123d44m44.555s"), 0.0);
 
-        assertEquals("the quote spelling of the same angle is read correctly, which is what "
-                        + "shows the 's' is the problem and not the arithmetic",
-                12.5825, Angle.parse("12d34'57\""), TOLERANCE);
+        assertEquals("with no degree marker in front of it there is no seconds field for an 's' "
+                        + "to be abbreviating, so it stays South -- and dmstor reads it the same "
+                        + "way", -123.12, Angle.parse("123.12s"), 0.0);
+
+        assertEquals("the quote spelling of the same angle agrees to the last bit, which is the "
+                        + "point: the two spellings are one grammar",
+                Angle.parse("12d34'57\""), Angle.parse("12d34m57s"), 0.0);
     }
 
     /**
-     * DEFECT, stated as a round trip because that is how it will be met in practice: text written
-     * by this class cannot be read back by this class.
+     * The shapes a case-only rule got wrong. Each ends in a lower-case {@code s} that closes no
+     * seconds field, so each is South, and the narrowed rule reads them that way again.
+     *
+     * <p>Reading the {@code s} as seconds cost three ordinary spellings. Measured against master
+     * and against an installed PROJ 9.8.1, piping each token through
+     * {@code cs2cs -f '%.6f' +proj=latlong +datum=WGS84 +to +proj=latlong +datum=WGS84}:
+     *
+     * <ul>
+     * <li>{@code "12d34's"} read {@code +12.5667} where master and 9.8.1 both give
+     *     {@code -12.5667}.</li>
+     * <li>{@code "12d34'56\"s"} threw outright, where master and 9.8.1 both read
+     *     {@code -12.5822}.</li>
+     * <li>{@code "12d34'57s"} read {@code +12.5825} where master and 9.8.1 both give
+     *     {@code -12.5825}.</li>
+     * </ul>
+     *
+     * <p>All three are the symbolic spelling, in which {@code s} has no job: this class writes the
+     * lettered {@code 12d34m57s} and the symbolic {@code 12d34'57"}, never a mixture. So the
+     * abbreviation is recognised only after an {@code m}. These three are agreements with
+     * upstream, not divergences from it, which is why they are here and not in
+     * {@link #theThreeShapesWhereThisParserDivergesFromDmstor()}.
+     *
+     * <p>The two conditions the rule tests are pinned separately below: {@code "18d54s"} has no
+     * minutes marker at all, and {@code "12d34m56\"s"} has one but no digit in front of the
+     * {@code s}.
      */
     @Test
-    public void DEFECT_theLetterAbbreviationPatternDoesNotSurviveARoundTrip() {
+    public void aLowerCaseSThatClosesNoSecondsFieldIsStillSouth() throws ParseException {
+        assertEquals(-12.566666666666666, Angle.parse("12d34's"), 0.0);
+        assertEquals(-12.582222222222223, Angle.parse("12d34'56\"s"), 0.0);
+        assertEquals(-12.5825, Angle.parse("12d34'57s"), 0.0);
+
+        assertEquals(-12.566666666666666, parseAsDegrees("12d34's"), 0.0);
+        assertEquals(-12.582222222222223, parseAsDegrees("12d34'56\"s"), 0.0);
+        assertEquals(-12.5825, parseAsDegrees("12d34'57s"), 0.0);
+
+        assertEquals("upper case is South by the same reading, and always was",
+                -12.582222222222223, Angle.parse("12d34'56\"S"), 0.0);
+
+        assertEquals("no minutes marker at all, so there is no seconds field open for the 's' to "
+                        + "close: master and dmstor both read this as South too",
+                -18.9, Angle.parse("18d54s"), TOLERANCE);
+
+        // The digit rule. The quote has already closed the seconds field, so the 's' after it is
+        // a suffix rather than an abbreviation. Pinned against the symbolic spelling rather than
+        // against a literal, because the two must be the same angle: that value is -12.5822,
+        // asserted above.
+        assertEquals("a marker that already closed its own field leaves the 's' as a suffix",
+                Angle.parse("12d34'56\"s"), Angle.parse("12d34m56\"s"), 0.0);
+    }
+
+    /**
+     * An upper-case {@code S} after a degree marker is South, and this is the assertion that
+     * stops a fix for the test above from moving Madagascar into the northern hemisphere.
+     *
+     * <p>{@code epsg/src/main/resources/proj4/nad/world:9} — the Madagascar Laborde grid — writes
+     * {@code +lat_0=18d54S}, and eleven more registry tokens are shaped the same way. Any rule of
+     * the form "a trailing s after a degree marker is seconds" reads that as 18 degrees 54 minutes
+     * north, and moves Madagascar into the northern hemisphere.
+     */
+    @Test
+    public void upperCaseSouthAfterADegreeMarkerIsStillTheHemisphere() throws ParseException {
+        assertEquals("the Madagascar Laborde grid's +lat_0", -18.9, Angle.parse("18d54S"), TOLERANCE);
+        assertEquals(-18.9, parseAsDegrees("18d54S"), TOLERANCE);
+        assertEquals("and the same with seconds spelled out",
+                -18.9, Angle.parse("18d54'00\"S"), TOLERANCE);
+        assertEquals("the other three cardinals are unaffected in either case",
+                18.9, Angle.parse("18d54N"), TOLERANCE);
+        assertEquals(18.9, Angle.parse("18d54n"), TOLERANCE);
+        assertEquals(-18.9, Angle.parse("18d54w"), TOLERANCE);
+    }
+
+    /**
+     * The three shapes where this parser and {@code dmstor} disagree, pinned so that the
+     * disagreement is a recorded decision rather than a surprise.
+     *
+     * <p>Every survivor contains an {@code m}, and one choice produces all three: {@code m} and
+     * {@code '} are one grammar here, both carrying the angle on into a seconds field. Upstream
+     * recognises only {@code d}, {@code '} and {@code "}, so its digit loop stops at the
+     * unrecognised {@code m}, and its postfix-sign test then looks at that {@code m} rather than
+     * at the end of the string. Upstream discriminates by where the parse stopped; we read the
+     * whole string.
+     *
+     * <p>The set used to have five members. It shrank when the seconds rule was narrowed: the
+     * discriminator is no longer case, it is whether the {@code s} closes a lettered seconds
+     * field — a digit in front of it and an {@code m} earlier in the string. Under that rule
+     * {@code "18d54s"} and {@code "12d34'57s"} are both South, which is what master and 9.8.1
+     * say too, so they are agreements now rather than divergences and have moved to
+     * {@link #aLowerCaseSThatClosesNoSecondsFieldIsStillSouth()}.
+     *
+     * <p>Matching upstream on what is left would mean treating {@code m} as ending the angle,
+     * which would stop {@link AngleFormat#ddmmssPattern4} reading back what it writes — see
+     * {@link #bothMinuteSpellingsRoundTrip()} — and would suppress every cardinal after an
+     * {@code m} rather than just the {@code s}.
+     *
+     * <p>None of these three occurs in the shipped registries or the gie corpus. What was
+     * measured is that the registries hold 1,792 distinct angular values, not one of which
+     * contains an {@code m}, and that the gie corpus holds none either. So the choice moves no
+     * data either way. If that ever stops being true, this test is the place to change the rule.
+     */
+    @Test
+    public void theThreeShapesWhereThisParserDivergesFromDmstor() {
+        assertEquals("upstream reads +12.5667, having stopped at the 'm'; we read the seconds",
+                12.5825, Angle.parse("12d34m57s"), TOLERANCE);
+        assertEquals("upstream reads +12.5667, because it stopped at the 'm' and never looked at "
+                        + "the 'S'", -12.5825, Angle.parse("12d34m57S"), TOLERANCE);
+        assertEquals("upstream reads +123.5, for the same reason",
+                -123.5, Angle.parse("123d30mw"), TOLERANCE);
+    }
+
+    /**
+     * {@code m} and {@code '} are two spellings of the same minutes field, and either one lets
+     * the angle continue into seconds.
+     *
+     * <p>This is where the library deliberately parts company with {@code dmstor}, whose unit
+     * alphabet is {@code d}, {@code '} and {@code "} — see
+     * {@code conformance/.../parse/ProjDmsToR.java}, a port of {@code 9.8.1:src/dmstor.cpp} — and
+     * whose digit loop therefore reads the minutes and stops at the unrecognised {@code m}. The
+     * reason for parting company is {@link #bothMinuteSpellingsRoundTrip()}: this class writes
+     * the {@code m} spelling itself.
+     *
+     * <p>Reading the whole string also means the seconds after an {@code m} are range-checked
+     * like any others, rather than passing unlooked-at.
+     */
+    @Test
+    public void theTwoMinuteSpellingsAreOneGrammar() throws ParseException {
+        assertEquals("the same angle either way", Angle.parse("12d34'57\""),
+                Angle.parse("12d34m57s"), 0.0);
+        // Delta 0.0, and the literal is the double the code actually returns. This assertion
+        // used to end ...22222 while degreesMinutesAndSeconds pinned ...22223 for the same
+        // angle spelled 123d44'44.555". Those are one ULP apart, so TOLERANCE hid it -- 1e-12
+        // is about 70 ULPs at this magnitude -- and the file was asserting that the two
+        // spellings are the same double and then giving them different values.
+        assertEquals(123.74570972222223, Angle.parse("123d44m44.555s"), 0.0);
+        assertEquals("and the quote spelling is the same double, not merely close",
+                Angle.parse("123d44'44.555\""), Angle.parse("123d44m44.555s"), 0.0);
+        assertEquals("seconds after an 'm' are validated, not skipped",
+                "Seconds must be at least 0 and less than 60",
+                angleFailureMessage("123d30m-5s"));
+        assertEquals("and the two markers can be mixed within one angle",
+                123.01652777777778, Angle.parse("123d0m59.5\""), TOLERANCE);
+    }
+
+    /**
+     * {@link AngleFormat#ddmmssPattern4} survives a round trip, which it did not before.
+     *
+     * <p>It used to come back negated — twelve and a half degrees south instead of north —
+     * because the trailing {@code s} this class writes was read as South. The pattern is
+     * {@code DdMmSs}, so the {@code m} and the {@code s} are both this class's own output, and a
+     * writing format that the matching reader cannot read back is a defect rather than a
+     * grammar. Both patterns now return the value they were given.
+     */
+    @Test
+    public void bothMinuteSpellingsRoundTrip() {
         AngleFormat letters = new AngleFormat(AngleFormat.ddmmssPattern4, true);
         String written = letters.format(12.5825);
         assertEquals("12d34m57s", written);
-        assertEquals("pins today's wrong answer; reading back what this class just wrote must "
-                        + "give 12.5825 and instead flips the sign",
-                -12.5825, Angle.parse(written), TOLERANCE);
+        assertEquals(12.5825, Angle.parse(written), TOLERANCE);
 
         AngleFormat punctuation = new AngleFormat(AngleFormat.ddmmssPattern2, true);
         String alsoWritten = punctuation.format(12.5825);
         assertEquals("12d34'57\"", alsoWritten);
-        assertEquals("the punctuation pattern does round-trip, which is the comparison that says "
-                        + "the defect is in the letter 's' and nowhere else",
-                12.5825, Angle.parse(alsoWritten), TOLERANCE);
+        assertEquals(12.5825, Angle.parse(alsoWritten), TOLERANCE);
+
+        assertEquals("the two spellings of the same angle agree to the last bit",
+                Angle.parse(written), Angle.parse(alsoWritten), 0.0);
     }
 
     // ------------------------------------------------------------------
-    // DEFECT 3: minus zero degrees
+    // Minus zero degrees
     // ------------------------------------------------------------------
 
     /**
-     * DEFECT. An angle between -1 and 0 degrees written sexagesimally parses as positive.
+     * An angle between -1 and 0 degrees written sexagesimally keeps its sign.
      *
-     * <p>The current behaviour is wrong. {@code "-0d30"} is half a degree south and should parse
-     * as {@code -0.5}; it parses as {@code +0.5}. The degrees field is read with
-     * {@code Double.valueOf("-0")}, which is negative zero, and
+     * <p>{@code "-0d30"} is half a degree south and used to parse as {@code +0.5}. The degrees
+     * field is read with {@code Double.valueOf("-0")}, which is negative zero, and
      * {@code ProjectionMath.dmsToDeg} decides where to put the sign with {@code if (d >= 0)} —
-     * true for negative zero, so the minutes are added rather than subtracted. The fix is to
-     * carry the sign of the text separately from the value of the degrees field.
+     * true for negative zero, so the minutes were added rather than subtracted. The sign is now
+     * recovered at the call site, by inspecting the sign bit of the degrees field, which leaves
+     * {@code dmsToDeg}'s arithmetic untouched for the 187 registry tokens of the {@code -#d#}
+     * form (99 in {@code nad27}, 88 in {@code nad83}, 77 distinct) that take its
+     * genuinely-negative branch.
      *
-     * <p>This is the reading-side twin of the formatting defect: {@code format(-0.5)} writes
-     * {@code "0d30"} and {@code parse("-0d30")} reads {@code +0.5}, so a value below one degree
-     * loses its hemisphere whichever direction it is travelling. Writing the sign as a hemisphere
-     * letter instead does work, and that contrast is asserted here so a fix keeps it working.
+     * <p>This is the reading-side twin of the formatting defect: {@code format(-0.5)} wrote
+     * {@code "0d30"} and {@code parse("-0d30")} read {@code +0.5}, so a value below one degree
+     * lost its hemisphere whichever direction it was travelling.
      */
     @Test
-    public void DEFECT_negativeZeroDegreesLosesTheSign() throws ParseException {
-        assertEquals("pins today's wrong answer; the right answer is -0.5",
-                0.5, Angle.parse("-0d30"), TOLERANCE);
-        assertEquals("pins today's wrong answer; the right answer is -0.5",
-                0.5, Angle.parse("-0d30m"), TOLERANCE);
-        assertEquals("pins today's wrong answer; the right answer is -0.5",
-                0.5, parseAsDegrees("-0d30'00\""), TOLERANCE);
-        assertEquals("pins today's wrong answer; the right answer is -0.0002777...",
-                2.777777777777778E-4, Angle.parse("-0d0'1\""), TOLERANCE);
+    public void negativeZeroDegreesKeepsTheSign() throws ParseException {
+        assertEquals(-0.5, Angle.parse("-0d30"), TOLERANCE);
+        assertEquals(-0.5, Angle.parse("-0d30m"), TOLERANCE);
+        assertEquals(-0.5, parseAsDegrees("-0d30'00\""), TOLERANCE);
+        assertEquals(-2.777777777777778E-4, Angle.parse("-0d0'1\""), TOLERANCE);
 
-        assertEquals("at one whole degree the sign survives, which is where the defect stops",
+        assertEquals("at one whole degree the sign always survived; it must still",
                 -1.5, Angle.parse("-1d30m"), TOLERANCE);
-        assertEquals("the hemisphere spelling of the same angle is read correctly",
+        assertEquals("a positive zero degrees field is not negated",
+                0.5, Angle.parse("0d30"), TOLERANCE);
+        assertEquals("the hemisphere spelling of the same angle",
                 -0.5, Angle.parse("0d30'00\"S"), TOLERANCE);
-        assertEquals("and the decimal spelling is read correctly",
-                -0.5, Angle.parse("-0.5"), 0.0);
+        assertEquals("and the decimal spelling", -0.5, Angle.parse("-0.5"), 0.0);
+    }
+
+    /**
+     * A trailing cardinal overrules a leading minus rather than compounding with it. The letter
+     * assigns the sign and the minus is discarded, so {@code "-0d30S"} is south and
+     * {@code "-0d30N"} is north.
+     *
+     * <p>That is what {@code dmstor} does — {@code sign = idx >= 4 ? -1 : 1}, an assignment, at
+     * {@code conformance/.../parse/ProjDmsToR.java:181} — and every value below was read out of
+     * PROJ 9.8.1 rather than reasoned about. It corrects two readings this library had wrong
+     * before this branch, {@code "-1d30E"} (was {@code -1.5}) and {@code "-12d34S"} (was
+     * {@code +12.5667}), and it is also the only rule under which recovering the lost sign of
+     * {@code "-0d30"} does not break the four sub-degree shapes that were already right.
+     *
+     * <p>Nothing shipped writes both. Of 735 DMS tokens in the registries, 187 open with a minus
+     * and 66 close with a cardinal, none does both, and the gie corpus has none either.
+     */
+    @Test
+    public void aTrailingCardinalOverrulesALeadingMinus() throws ParseException {
+        // Sub-degree: the minus survives only when no letter contradicts it. All six agree with
+        // 9.8.1, and the last five agreed with master too -- the multiply rule would have
+        // flipped every one of them.
+        assertEquals("no letter, so the recovered sign bit stands",
+                -0.5, Angle.parse("-0d30"), 0.0);
+        assertEquals(-0.5, Angle.parse("-0d30W"), 0.0);
+        assertEquals(0.5, Angle.parse("-0d30E"), 0.0);
+        assertEquals(0.5, Angle.parse("-0d30N"), 0.0);
+        assertEquals(-0.5, Angle.parse("-0d30S"), 0.0);
+        assertEquals(-0.008333333333333333, Angle.parse("-0d0'30\"W"), 0.0);
+
+        // Whole degrees. Both of these read with the wrong sign before this branch.
+        assertEquals("was -1.5 here, +1.5 upstream", 1.5, Angle.parse("-1d30E"), 0.0);
+        assertEquals("was +12.5667 here, -12.5667 upstream",
+                -12.566666666666666, Angle.parse("-12d34S"), 0.0);
+        assertEquals(12.566666666666666, Angle.parse("-12d34N"), 0.0);
+
+        // The decimal spelling takes the same rule, and always did.
+        assertEquals(-45.5, Angle.parse("-45.5S"), 0.0);
+        assertEquals(45.5, Angle.parse("-45.5N"), 0.0);
+
+        // The other parser, on the same inputs.
+        assertEquals(-0.5, parseAsDegrees("-0d30W"), 0.0);
+        assertEquals(0.5, parseAsDegrees("-0d30E"), 0.0);
+        assertEquals(-12.566666666666666, parseAsDegrees("-12d34S"), 0.0);
+        assertEquals(12.566666666666666, parseAsDegrees("-12d34N"), 0.0);
+        assertEquals(1.5, parseAsDegrees("-1d30E"), 0.0);
     }
 
     // ------------------------------------------------------------------
@@ -386,11 +584,11 @@ public class AngleFormatParseTest {
 
     @Test
     public void minutesOutsideTheRangeAreRejected() {
-        assertEquals("Minutes must be between 0 and 59",
+        assertEquals("Minutes must be at least 0 and less than 60",
                 angleFailureMessage("123d60m"));
-        assertEquals("Minutes must be between 0 and 59",
+        assertEquals("Minutes must be at least 0 and less than 60",
                 angleFailureMessage("123d-5m"));
-        assertEquals("Minutes must be between 0 and 59",
+        assertEquals("Minutes must be at least 0 and less than 60",
                 angleFormatFailureMessage("123d60m"));
         assertEquals("59 minutes exactly must still be accepted",
                 123.98333333333333, Angle.parse("123d59m"), TOLERANCE);
@@ -398,36 +596,43 @@ public class AngleFormatParseTest {
 
     @Test
     public void secondsOutsideTheRangeAreRejected() {
-        assertEquals("Seconds must be between 0 and 59",
+        assertEquals("Seconds must be at least 0 and less than 60",
                 angleFailureMessage("123d0'60\""));
-        assertEquals("Seconds must be between 0 and 59",
+        // Both spellings of a negative seconds field. The lettered one, "123d30m-5s", is the
+        // input this test carried originally; the symbolic one was substituted for it at some
+        // point without a note. They are the same case and both are cheap, so both are here.
+        assertEquals("Seconds must be at least 0 and less than 60",
+                angleFailureMessage("123d0'-5\""));
+        assertEquals("Seconds must be at least 0 and less than 60",
                 angleFailureMessage("123d30m-5s"));
-        assertEquals("Seconds must be between 0 and 59",
+        assertEquals("Seconds must be at least 0 and less than 60",
                 angleFormatFailureMessage("123d0'60\""));
+        assertEquals("59 seconds exactly must still be accepted",
+                123.01638888888889, Angle.parse("123d0'59\""), TOLERANCE);
     }
 
     /**
-     * DEFECT. The two range checks do not agree with each other, and neither agrees with its own
-     * message.
+     * The two range checks now agree with each other, and both messages describe what they do.
      *
-     * <p>Seconds are checked with {@code s >= 60}, so 59.5 seconds is accepted — correctly, since
-     * it is a real angle. Minutes are checked with {@code m > 59}, so 59.5 minutes is rejected,
-     * although it is equally real: {@code "123d59.5m"} is 123 degrees 59 minutes 30 seconds. The
-     * current behaviour is wrong; {@code "123d59.5m"} should parse as {@code 123.99166...}. The
-     * fix is to check {@code m >= 60}.
-     *
-     * <p>Both messages say "between 0 and 59" while the seconds check in fact permits anything
-     * below 60, so the message is misleading on the side that behaves correctly and accurate only
-     * on the side that does not.
+     * <p>Seconds were checked with {@code s >= 60}, so 59.5 seconds was accepted — correctly,
+     * since it is a real angle. Minutes were checked with {@code m > 59}, so 59.5 minutes was
+     * rejected, although {@code "123d59.5m"} is the equally real 123 degrees 59 minutes 30
+     * seconds. Both are now "at least 0 and less than 60", which is also what both messages say;
+     * the old wording, "between 0 and 59", was accurate only on the side that behaved wrongly.
      */
     @Test
-    public void DEFECT_fractionalMinutesJustBelowSixtyAreRejectedThoughSecondsAreNot() {
-        assertEquals("59.5 seconds is accepted, and should be",
-                123.01652777777778, Angle.parse("123d0m59.5\""), TOLERANCE);
-        assertEquals("pins today's wrong answer; 123d59.5m should parse as 123.99166...",
-                "Minutes must be between 0 and 59", angleFailureMessage("123d59.5m"));
-        assertEquals("pins today's wrong answer; the two parsers are wrong in the same way",
-                "Minutes must be between 0 and 59", angleFormatFailureMessage("123d59.5m"));
+    public void fractionalMinutesJustBelowSixtyAreAcceptedLikeSeconds() {
+        assertEquals(123.99166666666666, Angle.parse("123d59.5m"), TOLERANCE);
+        assertEquals("both parsers, since the check was duplicated in both",
+                123.99166666666666, Units.DEGREES.parse("123d59.5m"), TOLERANCE);
+        assertEquals("the apostrophe spelling, which was rejected too",
+                123.99166666666666, Angle.parse("123d59.5'"), TOLERANCE);
+        assertEquals("and the fractional seconds that were always allowed",
+                123.01652777777778, Angle.parse("123d0'59.5\""), TOLERANCE);
+        assertEquals("60 exactly is still out of range on both sides",
+                "Minutes must be at least 0 and less than 60", angleFailureMessage("123d60m"));
+        assertEquals("Seconds must be at least 0 and less than 60",
+                angleFailureMessage("123d0'60\""));
     }
 
     // ------------------------------------------------------------------
@@ -458,8 +663,10 @@ public class AngleFormatParseTest {
     /**
      * The failures that come out of an empty field name nothing at all. Recorded as it stands
      * rather than asserted as correct: a caller who gets {@code "empty String"} back from a CRS
-     * definition has no way to tell which parameter was at fault. Whoever fixes the degrees-only
-     * defect above should give these messages the offending text as well.
+     * definition has no way to tell which parameter was at fault. These messages come out of
+     * {@code Double.valueOf} rather than out of this library, so improving them means catching
+     * and rethrowing at each of the four fields, which is a change to {@code Angle} and
+     * {@code AngleFormat} and not to this test.
      */
     @Test
     public void emptyFieldsAreRejectedWithAMessageThatNamesNothing() {
@@ -499,25 +706,28 @@ public class AngleFormatParseTest {
     }
 
     /**
-     * DEFECT. When a hemisphere letter is consumed, the reported position stops one character
-     * short of it.
+     * When a hemisphere letter is consumed, the reported position includes it.
      *
-     * <p>The current behaviour is wrong. After reading all eight characters of {@code "123d30mN"}
-     * the index should be 8; it is 7, because the index is set from the length of the string
-     * <em>after</em> the suffix has been chopped off. A caller reading several angles out of one
-     * string with a shared {@link ParsePosition} would read the {@code N} again as the start of
-     * the next one. The fix is to record the original length before the suffix is removed.
+     * <p>It used to stop one character short: after reading all eight characters of
+     * {@code "123d30mN"} the index came back as 7, because it was taken from the length of the
+     * string <em>after</em> the suffix had been chopped off. A caller reading several angles out
+     * of one string with a shared {@link ParsePosition} would have read the {@code N} again as the
+     * start of the next one. The length is now recorded before the suffix is removed.
      *
-     * <p>Nothing in the repository parses with an explicit position today, which is why this has
-     * not bitten: {@code Units.DEGREES.parse} goes through {@code NumberFormat.parse(String)},
-     * which only checks the index is not zero.
+     * <p>Nothing in the repository parses with an explicit position today, which is why this never
+     * bit: {@code Units.DEGREES.parse} goes through {@code NumberFormat.parse(String)}, which only
+     * checks the index is not zero.
      */
     @Test
-    public void DEFECT_theReportedPositionExcludesTheHemisphereLetter() {
-        ParsePosition position = new ParsePosition(0);
-        degreeParser().parse("123d30mN", position);
-        assertEquals("pins today's wrong answer; the right answer is 8",
-                7, position.getIndex());
+    public void theReportedPositionIncludesTheHemisphereLetter() {
+        ParsePosition withSuffix = new ParsePosition(0);
+        degreeParser().parse("123d30mN", withSuffix);
+        assertEquals(8, withSuffix.getIndex());
+
+        ParsePosition decimalWithSuffix = new ParsePosition(0);
+        degreeParser().parse("123.12W", decimalWithSuffix);
+        assertEquals("the decimal path reports the whole string too",
+                7, decimalWithSuffix.getIndex());
     }
 
     @Test

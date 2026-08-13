@@ -49,8 +49,13 @@ public final class Angles {
         String s = raw.trim();
         if (s.isEmpty()) return Double.NaN;
 
-        // Trailing cardinal direction sets the sign and is stripped first: "6d0E", "-14d16",
-        // "83d10'W". PROJ accepts N/E/S/W in either case.
+        // Trailing cardinal direction, stripped first: "6d0E", "-14d16", "83d10'W". PROJ accepts
+        // N/E/S/W in either case. W and S multiply by -1 here rather than assigning the sign, so
+        // "-45.5S" is +45.5 and "-1d30E" is -1.5. core's Angle.parse -- which this deliberately does
+        // not call -- now assigns instead, matching dmstor, and answers -45.5 and +1.5. The two
+        // agree on every value the dictionaries actually contain: of the 1,431 distinct angular
+        // values in the shipped registries, exactly two carry a cardinal (46d57'8.660"N and
+        // 7d26'22.500"E) and neither is signed.
         double cardinal = 1.0;
         char last = s.charAt(s.length() - 1);
         if (last == 'N' || last == 'n' || last == 'E' || last == 'e') {
@@ -61,8 +66,12 @@ public final class Angles {
         }
         if (s.isEmpty()) return Double.NaN;
 
-        // Radian suffix. PROJ's dmstor accepts it; proj4j does not, which is itself a divergence,
-        // but here we only need to read what the dictionaries contain.
+        // Radian suffix. PROJ's dmstor accepts it and so does proj4j: Proj4Parser.parseAngle strips
+        // a trailing r/R and scales the rest by RTD, and parseAngleRadians does the same and answers
+        // in radians. The parser is stricter about what may precede the suffix -- the remainder has
+        // to be a plain decimal, so "1d30r" and "0.5rE" are errors there and angles here -- but no
+        // angular value in the dictionaries this reads carries the suffix at all, so the difference
+        // costs nothing.
         boolean radians = false;
         last = s.charAt(s.length() - 1);
         if (last == 'r' || last == 'R') {

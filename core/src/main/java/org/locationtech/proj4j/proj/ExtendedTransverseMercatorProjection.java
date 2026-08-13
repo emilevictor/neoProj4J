@@ -356,7 +356,23 @@ public class ExtendedTransverseMercatorProjection extends CylindricalProjection 
         }
     }
 
+    /**
+     * Installs the UTM frame on the exact algorithm.
+     *
+     * <p><b>Not reachable from a proj-string.</b> {@code +proj=etmerc} does not accept
+     * {@code +zone}: {@code PJ_PROJECTION(etmerc)} never calls {@code pj_param} for it, so
+     * {@code Proj4Parser} deliberately has no dispatch here. This stays public for callers
+     * that want a UTM frame on Poder/Engsager directly - which is what
+     * {@code +proj=utm} itself gets, through {@link TransverseMercatorProjection}'s
+     * {@code exact} delegate.
+     *
+     * @param zone the UTM zone, 1 to 60 inclusive
+     * @throws InvalidValueException if the zone is outside 1..60; the check is
+     *         {@code TransverseMercatorProjection.checkUTMZone}, shared so the two setters
+     *         cannot drift
+     */
     public void setUTMZone(int zone) {
+        TransverseMercatorProjection.checkUTMZone(zone);
         zone--;
         projectionLongitude = (zone + .5) * Math.PI / 30. - Math.PI;
         projectionLatitude = 0.0;

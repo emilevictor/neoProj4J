@@ -38,21 +38,28 @@ import static org.junit.Assert.assertSame;
  *
  * <p>Each pattern letter is asserted separately, so a failure says which letter moved rather than
  * just that some string changed. {@code D} is the degree count, {@code M} the minutes,
- * {@code S} the seconds, {@code F} the arcseconds remaining inside the degree, {@code R} the raw
- * number, and {@code N} / {@code W} the hemisphere letters. Anything else in the pattern is
+ * {@code S} the seconds, {@code F} the fraction of a degree left below the degree count,
+ * {@code R} the raw number, and {@code N} / {@code W} the hemisphere letters. Anything else in the pattern is
  * copied through as a literal, which is where the {@code d}, the apostrophe and the quote in
  * {@code "DdM'S\""} come from.
  *
- * <h2>Three defects are pinned here rather than fixed</h2>
+ * <h2>Three defects that used to be pinned here, and are now fixed</h2>
  *
- * <p>Each is marked DEFECT below with the answer the code ought to give. They are deliberately
- * left unfixed in this change; the assertions exist so that whoever fixes one has a test to flip
- * and can see immediately what else moves.
+ * <p>Each was marked DEFECT with the answer the code ought to give, and each has since been given
+ * it. The assertions below are the flipped versions and are now references rather than markers.
  *
  * <ol>
- * <li>An angle between -1 and 0 degrees comes out positive.</li>
- * <li>Seconds that round up to a whole degree do not carry into the degree.</li>
- * <li>{@code AngleFormat.decimalPattern} does not produce a decimal number.</li>
+ * <li>An angle between -1 and 0 degrees came out positive, because the sign reached the output
+ *     only as the minus on {@code (int) ddmmss} and that field is zero for every such angle. The
+ *     sign is now carried separately —
+ *     {@link #theSignSurvivesBelowOneDegree()}.</li>
+ * <li>Seconds that round up to a whole degree did not carry into the degree, because the degree
+ *     field was truncated from the raw value while the minutes and seconds came from the value
+ *     after rounding to whole arcseconds. All three fields now come from one rounded arcsecond
+ *     count — {@link #secondsThatRoundUpToAWholeDegreeCarryIntoIt()}.</li>
+ * <li>{@code AngleFormat.decimalPattern} did not produce a decimal number, because {@code F}
+ *     emitted the arcsecond count unscaled. {@code F} now emits the fraction of a degree —
+ *     {@link #theDecimalPatternIsDecimal()}.</li>
  * </ol>
  *
  * <p>If this file is deleted, the pattern loop goes back to being exercised only by
@@ -187,26 +194,23 @@ public class AngleFormatFormatTest {
     }
 
     /**
-     * DEFECT. The carry stops at the minute: an angle whose seconds round up to a whole degree
-     * keeps the old degree count and resets the minutes to zero, so it prints one degree short.
+     * The carry reaches the degree. An angle whose seconds round up to a whole degree increments
+     * the degree count instead of keeping the old one and resetting the minutes to zero.
      *
-     * <p>The current behaviour is wrong. {@code 45.99999} degrees should print as {@code 46d00}
-     * and prints as {@code 45d00} — an error of a whole degree, about 111 km on the ground. The
-     * cause is that the degree field is truncated from the raw value ({@code (int) ddmmss}) while
-     * the minutes and seconds are taken from the value after rounding to whole arcseconds, so the
-     * two fields disagree about which degree they are in. The fix is to derive all three fields
-     * from the same rounded arcsecond count.
+     * <p>This used to be wrong by a whole degree, about 111 km on the ground: {@code 45.99999}
+     * printed as {@code 45d00}. The degree field was truncated from the raw value
+     * ({@code (int) ddmmss}) while the minutes and seconds were taken from the value after
+     * rounding to whole arcseconds, so the two disagreed about which degree they were in. All
+     * three fields now come from one rounded arcsecond count.
      */
     @Test
-    public void DEFECT_secondsThatRoundUpToAWholeDegreeDoNotCarry() {
-        assertEquals("pins today's wrong answer; the right answer is 46d00",
-                "45d00", format("DdM", 45.99999));
-        assertEquals("pins today's wrong answer; the right answer is 1d00",
-                "0d00", format("DdM", 0.9999));
-        assertEquals("pins today's wrong answer; the right answer is 180d00'00\"",
-                "179d00'00\"", format("DdM'S\"", 179.9999999));
-        assertEquals("pins today's wrong answer; the right answer is 46d00'00\"N",
-                "45d00'00\"N", format(AngleFormat.ddmmssLatPattern, 45.99999));
+    public void secondsThatRoundUpToAWholeDegreeCarryIntoIt() {
+        assertEquals("46d00", format("DdM", 45.99999));
+        assertEquals("0.9999 degrees is 3599.64 arcseconds, which rounds to a whole degree",
+                "1d00", format("DdM", 0.9999));
+        assertEquals("180d00'00\"", format("DdM'S\"", 179.9999999));
+        assertEquals("the carry must survive the hemisphere patterns too",
+                "46d00'00\"N", format(AngleFormat.ddmmssLatPattern, 45.99999));
     }
 
     // ------------------------------------------------------------------
@@ -214,62 +218,72 @@ public class AngleFormatFormatTest {
     // ------------------------------------------------------------------
 
     /**
-     * DEFECT. Any angle strictly between -1 and 0 degrees is printed as if it were positive.
+     * An angle strictly between -1 and 0 degrees keeps its sign.
      *
-     * <p>The current behaviour is wrong. {@code -0.5} degrees should print as {@code -0d30} and
-     * prints as {@code 0d30}. The cause is that the sign only ever reaches the output through the
-     * degree field, as the minus sign on {@code (int) ddmmss}; when the degree count is zero there
-     * is no minus sign to print, and the minutes and seconds are taken from the absolute value.
-     * The fix is to carry the sign separately from the degree count.
+     * <p>This used to print as if positive — {@code -0.5} came out as {@code 0d30} — because the
+     * sign only ever reached the output through the degree field, as the minus on
+     * {@code (int) ddmmss}. When the degree count is zero there is no minus to print, and the
+     * minutes and seconds were taken from the absolute value. The sign is now carried separately
+     * from the degree count.
      *
-     * <p>The boundary is exact: the sign survives for values at or below {@code -1.0}, because
-     * {@code (int) -1.0} is {@code -1} and prints its own minus. It is lost for every value in
-     * the open interval {@code (-1, 0)}. Patterns that carry a hemisphere letter are unaffected,
-     * because there the sign is consumed before the arithmetic and re-emitted as {@code S} or
-     * {@code W}.
+     * <p>Patterns that carry a hemisphere letter were never affected, because there the sign is
+     * consumed before the arithmetic and re-emitted as {@code S} or {@code W}; that contrast is
+     * asserted in {@link #aHemispherePatternAbsorbsTheMinusSignRatherThanPrintingBoth()}.
      */
     @Test
-    public void DEFECT_theSignIsLostBelowOneDegree() {
-        assertEquals("pins today's wrong answer; the right answer is -0d30",
-                "0d30", format("DdM", -0.5));
-        assertEquals("pins today's wrong answer; the right answer is -0d30'00\"",
-                "0d30'00\"", format("DdM'S\"", -0.5));
-        assertEquals("pins today's wrong answer; the right answer is -0d00'58\"",
-                "0d00'58\"", format("DdM'S\"", -0.016));
-        assertEquals("this is the user-visible form of the same defect; the right answer is "
-                + "-0d30 deg", "0d30 deg", Units.DEGREES.format(-0.5));
-    }
-
-    /** The boundary of the sign defect, stated as a pair so a fix cannot move it unnoticed. */
-    @Test
-    public void DEFECT_theSignSurvivesAtExactlyMinusOneDegreeAndIsLostJustInsideIt() {
-        assertEquals("at or beyond -1 degree the degree field carries the sign itself",
-                "-1d00", format("DdM", -1.0));
-        assertEquals("-1d00'00\"", format("DdM'S\"", -1.0000001));
-
-        // Just inside the boundary. Both defects fire at once here: the sign is dropped and the
-        // 59.964 arcseconds round up to a degree that is never carried, so an angle of nearly one
-        // degree west prints as zero. The right answer is -1d00.
-        assertEquals("pins today's wrong answer; the right answer is -1d00",
-                "0d00", format("DdM", -0.9999));
-        assertEquals("pins today's wrong answer; the right answer is -0d59",
-                "0d59", format("DdM", -0.99));
+    public void theSignSurvivesBelowOneDegree() {
+        assertEquals("-0d30", format("DdM", -0.5));
+        assertEquals("-0d30'00\"", format("DdM'S\"", -0.5));
+        assertEquals("-0d00'58\"", format("DdM'S\"", -0.016));
+        assertEquals("this is the user-visible form of the same fix",
+                "-0d30 deg", Units.DEGREES.format(-0.5));
     }
 
     /**
-     * DEFECT, same cause, reached through {@code Projection.getPROJ4Description()}.
+     * The boundary at one degree, stated as a pair so a regression cannot move it unnoticed. It
+     * used to be a real discontinuity — the sign survived at {@code -1.0} and vanished just
+     * inside it — and is now simply continuous.
+     */
+    @Test
+    public void theSignIsContinuousAcrossTheOneDegreeBoundary() {
+        assertEquals("-1d00", format("DdM", -1.0));
+        assertEquals("-1d00'00\"", format("DdM'S\"", -1.0000001));
+
+        // Just inside the boundary, where both defects used to fire at once: the sign was dropped
+        // and the 59.964 arcseconds rounded up to a degree that was never carried, so an angle of
+        // nearly one degree west printed as "0d00".
+        assertEquals("-1d00", format("DdM", -0.9999));
+        assertEquals("-0d59", format("DdM", -0.99));
+    }
+
+    /**
+     * An angle too small to round to a single arcsecond is printed without a sign, so a tiny
+     * negative is {@code 0d00} and never {@code -0d00}.
+     *
+     * <p>Pinned because it is the one case the sign fix deliberately does not cover: below half an
+     * arcsecond every field is zero and a minus sign in front of them would claim a direction the
+     * output has no magnitude to support.
+     */
+    @Test
+    public void anAngleThatRoundsAwayEntirelyIsPrintedWithoutASign() {
+        assertEquals("0d00", format("DdM", -0.4 / 3600));
+        assertEquals("0d00'00\"", format("DdM'S\"", -0.0));
+        assertEquals("0d00'00\"", format("DdM'S\"", 0.0));
+    }
+
+    /**
+     * The same fix, reached through {@code Projection.getPROJ4Description()}.
      *
      * <p>That method builds an {@code AngleFormat} on {@code ddmmssPattern} in radian mode and
      * writes the result after {@code +lon_0=} and {@code +lat_0=}. A projection centred half a
-     * degree south of the equator therefore describes itself as being half a degree north, and
-     * the description does not read back as the projection it came from. Asserted here in radian
-     * mode rather than through a projection so that the failure points at the formatter.
+     * degree south of the equator used to describe itself as being half a degree north, so the
+     * description did not read back as the projection it came from. Asserted here in radian mode
+     * rather than through a projection so that a failure points at the formatter.
      */
     @Test
-    public void DEFECT_theSignIsAlsoLostInRadianModeWhichIsWhatProj4DescriptionsUse() {
+    public void theSignSurvivesInRadianModeWhichIsWhatProj4DescriptionsUse() {
         AngleFormat asProjectionUsesIt = new AngleFormat(AngleFormat.ddmmssPattern, false);
-        assertEquals("pins today's wrong answer; the right answer is -0d30",
-                "0d30", asProjectionUsesIt.format(ProjectionMath.toRad(-0.5)));
+        assertEquals("-0d30", asProjectionUsesIt.format(ProjectionMath.toRad(-0.5)));
     }
 
     // ------------------------------------------------------------------
@@ -331,27 +345,35 @@ public class AngleFormatFormatTest {
     // ------------------------------------------------------------------
 
     /**
-     * DEFECT. {@code AngleFormat.decimalPattern} is named for decimal degrees but does not
-     * produce them.
+     * {@code AngleFormat.decimalPattern} produces decimal degrees, which is what its name says.
      *
-     * <p>The current behaviour is wrong. {@code 45.5} degrees under the {@code "D.F"} pattern
-     * should print as {@code 45.5} and prints as {@code 45.1800}, because {@code F} emits the
-     * count of arcseconds inside the degree (1800 of them in half a degree) with no scaling and
-     * no padding, and the {@code .} is only a literal. The number that comes out is not the angle
-     * in any notation: it reads as forty-five and eighteen hundred ten-thousandths of a degree.
-     * The fix is either to make {@code F} emit a fraction of a degree or to withdraw the
-     * constant. Nothing in the repository formats with it today, which is why it has gone
-     * unnoticed.
+     * <p>It used not to. {@code 45.5} degrees under {@code "D.F"} printed as {@code 45.1800},
+     * because {@code F} emitted the count of arcseconds inside the degree (1800 of them in half a
+     * degree) with no scaling, and the {@code .} is only a literal. What came out was not the
+     * angle in any notation: it read as forty-five and eighteen hundred ten-thousandths of a
+     * degree. {@code F} now emits the fraction of a degree instead.
      */
     @Test
-    public void DEFECT_theDecimalPatternIsNotDecimal() {
-        assertEquals("pins today's wrong answer; the right answer is 45.5",
-                "45.1800", format(AngleFormat.decimalPattern, 45.5));
-        assertEquals("pins today's wrong answer; the right answer is 0.25",
-                "0.900", format(AngleFormat.decimalPattern, 0.25));
-        assertEquals("a whole number of degrees is the only case that reads correctly",
-                "45.0", format(AngleFormat.decimalPattern, 45.0));
-        assertEquals("pins today's wrong answer; the right answer is -122.25",
-                "-122.900", format(AngleFormat.decimalPattern, -122.25));
+    public void theDecimalPatternIsDecimal() {
+        assertEquals("45.5", format(AngleFormat.decimalPattern, 45.5));
+        assertEquals("0.25", format(AngleFormat.decimalPattern, 0.25));
+        assertEquals("a whole number of degrees keeps a single trailing zero rather than ending "
+                + "on the separator", "45.0", format(AngleFormat.decimalPattern, 45.0));
+        assertEquals("-122.25", format(AngleFormat.decimalPattern, -122.25));
+    }
+
+    /**
+     * The fraction is carried to four decimal places, which is the most an arcsecond count can
+     * justify: one arcsecond is 0.000277… of a degree, so four places distinguish neighbouring
+     * arcseconds and a fifth would be inventing precision the rounded count no longer has.
+     */
+    @Test
+    public void theDecimalFractionIsFourPlacesAndTrailingZerosAreDropped() {
+        assertEquals("one arcsecond", "0.0003", format(AngleFormat.decimalPattern, 1.0 / 3600));
+        assertEquals("0.5", format(AngleFormat.decimalPattern, 0.5));
+        assertEquals("two arcseconds are 0.000555… of a degree and round up, not down",
+                "0.0006", format(AngleFormat.decimalPattern, 2.0 / 3600));
+        assertEquals("the fraction is padded on the left, not the right",
+                "45.0167", format(AngleFormat.decimalPattern, 45.0 + 1.0 / 60));
     }
 }

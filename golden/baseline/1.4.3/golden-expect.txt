@@ -20,12 +20,20 @@
 # catch, and a re-pin without one is how that regression gets waved through.
 #
 # The INTENDED figure is also asserted a second way, and more tightly: every rule in rules.yaml
-# carries an exact, two-sided expected_rows, and as of this pin those 44 pins sum to exactly 39134.
+# carries an exact, two-sided expected_rows, and as of this pin those 45 pins sum to exactly 39138.
 # A change that moves INTENDED without moving a rule's expected_rows is therefore already a
 # COUNT_MISMATCH. It is pinned here as well so that all six figures are visible in one place.
 #
-# The 2291 UNEXPLAINED is the pre-existing triage backlog, not a target of zero. Pinning it means a
+# The 2287 UNEXPLAINED is the pre-existing triage backlog, not a target of zero. Pinning it means a
 # PR that resolves some of it must say so here, and a PR that quietly adds to it cannot.
 #
 # Pinned 2026-08-13 against baseline 1.4.3.
-golden diff: 12005 UNCHANGED, 41425 CHANGED, 0 ADDED, 0 REMOVED; 39134 INTENDED, 2291 UNEXPLAINED (baseline 53430 rows, current 53430 rows)
+#
+# RE-PINNED 2026-08-13 by the +proj=tmerc +zone change. INTENDED 39134 -> 39138 and UNEXPLAINED
+# 2291 -> 2287; UNCHANGED, CHANGED, ADDED and REMOVED did not move, so no row changed sides
+# against the baseline. The five rows are the whole of `SYN mod/tmerc/zone` and they are claimed
+# by the new rule PARSE-TMERC-IGNORES-ZONE. Exactly one of the five, probe 0, moved a figure by
+# itself: it was INTENDED under PROJ-TMERC-PODER-ENGSAGER-DEFAULT inside that rule's 1 cm band and
+# is now 5.0e6 m outside it, so that rule is re-pinned 14038 -> 14037 in the same change. The
+# other four were already UNEXPLAINED and the new rule absorbs them.
+golden diff: 12005 UNCHANGED, 41425 CHANGED, 0 ADDED, 0 REMOVED; 39138 INTENDED, 2287 UNEXPLAINED (baseline 53430 rows, current 53430 rows)
