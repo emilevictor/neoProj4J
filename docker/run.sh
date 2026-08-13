@@ -25,13 +25,14 @@
 # The expectation is not hardcoded to a verdict either - it is re-derived from the run:
 #
 #   * golden is EXPECTED-FAIL only while its failure is UNEXPLAINED rows and nothing else. A
-#     COUNT_MISMATCH, DEAD_RULE, EXPIRED_RULE or PENDING_RULE_FIRED is a real failure and is
-#     reported as one, because those mean the rule set has stopped describing the tree. A green
-#     golden is not the goal and is not what this script waits for. The criterion is that the six
-#     figures in the REPORT are unchanged -- but read that as an instruction to you, not a claim
-#     about automation: nothing diffs the produced report against the pinned expectation, so the
-#     comparison is by eye. The test is already red, so its pass/fail bit says nothing about a
-#     change; the counts are the whole signal. See task #104.
+#     FIGURES_MOVED, COUNT_MISMATCH, DEAD_RULE, EXPIRED_RULE or PENDING_RULE_FIRED is a real failure
+#     and is reported as one, because those mean the rule set, or the pinned figure set, has stopped
+#     describing the tree. A green golden is not the goal and is not what this script waits for. The
+#     criterion is that the six figures in the REPORT are unchanged, and that is now checked by
+#     machine: GoldenMasterTest compares them to golden/baseline/1.4.3/golden-expect.txt and fails
+#     with FIGURES_MOVED, printing expected/actual/delta for all six. The test is already red on the
+#     backlog, so its pass/fail bit still says nothing on its own -- which is why the figure check
+#     is a distinct named failure this script greps for below.
 #   * ci used to be expected to fail too, on MetaCRSTest alone, while that test's CSV input was
 #     being regenerated. The regeneration landed and ci is green. The XFAIL branch in check_ci is
 #     left in place because it derives the expectation from the run rather than asserting it: if
@@ -311,13 +312,24 @@ break_conformance() {
 # =====================================================================================
 # A FLOOR, NOT AN EXPECTED COUNT. The reading it guards is 2,573 tests - core 2,141, conformance 345
 # (its unit tests; the corpus sweep is behind -Pconformance and does not run here), db 75, geoapi
-# 12, and no test sources in epsg or grids-us-legacy. On a warm tree none of those are skipped; in
-# this container they are a clean first build, so NoGeoApiInCoreTest's two Assumes fire and the
-# runner reports 2 skips. That is a skip, not a pass, which is why it is printed. 1,700 is well below
-# that so ordinary additions do not have to touch this line. It is also, by the same token, 873
-# below reality, so it would no longer catch a whole module dropping out of the reactor; raising it
-# is a change to what the harness asserts and belongs in its own commit, not in a docs pass.
-CI_MIN_TESTS=1700
+# 12, and no test sources in epsg or grids-us-legacy. Measured 2026-08-13 with
+# `mvn -B -ntp clean verify`. Surefire's `tests` attribute counts skips, so the two Assumes that
+# NoGeoApiInCoreTest fires on a clean first build do not move this number; they are printed
+# separately because a skip is never a pass.
+#
+# 2,500 IS CHOSEN, NOT ROUNDED. It is the highest round figure that still fails when the db module
+# (75 tests) drops out of the reactor: 2,573 - 75 = 2,498. That property is the reason this floor
+# exists, and it is what the previous 1,700 had lost - 873 below reality, it would have passed a run
+# with core, conformance and db all present but any two of them gone.
+#
+# What it deliberately does NOT catch: geoapi's 12 tests vanishing (2,561, still over). No floor can
+# catch a 12-test module and still leave room for ordinary additions. 73 tests of headroom is a few
+# PRs' worth; when it runs out, RAISE IT, do not lower it. It is a ratchet.
+#
+# This check has no counterpart in ci.yaml - that workflow's only numeric comparisons are in its
+# jdk8-runtime job. So on this axis the container asserts strictly MORE than the workflow it
+# otherwise mirrors, and raising this line here does not desynchronise anything.
+CI_MIN_TESTS=2500
 check_ci() {
     hdr "ci  -- mvn -B -ntp clean install   (ci.yaml / build-and-test)"
     cd "$WORK" || return 2
@@ -604,9 +616,20 @@ check_golden() {
     total=$(sumattr tests   golden/target/surefire-reports/TEST-org.locationtech.proj4j.golden.*.xml)
     totalskip=$(sumattr skipped golden/target/surefire-reports/TEST-org.locationtech.proj4j.golden.*.xml)
     say "golden module: tests=$total skipped=$totalskip"
-    if [ "$total" -lt 40 ]; then
-        bad "only $total tests ran in the golden module; expected at least 40."
-        record golden FAIL "$total tests (floor 40)" "floor assertion failed - tests were dropped or not matched"
+    # 55 against 64 measured @Test methods (GoldenDiffTest 30, GoldenRulesTest 14, ProbesTest 11,
+    # GoldenFormatTest 8, GoldenMasterTest 1), counted 2026-08-13. It was 40, which no longer
+    # detected anything: the module could lose GoldenDiffTest AND GoldenRulesTest and still pass.
+    #
+    # 55 is the highest floor that leaves real headroom while still failing if any ONE of the three
+    # largest classes disappears: without GoldenDiffTest 34, without GoldenRulesTest 50, without
+    # ProbesTest 53 - all under 55. Losing GoldenFormatTest alone (56) stays under the radar, which
+    # is the accepted cost of 9 tests of headroom. GoldenMasterTest going missing is covered
+    # separately and exactly, by the ran-exactly-once check above.
+    #
+    # MIRRORED at .github/workflows/golden.yaml. The two must move together or they stop mirroring.
+    if [ "$total" -lt 55 ]; then
+        bad "only $total tests ran in the golden module; expected at least 55."
+        record golden FAIL "$total tests (floor 55)" "floor assertion failed - tests were dropped or not matched"
         return
     fi
     if [ "$totalskip" -ne 0 ]; then
@@ -626,11 +649,15 @@ check_golden() {
     say "rules.yaml: $pinned/$rules rules carry a pinned expected_rows"
 
     local unexplained diffline hardkinds="" kind n
+    # This grep is why GoldenDiff.Result.summary() keeps ASCII separators. If that line is ever
+    # reworded, re-check this pattern.
     diffline=$(grep -ho 'golden diff: [^<"]*' "$xml" | head -1)
     [ -n "$diffline" ] && say "$diffline"
     unexplained=$(grep -o 'UNEXPLAINED [0-9]* row(s)' "$xml" | head -1 | tr -dc '0-9')
     [ -z "$unexplained" ] && unexplained=0
-    for kind in COUNT_MISMATCH DEAD_RULE EXPIRED_RULE PENDING_RULE_FIRED; do
+    # FIGURES_MOVED belongs in this list, not in the XFAIL branch below. The backlog figure moving is
+    # exactly the thing that used to be invisible, and recording it as "expected" would put it back.
+    for kind in FIGURES_MOVED COUNT_MISMATCH DEAD_RULE EXPIRED_RULE PENDING_RULE_FIRED; do
         n=$(grep -c "$kind " "$xml")
         [ "$n" -gt 0 ] && hardkinds="$hardkinds $kind($n)"
     done
@@ -640,12 +667,14 @@ check_golden() {
     elif [ -n "$hardkinds" ]; then
         bad "golden failed on rule-level problems:$hardkinds"
         bad "These are NOT the triage backlog. A COUNT_MISMATCH, DEAD_RULE, EXPIRED_RULE or"
-        bad "PENDING_RULE_FIRED means the rule set has stopped describing the tree."
+        bad "PENDING_RULE_FIRED means the rule set has stopped describing the tree; a FIGURES_MOVED"
+        bad "means the six headline figures no longer match baseline/1.4.3/golden-expect.txt."
         grep -o "\(COUNT_MISMATCH\|DEAD_RULE\|EXPIRED_RULE\|PENDING_RULE_FIRED\) [a-z0-9-]*" "$xml" | sort -u
+        grep -A 8 'FIGURES_MOVED' "$xml" | head -9
         record golden FAIL "$unexplained UNEXPLAINED plus$hardkinds" \
             "a rule-level failure, which is a defect in the rule set - not the triage backlog"
     elif [ "$unexplained" -gt 0 ]; then
-        record golden XFAIL "$unexplained UNEXPLAINED rows, $pinned/$rules rules pinned, no COUNT_MISMATCH/DEAD_RULE/EXPIRED_RULE/PENDING_RULE_FIRED" \
+        record golden XFAIL "$unexplained UNEXPLAINED rows, $pinned/$rules rules pinned, no FIGURES_MOVED/COUNT_MISMATCH/DEAD_RULE/EXPIRED_RULE/PENDING_RULE_FIRED" \
             "EXPECTED: $unexplained changed rows have not yet been attributed to a specific fix. That is a triage backlog owned by the streams that caused it, not a defect in this gate. It goes green one rule at a time."
     else
         record golden FAIL "mvn exited $rc with 0 UNEXPLAINED and no rule failure" \
@@ -813,16 +842,31 @@ check_bench() {
     arms=$(grep -c '"benchmark"' "$json")
     alloc=$(grep -c 'gc.alloc.rate.norm' "$json")
     say "JMH arms: $arms   arms carrying gc.alloc.rate.norm: $alloc"
-    if [ "$arms" -lt 20 ]; then
-        bad "only $arms benchmark arms in the result; expected at least 20. Benchmarks were"
+    # 200 against 245 measured arms across 10 benchmark classes (benchmark/README.md: "all 245 arms
+    # are gated as of 2026-08-03, 0 EXCLUDED"; the run prints "245 arms expected"). It was 20, which
+    # was satisfied by a single class limping through and 9 of the 10 failing in @Setup - the exact
+    # scenario the sentence below claims to catch.
+    #
+    # 200 leaves 45 arms of headroom, which matters more here than elsewhere because the arm count
+    # is a product of @Param combinations and moves in jumps: this suite went 181 -> 245 in one
+    # change. It is still tight enough that losing any whole class fails. RAISE IT when arms are
+    # added; it is a ratchet, same as everywhere else in this file.
+    #
+    # Note this is a backstop, not the primary check: run-gate.sh enumerates the expected arms with
+    # JMH's own `-lp` and dies per shard if a shard returns fewer than it should. This catches the
+    # case where that enumeration is itself wrong.
+    #
+    # MIRRORED at .github/workflows/bench.yaml, which had the same two 20s.
+    if [ "$arms" -lt 200 ]; then
+        bad "only $arms benchmark arms in the result; expected at least 200. Benchmarks were"
         bad "excluded, renamed, or failed in @Setup. Tier 1 cannot gate what was not run."
-        record bench FAIL "$arms arms (floor 20)" "floor assertion failed - too few benchmark arms"
+        record bench FAIL "$arms arms (floor 200)" "floor assertion failed - too few benchmark arms"
         return
     fi
-    if [ "$alloc" -lt 20 ]; then
+    if [ "$alloc" -lt 200 ]; then
         bad "$alloc arms carry gc.alloc.rate.norm. The -prof gc profiler did not attach, so Tier 1"
         bad "would have measured NOTHING while reporting success."
-        record bench FAIL "$alloc arms with an allocation measurement (floor 20)" "the allocation profiler did not attach"
+        record bench FAIL "$alloc arms with an allocation measurement (floor 200)" "the allocation profiler did not attach"
         return
     fi
     say "Non-vacuity satisfied: $alloc of $arms arms carry an allocation measurement."

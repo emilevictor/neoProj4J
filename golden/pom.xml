@@ -72,6 +72,11 @@
              kind of thing that silently works on a laptop and silently does something else in CI. -->
         <golden.dir>${project.basedir}</golden.dir>
         <golden.baseline>1.4.3</golden.baseline>
+
+        <!-- The pinned six figures of the golden diff. Derived from the two properties above rather
+             than spelled out, so that -Dgolden.baseline=X moves the expectation and the table it
+             describes together and they cannot be mismatched from the command line. -->
+        <golden.expect>${golden.dir}/baseline/${golden.baseline}/golden-expect.txt</golden.expect>
     </properties>
 
     <dependencies>
@@ -121,6 +126,7 @@
                         <golden.dir>${golden.dir}</golden.dir>
                         <golden.baseline>${golden.baseline}</golden.baseline>
                         <golden.out>${project.build.directory}/golden</golden.out>
+                        <golden.expect>${golden.expect}</golden.expect>
                     </systemPropertyVariables>
                     <!-- Determinism, and it MUST be argLine rather than systemPropertyVariables:
                          Locale.getDefault() and the default charset are initialised during JVM

@@ -720,7 +720,9 @@ this measurement.
 >    2026-08-01; all 176 are now real.**
 > 3. **A non-vacuity step.** If `-prof gc` fails to attach, or the `-e` exclusion matches too much,
 >    Tier 1 examines zero measurements and has nothing to complain about. The job asserts at least
->    20 arms in `jmh-result.json` and at least 20 carrying `gc.alloc.rate.norm`.
+>    200 arms in `jmh-result.json` and at least 200 carrying `gc.alloc.rate.norm`. (Both floors were
+>    20 until 2026-08-13, against 245 measured arms — low enough that one of the ten benchmark
+>    classes limping through on its own would have satisfied them.)
 >
 > `run-gate.sh` also gained an explicit `--require-baseline` case, and since 2026-08-01 an unknown
 > option is a **hard error** rather than a pass-through to JMH — see "An unknown option is a hard

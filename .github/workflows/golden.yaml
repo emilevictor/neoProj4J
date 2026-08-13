@@ -27,16 +27,19 @@ name: Golden Master
 #
 # WHAT IS ACTUALLY CHECKED, because an earlier version of this comment claimed more than the job
 # delivers and the claim was copied into docker/run.sh and golden/README.md before anyone noticed.
-# The criterion is that the six figures above are unchanged - but that comparison is made BY EYE
-# from this job's failure output. Nothing here diffs the produced report against the line above.
-# What the job enforces by itself is: the test ran exactly once and was not skipped, at least 40
-# tests ran in the module with none skipped, the generated table has the same line count as the
-# committed baseline, and GoldenMasterTest fails on any UNEXPLAINED row or on DEAD_RULE /
-# PENDING_RULE_FIRED / EXPIRED_RULE / COUNT_MISMATCH. Since the test is already red, its pass/fail
-# bit carries no information about a change - the counts are the whole signal, and a few hundred
-# rows drifting between UNCHANGED and UNEXPLAINED would pass every automated check here. Task #104
-# is to close that. rules.yaml carries 44 rules,
-# all `status: active` and all with a pinned integer `expected_rows` - count them rather than
+# The six figures above are compared automatically, but NOT HERE - the check is inside
+# GoldenMasterTest, against golden/baseline/1.4.3/golden-expect.txt, and it fails with
+# FIGURES_MOVED showing expected, actual and delta side by side. It was put in the test on purpose:
+# this workflow is `schedule` + `workflow_dispatch` only and master's ruleset has no required
+# status checks, so an assertion added here would gate nothing on a PR. In the test it runs
+# wherever the sweep runs, including docker/run.sh.
+# What this job adds on top is: the test ran exactly once and was not skipped, at least 55
+# tests ran in the module with none skipped, and the generated table has the same line count as the
+# committed baseline. GoldenMasterTest itself fails on any UNEXPLAINED row or on DEAD_RULE /
+# PENDING_RULE_FIRED / EXPIRED_RULE / COUNT_MISMATCH. Since the test is already red on the backlog,
+# its pass/fail bit carries no information about a change - which is why the figure check reports a
+# separate, named, greppable failure rather than relying on the exit code. rules.yaml carries 44
+# rules, all `status: active` and all with a pinned integer `expected_rows` - count them rather than
 # quoting a number from prose, which has been stale more than once.
 #
 # DO NOT ADD `continue-on-error` TO GET PAST THEM. golden/README.md says so directly, and the
@@ -244,8 +247,12 @@ jobs:
           }
           total=$(sum tests); totalskip=$(sum skipped)
           echo "golden module: tests=$total skipped=$totalskip"
-          [ "$total" -ge 40 ] || {
-            echo "::error::only $total tests ran in the golden module; expected at least 40."
+          # 55 against 64 measured @Test methods (2026-08-13). Was 40, which the module could have
+          # passed having lost both GoldenDiffTest and GoldenRulesTest. 55 fails if any one of the
+          # three largest classes disappears and still leaves 9 tests of headroom.
+          # MIRRORED at docker/run.sh; the two must move together or they stop mirroring.
+          [ "$total" -ge 55 ] || {
+            echo "::error::only $total tests ran in the golden module; expected at least 55."
             echo "::error::Tests were dropped, renamed out of the -Dtest pattern, or not compiled."
             exit 1; }
           [ "$totalskip" -eq 0 ] || {

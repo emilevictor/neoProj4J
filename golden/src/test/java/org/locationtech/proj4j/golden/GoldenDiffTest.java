@@ -20,6 +20,7 @@ import java.util.Date;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -488,5 +489,146 @@ public class GoldenDiffTest {
         // '.' and other regex metacharacters are literal
         assertFalse(GoldenRules.glob("a.c", "abc"));
         assertTrue(GoldenRules.glob("a.c", "a.c"));
+    }
+
+    // ------------------------------------------------------------- the pinned headline figures
+
+    private static GoldenDiff.Result result(int unchanged, int changed, int added, int removed,
+                                            int intended, int unexplained) {
+        GoldenDiff.Result r = new GoldenDiff.Result();
+        r.unchanged = unchanged;
+        r.changed = changed;
+        r.added = added;
+        r.removed = removed;
+        r.intended = intended;
+        r.unexplained = unexplained;
+        r.baselineRows = unchanged + changed + removed;
+        r.currentRows = unchanged + changed + added;
+        return r;
+    }
+
+    private File expect(String... lines) throws IOException {
+        File f = tmp.newFile("expect-" + System.nanoTime() + ".txt");
+        Writer w = GoldenFormat.writer(f);
+        try {
+            for (int i = 0; i < lines.length; i++) {
+                w.write(lines[i]);
+                w.write('\n');
+            }
+        } finally {
+            w.close();
+        }
+        return f;
+    }
+
+    /**
+     * The one that stops the pin rotting: an expectation written from a Result must accept that same
+     * Result. If anybody re-words {@link GoldenDiff.Result#summary()} into a shape the parser cannot
+     * read, this fails here rather than turning every golden run into a false FIGURES_MOVED.
+     */
+    @Test
+    public void anExpectationPastedFromSummaryAcceptsTheRunItCameFrom() throws IOException {
+        GoldenDiff.Result r = result(12005, 41425, 0, 0, 39134, 2291);
+        GoldenDiff.Expectation e = GoldenDiff.Expectation.load(expect("# comment", "", r.summary()));
+        assertNull(e.mismatch(r));
+    }
+
+    @Test
+    public void everyOneOfTheSixFiguresIsAsserted() throws IOException {
+        int[] base = {12005, 41425, 0, 0, 39134, 2291};
+        for (int i = 0; i < 6; i++) {
+            int[] moved = base.clone();
+            moved[i] += 7;
+            GoldenDiff.Result pinned = result(base[0], base[1], base[2], base[3], base[4], base[5]);
+            GoldenDiff.Expectation e = GoldenDiff.Expectation.load(expect(pinned.summary()));
+            String msg = e.mismatch(result(moved[0], moved[1], moved[2], moved[3], moved[4],
+                    moved[5]));
+            assertTrue(GoldenDiff.Expectation.LABELS[i] + " moved but nothing failed", msg != null);
+            assertTrue("the message must name the label that moved",
+                    msg.contains(GoldenDiff.Expectation.LABELS[i]));
+            assertTrue("the message must show the delta", msg.contains("+7"));
+            assertTrue("the message must show both the pinned and the actual line",
+                    msg.contains("pinned: ") && msg.contains("actual: "));
+            assertTrue("the message must say how to re-pin", msg.contains("TO RE-PIN"));
+        }
+    }
+
+    /** A figure that moves DOWN is a move too. Fewer UNEXPLAINED rows is good news that still has
+     *  to be attributed, and the delta must read as negative. */
+    @Test
+    public void aFigureThatMovesDownFailsTooAndShowsANegativeDelta() throws IOException {
+        GoldenDiff.Expectation e = GoldenDiff.Expectation.load(
+                expect(result(12005, 41425, 0, 0, 39134, 2291).summary()));
+        String msg = e.mismatch(result(12005, 41425, 0, 0, 39134, 2281));
+        assertTrue(msg != null);
+        assertTrue(msg, msg.contains("-10"));
+    }
+
+    /** Parsing is by label, so the separator is free. The prose in this repo writes these six with
+     *  a middot; summary() writes ASCII. Neither may be read as a different set of numbers. */
+    @Test
+    public void figuresAreReadByLabelNotBySeparatorOrPosition() throws IOException {
+        GoldenDiff.Expectation e = GoldenDiff.Expectation.load(expect(
+                "golden diff: 1 UNCHANGED | 2 CHANGED | 3 ADDED | 4 REMOVED | 5 INTENDED"
+                        + " | 6 UNEXPLAINED [ignored trailing text 999]"));
+        assertNull(e.mismatch(result(1, 2, 3, 4, 5, 6)));
+    }
+
+    /** A broken expectation file must be loud. A gate that silently passes when its pin is
+     *  unreadable is worse than no gate. */
+    @Test
+    public void abrokenExpectationFileFailsRatherThanPassing() throws IOException {
+        try {
+            GoldenDiff.Expectation.load(new File(tmp.getRoot(), "does-not-exist.txt"));
+            fail("a missing expectation file must throw");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("not found"));
+        }
+        try {
+            GoldenDiff.Expectation.load(expect("# only comments"));
+            fail("an expectation file with no data line must throw");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("no data line"));
+        }
+        try {
+            GoldenDiff.Expectation.load(expect("1 UNCHANGED 2 CHANGED", "3 ADDED 4 REMOVED"));
+            fail("two data lines must throw");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("more than one"));
+        }
+        try {
+            // UNEXPLAINED omitted -- the figure most likely to be quietly dropped
+            GoldenDiff.Expectation.load(expect(
+                    "golden diff: 1 UNCHANGED, 2 CHANGED, 3 ADDED, 4 REMOVED; 5 INTENDED"));
+            fail("a missing label must throw");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("UNEXPLAINED"));
+        }
+        try {
+            GoldenDiff.Expectation.load(expect(
+                    "golden diff: many UNCHANGED, 2 CHANGED, 3 ADDED, 4 REMOVED; 5 INTENDED,"
+                            + " 6 UNEXPLAINED"));
+            fail("a non-numeric figure must throw");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("not preceded by a"));
+        }
+    }
+
+    /**
+     * The committed pin loads and carries all six. This is the same idea as GoldenRulesTest loading
+     * the real rules.yaml: the file is only useful if it parses, and a typo in it must fail in the
+     * fast build rather than 20 minutes into the golden sweep.
+     */
+    @Test
+    public void theCommittedExpectationFileParses() throws IOException {
+        // No Assume. surefire in this module always sets golden.dir, so a missing file here is a
+        // broken tree, and the golden checks in docker/run.sh and golden.yaml both treat a skip in
+        // this module as a failure anyway.
+        File f = new File(new File(new File(System.getProperty("golden.dir", "."), "baseline"),
+                System.getProperty("golden.baseline", "1.4.3")), "golden-expect.txt");
+        GoldenDiff.Expectation e = GoldenDiff.Expectation.load(f);
+        assertEquals(6, e.figures.length);
+        assertTrue("the pinned line must be the summary() shape",
+                e.line.startsWith("golden diff: "));
     }
 }

@@ -166,11 +166,173 @@ public final class GoldenDiff {
             return failures.isEmpty() ? 0 : 1;
         }
 
+        /**
+         * The one line everything else quotes. ASCII separators on purpose, twice over: golden files
+         * are {@link GoldenFormat#ASCII} by policy, and {@code docker/run.sh} greps this line out of
+         * the surefire XML. Prose elsewhere writes the same six figures with a {@code ·} separator;
+         * that is prose. {@link Expectation} parses figures by label rather than by separator, so
+         * the two cannot drift apart into a false pass — but changing the text here still means
+         * re-checking {@code docker/run.sh}'s {@code golden diff:} grep.
+         */
         public String summary() {
             return "golden diff: " + unchanged + " UNCHANGED, " + changed + " CHANGED, "
                     + added + " ADDED, " + removed + " REMOVED; "
                     + intended + " INTENDED, " + unexplained + " UNEXPLAINED"
                     + " (baseline " + baselineRows + " rows, current " + currentRows + " rows)";
+        }
+
+        /** The six figures of {@link #summary()}, in {@link Expectation#LABELS} order. */
+        public int[] figures() {
+            return new int[]{unchanged, changed, added, removed, intended, unexplained};
+        }
+    }
+
+    // ----------------------------------------------------------------------------- expectation
+
+    /**
+     * The pinned six figures, read from a committed one-line file, so that a move in the headline
+     * numbers fails a test instead of waiting for somebody to read the log.
+     *
+     * <p>Only {@code INTENDED} was previously machine-checked, and only indirectly: every rule in
+     * {@code rules.yaml} carries an exact, two-sided {@code expected_rows}, and those pins sum to the
+     * {@code INTENDED} figure. The other five were printed and compared to nothing.
+     *
+     * <p>Parsing is by <em>label</em>, not by position or separator: the line is split on runs of
+     * non-alphanumeric characters and every {@code <digits> <LABEL>} pair is taken. Text that is not
+     * one of the six labels is ignored, which is why the trailing {@code (baseline N rows, current N
+     * rows)} of {@link Result#summary()} can be pasted in unaltered and is carried as context rather
+     * than asserted. Row counts are already asserted, against the committed table, by
+     * {@code docker/run.sh} and by {@code .github/workflows/golden.yaml}.
+     */
+    public static final class Expectation {
+
+        public static final String[] LABELS = {
+                UNCHANGED, CHANGED, ADDED, REMOVED, "INTENDED", "UNEXPLAINED"};
+
+        /** The pinned figures, in {@link #LABELS} order. */
+        public final int[] figures;
+        /** The data line as committed, quoted verbatim in the failure message. */
+        public final String line;
+        /** Where it came from, so the failure message can say what to edit. */
+        public final File source;
+
+        Expectation(int[] figures, String line, File source) {
+            this.figures = figures;
+            this.line = line;
+            this.source = source;
+        }
+
+        /**
+         * Reads the single non-blank, non-{@code #} line of {@code f}.
+         *
+         * @throws IOException if the file is missing, has no data line, has more than one, or does
+         *         not carry all six labels. Every one of those is a broken gate, and a broken gate
+         *         must be loud rather than lenient.
+         */
+        public static Expectation load(File f) throws IOException {
+            if (!f.isFile()) {
+                throw new IOException("golden expectation file not found: " + f
+                        + " -- it is committed next to the baseline; point -Dgolden.expect at it"
+                        + " or restore it. Without it the six headline figures are unasserted.");
+            }
+            String data = null;
+            BufferedReader r = GoldenFormat.reader(f);
+            try {
+                String l;
+                while ((l = r.readLine()) != null) {
+                    String t = l.trim();
+                    if (t.length() == 0 || t.charAt(0) == '#') continue;
+                    if (data != null) {
+                        throw new IOException(f + " has more than one data line. It must hold exactly"
+                                + " one, so that a re-pin is a one-line edit and shows as one line in"
+                                + " the diff.");
+                    }
+                    data = t;
+                }
+            } finally {
+                r.close();
+            }
+            if (data == null) {
+                throw new IOException(f + " has no data line (only blanks and # comments).");
+            }
+            return new Expectation(parse(data, f), data, f);
+        }
+
+        /** Label-driven, separator-agnostic. Package-private for the self-tests. */
+        static int[] parse(String line, File source) throws IOException {
+            String[] tok = line.split("[^A-Za-z0-9]+");
+            int[] out = new int[LABELS.length];
+            boolean[] seen = new boolean[LABELS.length];
+            for (int i = 1; i < tok.length; i++) {
+                for (int j = 0; j < LABELS.length; j++) {
+                    if (!LABELS[j].equals(tok[i])) continue;
+                    if (!isDigits(tok[i - 1])) {
+                        throw new IOException(source + ": '" + LABELS[j] + "' is not preceded by a"
+                                + " number in: " + line);
+                    }
+                    if (seen[j]) {
+                        throw new IOException(source + ": '" + LABELS[j] + "' appears twice in: "
+                                + line);
+                    }
+                    seen[j] = true;
+                    out[j] = Integer.parseInt(tok[i - 1]);
+                }
+            }
+            for (int j = 0; j < LABELS.length; j++) {
+                if (!seen[j]) {
+                    throw new IOException(source + ": no '" + LABELS[j] + "' figure in: " + line
+                            + " -- all six must be pinned together.");
+                }
+            }
+            return out;
+        }
+
+        private static boolean isDigits(String s) {
+            if (s.length() == 0) return false;
+            for (int i = 0; i < s.length(); i++) {
+                if (s.charAt(i) < '0' || s.charAt(i) > '9') return false;
+            }
+            return true;
+        }
+
+        /**
+         * @return {@code null} when every figure matches, otherwise a failure message showing
+         *         expected, actual and delta for all six side by side, and saying how to re-pin.
+         */
+        public String mismatch(Result r) {
+            int[] actual = r.figures();
+            boolean moved = false;
+            for (int i = 0; i < LABELS.length; i++) {
+                if (actual[i] != figures[i]) moved = true;
+            }
+            if (!moved) return null;
+
+            StringBuilder sb = new StringBuilder("FIGURES_MOVED the golden diff's headline figures"
+                    + " are pinned and at least one changed.\n");
+            sb.append(pad("", 16)).append(pad("expected", 12)).append(pad("actual", 12))
+                    .append(pad("delta", 10)).append('\n');
+            for (int i = 0; i < LABELS.length; i++) {
+                int d = actual[i] - figures[i];
+                sb.append("    ").append(pad(LABELS[i], 12))
+                        .append(pad(Integer.toString(figures[i]), 12))
+                        .append(pad(Integer.toString(actual[i]), 12))
+                        .append(d == 0 ? "0" : (d > 0 ? "+" + d : Integer.toString(d)))
+                        .append('\n');
+            }
+            sb.append("\n    pinned: ").append(line);
+            sb.append("\n    actual: ").append(r.summary());
+            sb.append("\n\n    TO RE-PIN: replace the one data line in ").append(source)
+                    .append(" with the `actual` line above. That is the whole edit, and it is"
+                            + " allowed -- but the rows behind every figure that moved have to be"
+                            + " attributed in the PR body, because a figure that moves without an"
+                            + " explanation is the regression this module exists to catch.");
+            return sb.toString();
+        }
+
+        private static String pad(String s, int w) {
+            StringBuilder sb = new StringBuilder(s);
+            while (sb.length() < w) sb.append(' ');
+            return sb.toString();
         }
     }
 

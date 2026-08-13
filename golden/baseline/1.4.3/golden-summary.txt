@@ -1,3 +1,22 @@
+# INFORMATIONAL. Nothing asserts these numbers.
+# They are tallies of the run that wrote this directory, so the copy
+# under baseline/<name>/ describes the RELEASED proj4j the baseline was
+# generated from, and the copy under target/golden describes the working
+# tree. The two are EXPECTED to differ - that difference is the whole
+# subject of the golden diff, and it is measured row by row from
+# golden.tsv, not from here. Do not 'fix' one to match the other.
+# The asserted figures live in baseline/<name>/golden-expect.txt.
+#
+# Concretely, as of 2026-08-13: this file says ok=50808 exceptions=2622
+# non_finite_rows=282, and the working tree's generator reports 51246 /
+# 2184 / 1381. That gap is not drift and not staleness. It is released
+# 1.4.3 measured against the current tree, which is what this module is
+# for. Re-pinning these to the working tree's figures would destroy the
+# only record of what 1.4.3 did.
+#
+# These eight comment lines are emitted by GoldenGenerator, so a
+# regenerate rewrites them rather than dropping them; the paragraph above
+# was added by hand to this copy and a regenerate will drop it.
 cases=14502
 rows=53430
 ok=50808
