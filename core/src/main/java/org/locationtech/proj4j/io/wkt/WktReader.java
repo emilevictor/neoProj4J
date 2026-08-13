@@ -78,8 +78,12 @@ public final class WktReader {
         WktNode root = WktParser.parse(wkt);
         // Dialect detection runs on the text, not the tree, because PROJ's own rule is textual:
         // it asks whether "AXIS[" and "AUTHORITY[" appear anywhere at all.
+        //
+        // The guess is recorded on the definition and nothing else reads it. In particular it does
+        // not decide how methods and parameters are spelled: that is the job of Impl's esriStyle
+        // flag, which is PROJ's esriStyle_ rather than its maybeEsriStyle_. See that field.
         WktDialect dialect = WktDialect.guess(wkt);
-        CrsDefinition def = new Impl(dialect).crs(root, null, null, 1);
+        CrsDefinition def = new Impl().crs(root, null, null, 1);
         markDialect(def, dialect);
         return def;
     }
@@ -117,15 +121,37 @@ public final class WktReader {
     }
 
     /**
-     * The traversal itself. One instance per parse, so the dialect can be a field.
+     * The traversal itself. One instance per parse, so what the document has said so far can be a
+     * field.
      */
     private static final class Impl {
 
-        private final WktDialect dialect;
-
-        Impl(WktDialect dialect) {
-            this.dialect = dialect;
-        }
+        /**
+         * PROJ's {@code esriStyle_} (9.8.1 {@code src/iso19111/io.cpp:1272}), ported.
+         * <p>
+         * This is not the dialect guess. It is a confirmation found in the document itself, and
+         * two things set it, either one alone being enough:
+         * <ul>
+         * <li>a WKT1 {@code GEOGCS} whose name begins {@code GCS_} ({@code io.cpp:1761-1763});</li>
+         * <li>a {@code DATUM} whose name begins {@code D_} ({@code io.cpp:2413}).</li>
+         * </ul>
+         * Both comparisons are case-<em>sensitive</em>, because PROJ's {@code starts_with} is a
+         * {@code memcmp} ({@code include/proj/internal/internal.hpp:107-121}) and the
+         * case-insensitive {@code ci_starts_with} sitting next to it is deliberately not used
+         * here. Measured against PROJ 9.8.1: {@code DATUM["d_north_american_1983"]} does not flip
+         * it, and gives a different projection as a result.
+         * <p>
+         * Deliberately <em>not</em> PROJ's second flag {@code maybeEsriStyle_}, which is the raw
+         * {@link WktDialect#guess} result. That rule calls any WKT1 with no {@code AXIS[} and no
+         * {@code AUTHORITY[} ESRI, which is exactly what a shapefile {@code .prj} or a database
+         * CRS column written in GDAL vocabulary looks like. Letting the guess govern spelling
+         * would turn those into wrong answers; letting the confirmation govern it does not.
+         * <p>
+         * One {@code Impl} per parse, so this resets with the parse. PROJ's own field is never set
+         * back to {@code false}, so a reused {@code WKTParser} stays in ESRI mode for every later
+         * document — arguably an upstream bug, and not reproduced here.
+         */
+        private boolean esriStyle;
 
         // ------------------------------------------------------------ dispatch
 
@@ -190,6 +216,13 @@ public final class WktReader {
             }
             if (k.equals("FITTED_CS")) {
                 throw new WktParseException("FITTED_CS is not supported");
+            }
+            if (k.equals("DERIVEDPROJCRS")) {
+                // Refused as a decision rather than by falling off the end into the catch-all
+                // below. A derived projected CRS is a further conversion applied on top of an
+                // already projected one, and a proj4j CoordinateReferenceSystem holds exactly one
+                // projection. Its BASEPROJCRS is handled above, so only the wrapper is refused.
+                throw new WktParseException("DERIVEDPROJCRS is not supported");
             }
             throw new WktParseException("unrecognised CRS element \"" + node.keyword() + "\"");
         }
@@ -269,7 +302,10 @@ public final class WktReader {
             UnitDefinition linear = firstUnit(node, UnitDefinition.LINEAR);
             UnitDefinition baseAngular = baseCrs.getCoordinateSystem() == null ? UnitDefinition.DEGREE
                     : defaultAngularUnit(baseCrs.getCoordinateSystem());
-            def.setConversion(conversionWkt2(conv, linear, baseAngular));
+            ConversionDefinition conversion = conversionWkt2(conv, linear, baseAngular);
+            // As in projectedWkt1: the base CRS, hence its DATUM, was read above.
+            conversion.setEsriStyle(esriStyle);
+            def.setConversion(conversion);
 
             CoordinateSystemDefinition cs = coordinateSystem(node, node.find("CS"),
                     linear != null ? linear : UnitDefinition.METRE);
@@ -356,6 +392,11 @@ public final class WktReader {
             CrsDefinition def = new CrsDefinition();
             def.setKind(CrsDefinition.Kind.GEOGRAPHIC);
             def.setName(name(node));
+            // Only for GEOGCS, not for the GEOCCS that also arrives here via geocentricWkt1:
+            // PROJ tests the node keyword before looking at the name (io.cpp:1761).
+            if ("GEOGCS".equalsIgnoreCase(node.keyword())) {
+                noteEsriGeogcsName(def.getName());
+            }
             UnitDefinition angular = unit(node.find("UNIT"), UnitDefinition.ANGULAR);
             if (angular == null) {
                 angular = UnitDefinition.DEGREE;
@@ -428,6 +469,10 @@ public final class WktReader {
                 param.setId(id(p));
                 conv.addParameter(param);
             }
+            // The GEOGCS and its DATUM were read above, so anything in the document that confirms
+            // ESRI style has already been seen by the time the conversion is built. That ordering
+            // is control flow, not luck.
+            conv.setEsriStyle(esriStyle);
             def.setConversion(conv);
 
             CoordinateSystemDefinition cs = coordinateSystem(node, null, linear);
@@ -479,6 +524,7 @@ public final class WktReader {
             }
             DatumDefinition datum = new DatumDefinition();
             datum.setName(name(dn));
+            noteEsriDatumName(datum.getName());
             datum.setId(id(dn));
             WktNode anchor = dn.find("ANCHOR", "ANCHOREPOCH");
             if (anchor != null && anchor.childCount() > 0) {
@@ -513,6 +559,7 @@ public final class WktReader {
             }
             DatumDefinition datum = new DatumDefinition();
             datum.setName(name(dn));
+            noteEsriDatumName(datum.getName());
             datum.setId(id(dn));
             WktNode ell = dn.find("SPHEROID", "ELLIPSOID");
             if (ell == null) {
@@ -525,6 +572,34 @@ public final class WktReader {
                 def.setToWgs84(toWgs84(towgs84));
             }
             return datum;
+        }
+
+        /**
+         * Records that a {@code GEOGCS} named {@code GCS_something} has been seen, which is one of
+         * the two things that confirm ESRI style. See {@link #esriStyle}.
+         * <p>
+         * Case-sensitive, as PROJ's is ({@code io.cpp:1761-1763}). A lower-case {@code gcs_} does
+         * not count, and PROJ measurably reads such a document differently.
+         */
+        private void noteEsriGeogcsName(String name) {
+            if (name != null && name.startsWith("GCS_")) {
+                esriStyle = true;
+            }
+        }
+
+        /**
+         * Records that a {@code DATUM} named {@code D_something} has been seen, the other of the
+         * two confirmations. See {@link #esriStyle}.
+         * <p>
+         * Case-sensitive for the same reason as {@link #noteEsriGeogcsName} ({@code io.cpp:2413}).
+         * PROJ reaches this line only when it has not already resolved the datum name from its
+         * database, but that guard only fires for {@code WGS_1984} and for names ending
+         * {@code " ensemble"}, neither of which can begin {@code D_}, so it is not reproduced.
+         */
+        private void noteEsriDatumName(String name) {
+            if (name != null && name.startsWith("D_")) {
+                esriStyle = true;
+            }
         }
 
         private EllipsoidDefinition ellipsoid(WktNode node) {
