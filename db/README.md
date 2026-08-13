@@ -29,8 +29,8 @@ Transcoding buys three things instead:
 
 1. **Determinism.** Every ordering in the file is a total order over the data, so two generations from
    the same input are byte-identical, and `git diff --exit-code` after a regeneration proves it. That
-   is a contributor step, not a CI gate — no workflow under `.github/` regenerates, because doing so
-   needs `sqlite3` and a built `proj.db`. See the Regeneration section below, and task #102. This
+   is a contributor step and deliberately not a CI gate — no workflow under `.github/` regenerates.
+   See "Why regeneration is not a CI gate", below, for the decision and its cost. This
    runs in Spark executors that require bit-reproducible output.
 2. **The bytes we do not need are gone** — the write path, the b-tree interior pages, the page slack, and
    the 798 KB `idx_usage_object` whose job is done here by a 20-byte-per-row sorted array.
@@ -180,7 +180,32 @@ vacuous rather than failing loudly:**
   clock, so `git diff` is non-empty after every run, including a bit-perfect one. The value above
   is the one that reproduces the checked-in `db.properties`; the index itself does not depend on it.
 
-No workflow under `.github/` runs regeneration. It is a contributor step, not a CI gate.
+### Why regeneration is not a CI gate — decided, 2026-08-13 (task #102)
+
+No workflow under `.github/` runs regeneration, and none will. This was asked as an open question;
+the answer is no, and the reasoning is recorded here so it is not re-litigated by someone who reads
+"contributor step" as "not got round to it yet".
+
+**What a gate would cost.** It needs `sqlite3` *and* a PROJ **9.8.1** `proj.db`. That file is not
+checked into PROJ — it is built by `sqlite3` from the 52 SQL files listed in
+`data/sql_filelist.cmake` — and Ubuntu's `proj-bin` does not ship it at 9.8.1. So a runner would
+have to do a cmake source build of PROJ on every run, or cache one and then have the gate silently
+verify against the wrong version when the cache went stale. A cmake toolchain in CI is exactly what
+`db/pom.xml`'s "`mvn install` must not need sqlite3, cmake, Python, a PROJ checkout or a network"
+promise exists to prevent, and a gate that quietly contradicts a module's central promise is worse
+than no gate.
+
+**What is already covered without any of that.** The `requireFileChecksum` enforcer bound to
+`validate` runs in *every* default build, on every machine, with no toolchain. It fails on a
+hand-edited artifact and on a stale one. That is the property that protects consumers of this
+module.
+
+**What stays uncovered, stated exactly.** One thing: *"regeneration no longer reproduces these
+bytes"* — a determinism regression in `GenerateIndex` or in the format's orderings that nobody
+notices because nobody regenerated. It would surface the next time a contributor regenerates, as a
+non-empty diff, which is precisely the check documented above and verified to exit 0. Accepting that
+gap is the decision. If it ever needs closing, the honest way is a scheduled workflow that builds
+PROJ from source, not a step bolted onto the PR path.
 
 | machine | invocation | outcome |
 |---|---|---|

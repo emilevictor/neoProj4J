@@ -186,11 +186,11 @@ actually executed"* is the failure this runner is built against.
 
 | check | floor asserted | measured in the container |
 |---|---|---|
-| `ci` | ≥ 1,700 tests across all surefire XMLs | **2,573 tests**, 0 failures *(was 2,320; 2,142 before that; 1,792 before the `neoproj4j-db` javadoc fix let `db` and `conformance` reach their test phases)*. **The floor is a ratchet, not a ceiling — raise it deliberately, but note that 1,700 is now 873 below the reading, so it would no longer catch an entire module dropping out.** |
+| `ci` | ≥ 2,500 tests across all surefire XMLs | **2,573 tests**, 0 failures *(was 2,320; 2,142 before that; 1,792 before the `neoproj4j-db` javadoc fix let `db` and `conformance` reach their test phases)*. **The floor is a ratchet, not a ceiling — raise it deliberately.** 2,500 is the highest round figure that still fails when `db` (75 tests) drops out of the reactor; it cannot also cover `geoapi`'s 12 and leave any headroom. It was 1,700, which was 873 below the reading and had stopped catching a module dropping out at all. |
 | `conformance` | `GieConformanceTest` ≥ 7,900 tests; ≥ 25 other classes; `evaluated == index keys`; 0 skips outside the sweep; `skipped == still_failing` | **7,971 sweep tests**, **7,923 assertions evaluated** against a 7,923-key index, 26 other classes, 0 outside skips, 482 == 482 |
-| `golden` | exactly 1 `GoldenMasterTest`, 0 skips; generated line count == baseline; ≥ 40 tests in the module | **53,431 lines** generated vs 53,431 baseline — that is `wc -l` of a file whose first line is a header, so **53,430 data rows**, which is the figure quoted everywhere else. **58 tests**, 0 skips |
+| `golden` | exactly 1 `GoldenMasterTest`, 0 skips; generated line count == baseline; ≥ 55 tests in the module; the six diff figures equal `baseline/1.4.3/golden-expect.txt` | **53,431 lines** generated vs 53,431 baseline — that is `wc -l` of a file whose first line is a header, so **53,430 data rows**, which is the figure quoted everywhere else. **64 tests**, 0 skips. The figure check lives in `GoldenMasterTest`, not here, because `golden.yaml` is `schedule`-only and gates nothing on a PR |
 | `determinism` | ≥ 22 tests, 0 skips, ≥ 2 report files | **22 tests** in 4 classes, 0 failures |
-| `bench` | ≥ 20 JMH arms and ≥ 20 arms carrying `gc.alloc.rate.norm` | see the `bench` row in the table at the top of this file |
+| `bench` | ≥ 200 JMH arms and ≥ 200 arms carrying `gc.alloc.rate.norm` (was 20, which one surviving class of ten satisfied) | see the `bench` row in the table at the top of this file; 245 arms measured |
 
 A check that produces no verdict line at all is counted as a failure, not skipped over.
 

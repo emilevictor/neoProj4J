@@ -88,7 +88,10 @@ golden/
     golden.tsv                   53,430 rows, 5.94 MiB -- the pinned observations
     golden-index.tsv             per-key metadata the rules engine matches on (6 columns)
     golden-messages.tsv          exception messages, kept out of the numeric table
-    golden-summary.txt           tallies
+    golden-expect.txt            ASSERTED: the six headline figures, pinned, one line
+    golden-summary.txt           informational tallies of the run that wrote this
+                                 directory - i.e. of RELEASED 1.4.3. Asserted by nothing;
+                                 do not reconcile it with target/golden's copy.
   src/main/java/...golden/
     GoldenGenerator.java         main(); 1.4.3 API ONLY. Writes a golden table.
     GoldenInputs.java            main(); rewrites probes.tsv and pairs.tsv
@@ -457,22 +460,41 @@ errors are either sub-metre or enormous, with no long tail of subtle drift.
 The same line is pinned in `.github/workflows/golden.yaml`. A green golden run would mean the
 expectation had been edited, not that the backlog had gone.
 
-**Be precise about what is and is not automated here, because an earlier wording overstated it.**
-The criterion a reviewer applies is that those six figures are unchanged. That comparison is made
-**by eye**, from the job's failure output — nothing in the test or the workflow diffs the produced
-report against the pinned line. What the job does enforce on its own:
+**All six figures are now machine-checked.** They are pinned in
+`golden/baseline/1.4.3/golden-expect.txt` — one data line, in `GoldenDiff.Result.summary()`'s own
+format — and `GoldenMasterTest` compares them on every run, reporting a `FIGURES_MOVED` failure with
+expected, actual and delta for all six side by side. The path is `-Dgolden.expect`, defaulting into
+the baseline directory alongside `golden.dir`, `golden.baseline` and `golden.out`.
+
+Note the separators. `summary()` writes ASCII (`, ` and `; `) because golden files are US-ASCII by
+policy and because `docker/run.sh` greps that line out of the surefire XML; the ` · ` form above is
+prose. The expectation is parsed **by label**, not by separator or position, so the two forms cannot
+drift into a false pass — and the trailing `(baseline N rows, current N rows)` is carried as context
+rather than asserted, the row counts already being checked against the committed table by
+`docker/run.sh` and by the workflow.
+
+**Re-pinning is deliberately a one-line edit, and deliberately not free.** Landing work that moves
+these figures should not require weakening the gate, so the file is trivial to update: paste the
+`actual` line from the failure message. What is required in exchange is that the PR body attributes
+the rows behind every figure that moved. A figure that moves with no explanation is precisely the
+regression this module exists to catch.
+
+What else the job enforces on its own:
 
 - `GoldenMasterTest` fails on any UNEXPLAINED row, and on `DEAD_RULE`, `PENDING_RULE_FIRED`,
   `EXPIRED_RULE` or `COUNT_MISMATCH`. The last four mean the rule set has stopped describing the
-  tree, and they are real failures rather than backlog.
+  tree, and they are real failures rather than backlog. A `FIGURES_MOVED` is reported *alongside*
+  these, never instead of them: the run is already red on the backlog, and a check that
+  short-circuited would make re-pinning look like progress.
+- `INTENDED` is additionally pinned a second and tighter way: all 44 rules in `rules.yaml` carry an
+  exact, two-sided `expected_rows`, and those pins sum to exactly 39,134.
 - The workflow's non-vacuity step requires that the test existed, ran exactly once and was not
-  skipped; that at least 40 tests ran in this module with none skipped; and that the generated table
+  skipped; that at least 50 tests ran in this module with none skipped; and that the generated table
   has the same line count as the committed baseline.
 
-Because the test is already red, its pass/fail bit carries no information about a change — it was
-red before and is red after. The consequence is worth stating plainly: a drift of a few hundred rows
-between UNCHANGED and UNEXPLAINED would satisfy every automated check in this job and be caught only
-by someone reading the numbers. See task #104.
+The test's pass/fail bit still carries no information on its own — it was red before and is red
+after — which is why the figure check produces a distinct, named, greppable failure rather than
+relying on the exit code.
 
 The unexplained rows are **the backlog**, not a defect in this module. They are other streams'
 in-flight changes, and each stream owner adds the rule that claims theirs. This module deliberately

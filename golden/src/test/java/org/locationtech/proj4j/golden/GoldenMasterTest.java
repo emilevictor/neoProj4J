@@ -35,6 +35,18 @@ import static org.junit.Assert.fail;
  * </pre>
  * Without {@code -Pgolden} the whole thing is skipped and only the fast self-tests run, so a plain
  * {@code mvn install} stays fast.
+ *
+ * <h2>The six figures are pinned, and re-pinning them is meant to be easy</h2>
+ *
+ * The {@code golden diff:} line was printed and compared to nothing; only {@code INTENDED} was
+ * machine-checked, and only via the sum of every rule's {@code expected_rows}. It is now checked
+ * against {@code baseline/1.4.3/golden-expect.txt} ({@code -Dgolden.expect}).
+ *
+ * <p>Deliberately a pin and not "assert 0 UNEXPLAINED". Work that is already planned will move these
+ * figures legitimately, and a gate that such work cannot pass is a gate somebody deletes. So this one
+ * fails loudly, prints expected/actual/delta for all six side by side, and is re-pinned by editing
+ * one line in a committed file. The cost of a re-pin is not the edit — it is that the PR body has to
+ * say which rows moved and why. That is the property worth having: the figures cannot move silently.
  */
 public class GoldenMasterTest {
 
@@ -48,6 +60,8 @@ public class GoldenMasterTest {
                 new File(goldenDir, "target/golden").getPath()));
         String baselineName = System.getProperty("golden.baseline", "1.4.3");
         File baselineDir = new File(new File(goldenDir, "baseline"), baselineName);
+        File expectFile = new File(System.getProperty("golden.expect",
+                new File(baselineDir, "golden-expect.txt").getPath()));
         boolean regenerate = Boolean.parseBoolean(System.getProperty("golden.regenerate", "false"));
 
         File target = regenerate ? baselineDir : outDir;
@@ -75,9 +89,16 @@ public class GoldenMasterTest {
         }
         System.out.println("full report: " + report);
 
-        if (!r.ok()) {
+        // A moved figure is reported ALONGSIDE the rule-level failures, never instead of them. Today
+        // this run is red on 2,291 UNEXPLAINED rows; if the figure check short-circuited, fixing the
+        // pin would look like fixing the backlog.
+        String figures = GoldenDiff.Expectation.load(expectFile).mismatch(r);
+        if (figures != null) System.out.println(figures);
+
+        if (figures != null || !r.ok()) {
             StringBuilder sb = new StringBuilder(r.summary());
             sb.append("\nsee ").append(report);
+            if (figures != null) sb.append("\n\n").append(figures);
             for (int i = 0; i < r.failures.size(); i++) {
                 sb.append("\n\n").append(r.failures.get(i));
             }

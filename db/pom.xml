@@ -222,8 +222,27 @@
              to make that scriptable; db/README.md spells the flag out, because an XML comment
              cannot contain two consecutive hyphens.
 
-             No workflow in .github/ runs this. It is a contributor step, not a CI gate; an earlier
-             version of this comment claimed CI ran it, which was never true. -->
+             NO WORKFLOW IN .github/ RUNS THIS, AND NONE WILL. Decided 2026-08-13, task #102. An
+             earlier version of this comment claimed CI ran it, which was never true; this records
+             why it is not going to become true either.
+
+               * A gate would need sqlite3 AND a PROJ 9.8.1 proj.db. That file is not checked into
+                 PROJ; it is built by sqlite3 from the 52 SQL files in data/sql_filelist.cmake, and
+                 Ubuntu's proj-bin does not ship it at 9.8.1. Getting one means a cmake source build
+                 of PROJ on the runner, which is precisely the toolchain the promise a few lines up
+                 says a default build will never need.
+
+               * What is already covered, with no toolchain and on every CI build, is the
+                 requireFileChecksum execution above, bound to validate. It catches a hand-edited or
+                 stale checked-in artifact, which is the risk that reaches consumers.
+
+               * What stays uncovered is exactly one thing: "regeneration no longer reproduces these
+                 bytes". That surfaces the next time a contributor regenerates, as a non-empty diff
+                 from the verified invocation above. Accepting that gap is the decision, not an
+                 oversight. db/README.md carries the full reasoning.
+
+             (git's exit-code flag for the diff is spelled out in db/README.md rather than here,
+             because an XML comment cannot contain two consecutive hyphens.) -->
         <profile>
             <id>regen-db</id>
             <build>

@@ -189,8 +189,22 @@ public final class GoldenGenerator {
             messages.close();
         }
 
+        // The header is written by the generator, not added by hand, so that it survives the next
+        // `-Dgolden.regenerate=true` instead of being silently overwritten. See the note itself for
+        // why these tallies are informational: they describe whichever proj4j produced this
+        // directory, so the copy in baseline/1.4.3 describes RELEASED 1.4.3 and the copy in
+        // target/golden describes the working tree. They are not two measurements of one thing and
+        // must not be diffed against each other. What IS asserted is golden.tsv, row by row.
         Writer summary = GoldenFormat.writer(new File(outDir, "golden-summary.txt"));
         try {
+            summary.write("# INFORMATIONAL. Nothing asserts these numbers.\n");
+            summary.write("# They are tallies of the run that wrote this directory, so the copy\n");
+            summary.write("# under baseline/<name>/ describes the RELEASED proj4j the baseline was\n");
+            summary.write("# generated from, and the copy under target/golden describes the working\n");
+            summary.write("# tree. The two are EXPECTED to differ - that difference is the whole\n");
+            summary.write("# subject of the golden diff, and it is measured row by row from\n");
+            summary.write("# golden.tsv, not from here. Do not 'fix' one to match the other.\n");
+            summary.write("# The asserted figures live in baseline/<name>/golden-expect.txt.\n");
             summary.write("cases=" + counters.cases + "\n");
             summary.write("rows=" + counters.rows + "\n");
             summary.write("ok=" + counters.ok + "\n");

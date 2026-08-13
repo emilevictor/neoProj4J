@@ -170,13 +170,17 @@ jobs:
           arms=$(grep -c '"benchmark"' "$json" || true)
           alloc=$(grep -c 'gc.alloc.rate.norm' "$json" || true)
           echo "JMH arms: $arms   arms carrying gc.alloc.rate.norm: $alloc"
-          [ "${arms:-0}" -ge 20 ] || {
-            echo "::error::only ${arms:-0} benchmark arms in the result; expected at least 20."
+          # 200 against 245 measured arms across 10 classes. Both floors were 20, which a single
+          # surviving class satisfied. 45 arms of headroom, because the arm count is a product of
+          # @Param combinations and moves in jumps (this suite went 181 -> 245 in one change).
+          # MIRRORED at docker/run.sh; the two must move together.
+          [ "${arms:-0}" -ge 200 ] || {
+            echo "::error::only ${arms:-0} benchmark arms in the result; expected at least 200."
             echo "::error::Benchmarks were excluded, renamed, or failed in @Setup. Tier 1 cannot"
             echo "::error::gate what was not run - and GateChecker's `required` flag only catches"
             echo "::error::the rules that expect a specific one."
             exit 1; }
-          [ "${alloc:-0}" -ge 20 ] || {
+          [ "${alloc:-0}" -ge 200 ] || {
             echo "::error::${alloc:-0} arms carry gc.alloc.rate.norm. The -prof gc profiler did not"
             echo "::error::attach. Tier 1 warns per benchmark in that case rather than failing, so"
             echo "::error::the whole tier would have measured NOTHING while reporting success."
