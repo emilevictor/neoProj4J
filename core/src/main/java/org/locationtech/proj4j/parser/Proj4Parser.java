@@ -41,6 +41,7 @@ import org.locationtech.proj4j.proj.ObliqueTransformationProjection;
 import org.locationtech.proj4j.proj.PeirceQuincuncialProjection;
 import org.locationtech.proj4j.proj.Projection;
 import org.locationtech.proj4j.proj.SpaceObliqueMercatorProjection;
+import org.locationtech.proj4j.proj.SimpleConicProjection;
 import org.locationtech.proj4j.proj.SpilhausProjection;
 import org.locationtech.proj4j.proj.TiltedPerspectiveProjection;
 import org.locationtech.proj4j.proj.TransverseMercatorProjection;
@@ -198,6 +199,53 @@ public class Proj4Parser {
         s = params.get(Proj4Keyword.lat_2);
         if (s != null)
             projection.setProjectionLatitude2Degrees(parseAngle(Proj4Keyword.lat_2, s));
+
+        /*
+         * sconics.cpp:44-52 (phi12) makes a missing +lat_1 or a missing +lat_2 fatal for all
+         * seven members of the family, and the check has to live here rather than in
+         * SimpleConicProjection.initialize() for a reason that is easy to get wrong: upstream
+         * tests PRESENCE, with pj_param's leading 't' sigil, and presence is information this
+         * parser has and a Projection does not. By the time initialize() runs, an omitted
+         * +lat_2 and an explicit +lat_2=0 are both 0.0 in the same field.
+         *
+         * initialize()'s existing |del| < EPS || |sig| < EPS test catches BOTH parallels
+         * missing, because then del and sig are both zero. What it cannot catch is exactly one
+         * of them missing: a single parallel leaves del and sig at half of it, both non-zero,
+         * so the setup is accepted and answers as though the other parallel had been typed as
+         * 0. All figures below are +proj=murd2 +a=6400000 at 10E 20N, forward. PROJ refuses
+         * +lat_1=30 with "Missing parameter: lat_2 should be specified"; we used to return
+         * (1016992.395865934, 2297381.269569689), which is bit-for-bit our own answer for
+         * +lat_1=30 +lat_2=0 -- so not a rounding error but an answer to a different
+         * question, 1,191 km from the (1122158.107229810, 3483769.275111472) that
+         * +lat_1=30 +lat_2=60 gives, with nothing in the output to say which was answered.
+         *
+         * Checking presence here, and not value in initialize(), is what keeps the parity
+         * two-sided. PROJ accepts an explicit zero parallel and answers, and so must we:
+         * +lat_1=30 +lat_2=0 gives (1016992.395865934, 2297381.269569689), matching PROJ to
+         * every printed digit, and +lat_1=0 +lat_2=60 gives (928382.344182429,
+         * 2604267.019108738) against PROJ's ...108736, a 2 um last-ulp difference. A
+         * value-based guard would have refused both, trading upstream's defect for a locally
+         * invented one -- which is the harder of the two to defend, because upstream's is at
+         * least reproducible.
+         *
+         * Order matches upstream: PROJ names lat_1 first, including when both are absent.
+         */
+        if (projection instanceof SimpleConicProjection) {
+            if (params.get(Proj4Keyword.lat_1) == null) {
+                throw new InvalidValueException(ErrorCause.MISSING_PARAM,
+                        "Missing parameter: lat_1 should be specified. +proj="
+                                + params.get(Proj4Keyword.proj) + " needs both +lat_1 and"
+                                + " +lat_2; an omitted standard parallel is not the same as one"
+                                + " given as 0 (sconics.cpp, phi12)");
+            }
+            if (params.get(Proj4Keyword.lat_2) == null) {
+                throw new InvalidValueException(ErrorCause.MISSING_PARAM,
+                        "Missing parameter: lat_2 should be specified. +proj="
+                                + params.get(Proj4Keyword.proj) + " needs both +lat_1 and"
+                                + " +lat_2; an omitted standard parallel is not the same as one"
+                                + " given as 0 (sconics.cpp, phi12)");
+            }
+        }
 
         s = params.get(Proj4Keyword.lat_ts);
         if (s != null)

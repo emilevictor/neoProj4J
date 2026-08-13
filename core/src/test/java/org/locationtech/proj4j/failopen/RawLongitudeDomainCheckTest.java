@@ -25,6 +25,7 @@ import org.locationtech.proj4j.ErrorCause;
 import org.locationtech.proj4j.ProjCoordinate;
 import org.locationtech.proj4j.ProjectionException;
 import org.locationtech.proj4j.proj.Projection;
+import org.locationtech.proj4j.util.ProjectionMath;
 
 /**
  * {@code fwd_prepare} tests the longitude it was <b>given</b>, not the longitude left after
@@ -177,21 +178,133 @@ public class RawLongitudeDomainCheckTest {
     }
 
     /**
+     * Each out-of-range longitude below, paired with the in-range longitude it wraps to.
+     *
+     * <p>The pairs are <b>measured</b> from {@link ProjectionMath#adjlon}, not assumed, because
+     * {@code -540} sits exactly on the edge and could plausibly go either way. It does not:
+     * {@code -540 * pi/180} is <em>exactly</em> {@code -3*pi} in binary64, so {@code adjlon}
+     * returns exactly {@code -pi}, and the pair is {@code -540 == -180} rather than
+     * {@code -540 == +180}. That distinction is invisible on a projection that is continuous
+     * across the antimeridian and very visible on one that is not: {@code +proj=merc +R=1} gives
+     * {@code -3.141592653589793} at both {@code -540} and {@code -180}, but
+     * {@code +3.141592653589793} at {@code +180}.
+     */
+    private static final double[][] WRAP_PAIRS = {
+            {200.0, -160.0},
+            {-190.0, 170.0},
+            {360.0, 0.0},
+            {-540.0, -180.0},
+            {572.9, -147.1},
+    };
+
+    /**
      * The bound is {@code |lam| > 10} radians and <b>not</b> {@code [-180, 180]} degrees: a caller
      * passing 200&deg; or &minus;190&deg; must keep working, because PROJ wraps those rather than
      * rejecting them. Asserted on both sides of the reduction, because this is exactly the
      * assertion a careless version of the fix would break.
+     *
+     * <p><b>What changed.</b> {@code Projection.projectRadians} used to guard <em>both</em> the
+     * {@code lam0} subtraction and the {@code adjlon} wrap with
+     * {@code if (projectionLongitude != 0)}. Upstream guards neither: {@code fwd_prepare}
+     * subtracts {@code lam0} unconditionally at {@code 9.8.1:src/fwd.cpp:108} and wraps at
+     * {@code fwd.cpp:111-112} whenever {@code +over} is off, and neither line mentions
+     * {@code lam0}. So with no {@code +lon_0} &mdash; the commonest case by far &mdash; a
+     * longitude outside {@code [-180, 180]} reached the kernel raw and every projection behaved as
+     * though {@code +over} were on. Both guards are now gone, so each longitude here must not
+     * merely be <em>finite</em>, it must be the projection of the same meridian as its wrapped
+     * equivalent.
+     *
+     * <p><b>This assertion barely discriminates, and saying so is the point.</b> {@code laea}
+     * reaches {@code lam} only through {@code sin} and {@code cos}, which are 2&pi;-periodic, so
+     * wrapping the longitude moves its output by a couple of ulps and nothing more. Measured over
+     * all five pairs and both central meridians, the worst disagreement was <b>5.12e-9 m before
+     * the fix</b> and <b>4.19e-9 m after</b> &mdash; i.e. this test passed just as well against
+     * the defect. The leg that can actually fail is
+     * {@link #outOfRangeLongitudesProjectToTheSameSpotAsTheirWrappedEquivalent()}; without it
+     * these assertions are a description, not a guard.
      */
     @Test
     public void twoHundredDegreesIsStillPerfectlyLegal() {
         for (String definition : new String[]{LON0_SET, LON0_ZERO}) {
-            for (double lonDeg : new double[]{200.0, -190.0, 360.0, -540.0, 572.9}) {
+            for (double[] pair : WRAP_PAIRS) {
                 ProjCoordinate out = new ProjCoordinate();
-                projection(definition).project(new ProjCoordinate(lonDeg, 30.0), out);
-                assertTrue(definition + " at " + lonDeg + " deg must be a finite coordinate, got "
+                projection(definition).project(new ProjCoordinate(pair[0], 30.0), out);
+                assertTrue(definition + " at " + pair[0] + " deg must be a finite coordinate, got "
                         + out, isFinite(out.x) && isFinite(out.y));
+
+                ProjCoordinate equivalent = new ProjCoordinate();
+                projection(definition).project(new ProjCoordinate(pair[1], 30.0), equivalent);
+                // 1e-6 m against a worst measured residual of 4.19e-9 m: the two inputs reach the
+                // same meridian by different floating-point routes, so they agree to about a
+                // nanometre rather than bit for bit.
+                assertEquals(definition + ": " + pair[0] + " deg must project where " + pair[1]
+                        + " deg does (x)", equivalent.x, out.x, 1e-6);
+                assertEquals(definition + ": " + pair[0] + " deg must project where " + pair[1]
+                        + " deg does (y)", equivalent.y, out.y, 1e-6);
             }
         }
+    }
+
+    /**
+     * The same equivalence on a projection that can actually tell the difference, which makes this
+     * the positive control for {@link #twoHundredDegreesIsStillPerfectlyLegal()}.
+     *
+     * <p>{@code merc}'s easting is {@code R * lam}, linear rather than 2&pi;-periodic, so an
+     * unwrapped longitude shows up at full size instead of in the last ulp. Measured on
+     * {@code +proj=merc +R=1} at latitude 30, worst disagreement between an out-of-range longitude
+     * and its wrapped equivalent:
+     *
+     * <table>
+     * <caption>worst |&Delta;x| over the five pairs, radians of unit-sphere easting</caption>
+     * <tr><th>before the fix</th><th>after</th></tr>
+     * <tr><td>{@code 12.57} &mdash; that is 4&pi;, from the 572.9 row, which is 720&deg; out</td>
+     *     <td>{@code 4.44e-16}</td></tr>
+     * </table>
+     *
+     * <p>Every one of the five was out by an exact multiple of 2&pi; before, because the raw
+     * longitude went straight into the kernel. Pinned as absolute values too, not only as a
+     * difference, so that a future change which wrapped <em>both</em> sides to the same wrong
+     * meridian would still be caught.
+     */
+    @Test
+    public void outOfRangeLongitudesProjectToTheSameSpotAsTheirWrappedEquivalent() {
+        final String merc = "+proj=merc +R=1";
+        for (double[] pair : WRAP_PAIRS) {
+            ProjCoordinate raw = new ProjCoordinate();
+            projection(merc).project(new ProjCoordinate(pair[0], 30.0), raw);
+            ProjCoordinate equivalent = new ProjCoordinate();
+            projection(merc).project(new ProjCoordinate(pair[1], 30.0), equivalent);
+            assertEquals(merc + ": " + pair[0] + " deg must project where " + pair[1]
+                    + " deg does; before the fix it was out by a whole multiple of 2*pi",
+                    equivalent.x, raw.x, 1e-12);
+            assertEquals(merc + ": latitude is not involved in the wrap", equivalent.y, raw.y, 0.0);
+        }
+
+        // The absolute eastings, measured. -160, 170, 0, -180 and -147.1 degrees on a unit sphere.
+        assertEquals(-2.7925268031909276, forwardX(merc, 200.0), 1e-15);
+        assertEquals(2.9670597283903604, forwardX(merc, -190.0), 1e-15);
+        assertEquals(0.0, forwardX(merc, 360.0), 1e-15);
+        assertEquals(-3.1415926535897930, forwardX(merc, -540.0), 1e-15);
+        assertEquals(-2.5673793296836590, forwardX(merc, 572.9), 1e-15);
+
+        // Which side of the antimeridian -540 lands on, asserted rather than described: adjlon
+        // takes it to exactly -pi, so it agrees with -180 bit for bit and is the negation of +180.
+        assertEquals("adjlon(-540 deg) must be exactly -pi", -Math.PI,
+                ProjectionMath.adjlon(-540.0 * ProjectionMath.DTR), 0.0);
+        assertEquals("-540 deg must give the -180 easting, bit for bit",
+                forwardX(merc, -180.0), forwardX(merc, -540.0), 0.0);
+        assertEquals("+180 keeps the positive easting, so the two are genuinely distinguishable "
+                + "here and -540 is on the -180 side", -forwardX(merc, 180.0),
+                forwardX(merc, -540.0), 0.0);
+
+        // Nothing inside the antimeridian moves, +/-180 exactly included: adjlon returns its
+        // argument untouched while |lon| < pi + 1e-12.
+        assertEquals(3.1415926535897930, forwardX(merc, 180.0), 0.0);
+        assertEquals(-3.1415926535897930, forwardX(merc, -180.0), 0.0);
+
+        // And +over still does not wrap: 200 deg stays 200 deg.
+        assertEquals("+over must still suppress the wrap", 3.4906585039886590,
+                forwardX(merc + " +over", 200.0), 1e-15);
     }
 
     /**
@@ -290,6 +403,13 @@ public class RawLongitudeDomainCheckTest {
 
     private static Projection projection(String definition) {
         return new CRSFactory().createFromParameters("failopen", definition).getProjection();
+    }
+
+    /** Forward-project {@code lonDeg} at latitude 30 and return the easting. */
+    private static double forwardX(String definition, double lonDeg) {
+        ProjCoordinate out = new ProjCoordinate();
+        projection(definition).project(new ProjCoordinate(lonDeg, 30.0), out);
+        return out.x;
     }
 
     private static ProjCoordinate go(String definition, double x, double y, boolean radians) {

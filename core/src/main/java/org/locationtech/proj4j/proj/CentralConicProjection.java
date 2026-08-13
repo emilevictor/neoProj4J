@@ -60,6 +60,61 @@ import org.locationtech.proj4j.util.FastStrictTrig;
  * written by {@link Projection#setProjectionLatitude1(double)}; everything else here is
  * derived from it on each call.
  *
+ * <h2>Latitudes below {@code lat_1 - 90} fold onto the near side</h2>
+ *
+ * <p>This is a real limitation of the projection and it is <b>not</b> guarded, here or
+ * upstream. {@code r = cot(phi_1) - tan(phi - phi_1)} changes sign as {@code phi} crosses
+ * {@code phi_1 - 90}, because that is where {@code tan}'s argument passes through
+ * {@code -90} degrees. A negative {@code r} plots the point on the far side of the cone's
+ * apex. The inverse then recovers the radius with {@code hypot}, which is unsigned and
+ * cannot tell the two sides apart, so it hands back a point on the near side instead: the
+ * latitude is reflected and the longitude is offset by {@code 180 / sin(phi_1)} degrees.
+ * Every latitude the inverse can produce lies in the open interval
+ * {@code (phi_1 - 90, phi_1 + 90)}, whatever was fed to the forward.
+ *
+ * <p>Measured with {@code +proj=ccon +lat_1=45 +ellps=WGS84}, forward then inverse, at
+ * longitude 20:
+ *
+ * <pre>
+ *   lat  -45  -&gt;  ( 20.000000000, -45.000000000)   last latitude that survives
+ *   lat  -46  -&gt;  (125.441558773, -43.963834817)
+ *   lat  -60  -&gt;  (125.441558773, -15.000000000)
+ *   lat  -75  -&gt;  (125.441558773,  60.000000000)
+ *   lat  -90  -&gt;  (  0.000000000,  90.000000000)   the south pole comes back as the north
+ * </pre>
+ *
+ * <p>The constant longitude offset is {@code 105.4415588 = 360 - 180 / sin(45)}. The last
+ * row is not a separate case: {@code r} is zero at {@code phi = 90} <em>and</em> at
+ * {@code phi = -90} — those are the two solutions of
+ * {@code tan(phi - phi_1) = cot(phi_1)} — so both poles land on the single projected point
+ * that is the apex, and the inverse can only answer with one of them.
+ *
+ * <p><b>PROJ 9.8.1 does exactly the same thing and never refuses.</b> The forward at
+ * {@code (20, -75)} is {@code -1140797.744985023281, 10905748.430954094976} from
+ * {@code proj} and {@code -1140797.744985023, 1.0905748430954095E7} from this class —
+ * equal to the last digit either prints. Under this project's parity doctrine the port is
+ * therefore faithful and inventing a domain check here would make this library disagree
+ * with the oracle it tracks. {@code RegistryRoundTripAuditTest} pins the resulting
+ * 180-degree round-trip error rather than treating it as a defect.
+ *
+ * <p>There is no domain guard anywhere in the 104 lines of {@code ccon.cpp}. The file's
+ * only rejection is the {@code |lat_1| < EPS10} check at {@code ccon.cpp:87-90}, which is
+ * about the cone, not about the data. Upstream's own documentation calls the defined area
+ * "Global, but best used near the standard parallel"
+ * ({@code docs/source/operations/projections/ccon.rst:17}), which is true only for the
+ * forward.
+ *
+ * <p>One inherited claim about this file is <b>wrong</b> and is recorded here so it is not
+ * repeated: there is no "90 degrees from the mean parallel" rule in {@code ccon.cpp}.
+ * That rule exists, but it belongs to the <em>other</em> conics — {@code sconics.cpp:178-183}
+ * rejects {@code |lat_0 - 0.5 * (lat_1 + lat_2)| >= 90} for {@code pconic} — and
+ * {@code ccon} has no analogue of it because {@code ccon} never reads {@code +lat_0} at all
+ * (see {@code NewOperatorContractTest.cconIgnoresLat0}).
+ *
+ * <p><b>No upstream fix is in flight.</b> {@code src/projections/ccon.cpp} is byte-identical
+ * between tag {@code 9.8.1} and current {@code master}, so upgrading PROJ will not change
+ * any of the above.
+ *
  * @see <a href="https://github.com/OSGeo/PROJ/blob/9.8.1/src/projections/ccon.cpp">9.8.1
  *      ccon.cpp</a>
  */
@@ -100,7 +155,13 @@ public class CentralConicProjection extends ConicProjection {
         return xy;
     }
 
-    /** {@code ccon_inverse}, {@code ccon.cpp:54-63}. */
+    /**
+     * {@code ccon_inverse}, {@code ccon.cpp:54-63}.
+     *
+     * <p>{@code hypot} is unsigned, so this cannot recover a negative forward radius; that is
+     * the whole of the fold described in the class comment. Deliberately unguarded, because
+     * PROJ 9.8.1 is unguarded here too.
+     */
     @Override
     protected ProjCoordinate projectInverse(double x, double y, ProjCoordinate lp) {
         final double yy = ctgphi1 - y;

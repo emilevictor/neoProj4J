@@ -120,8 +120,29 @@ import org.locationtech.proj4j.proj.Projection;
  *
  * <p>Most pinned entries are honest domain limits of a regional or interrupted map that the forward
  * accepts anyway — which is itself worth knowing, since a forward that accepts a point its own
- * inverse cannot return is not fail-closed. A few look like defects rather than limits; they are
- * marked <b>[suspect]</b> in the table and are not fixed here.
+ * inverse cannot return is not fail-closed.
+ *
+ * <h2>Two markers, and why the third one is gone</h2>
+ *
+ * <p>Entries that looked like defects rather than limits used to be marked <b>[suspect]</b>, meaning
+ * "nobody has checked yet." Every one of them has now been checked against PROJ 9.8.1 — both the
+ * installed binaries and the source at the {@code 9.8.1} tag — and the marker is retired, because a
+ * question that has been answered should not still read as open. Two markers replace it:
+ *
+ * <ul>
+ * <li><b>[upstream]</b> — PROJ 9.8.1 produces the same answer, to the printed digit, and never
+ *     refuses. The port is faithful and the limitation is upstream's. Under this project's parity
+ *     rule these are <b>deliberately not fixed</b>: a guard invented here alone would make this
+ *     library answer differently from the oracle it claims to track, which is the harder thing to
+ *     defend. Each carries its upstream file so the claim can be rechecked, and each is being
+ *     reported upstream. Upgrading PROJ will not change these until upstream acts.</li>
+ * <li><b>[fail-closed]</b> — we deliberately <em>diverge</em> from PROJ by throwing where it
+ *     silently returns a wrong answer. Not a defect in either direction; a house rule.
+ *     {@code NonConvergenceTest} names these and asserts the throw. Do not "fix" one back to match
+ *     PROJ without reading that test first.</li>
+ * </ul>
+ *
+ * <p>What is left unmarked is an ordinary domain limit, and needs no verdict.
  */
 public class RegistryRoundTripAuditTest {
 
@@ -222,19 +243,46 @@ public class RegistryRoundTripAuditTest {
                     "Alaska-only modified stereographic: 48/68 probes wrong outside it, 35 refused"),
             new Pin("bipc", 49.136,
                     "bipolar conic for the Americas: 7 probes outside the two lobes, up to 49 deg off"),
+            // The second half of this reason used to read "and (-179.9,-45) inverts to longitude
+            // 684". That was wrong, and wrong from the commit that wrote it: at that probe the
+            // inverse throws ("generic 2D inverse did not converge in 15 iterations"), and no probe
+            // on the ladder recovers 684. Corrected to what is actually measured.
             new Pin("cass", REFUSED,
-                    "Cassini past ~90 deg from the central meridian: 24 wrong, 20 refused, and "
-                            + "(-179.9,-45) inverts to longitude 684"),
+                    "Cassini past ~90 deg from the central meridian: 24 wrong, 20 of them refused "
+                            + "by the inverse rather than answered, including (-179.9,-45), where "
+                            + "the generic 2D inverse gives up after 15 iterations"),
+            // ccon, murd2 and pconic share a symptom, not a file: ccon is ccon.cpp and the other two
+            // are sconics.cpp, and within sconics.cpp only murd2 and pconic fold - murd3, tissot,
+            // vitk1 and euler do not, so this is not a whole-family defect. What the three have in
+            // common is that each inverse recovers latitude from a radius that is even about the
+            // fold, so the two hemispheres are indistinguishable to it.
+            //
+            // Checked against the oracle at 9.8.1: forward of (-135,-75) then inverse gives PROJ the
+            // same +60 we give. murd2's fold is worth knowing precisely because it is in the NORTHERN
+            // hemisphere, where nobody thinks to look - bisected on the binaries, the last input that
+            // round-trips is 89.503439020862118 and the first that folds is 89.503439020862103, so
+            // the apex is 89.50343902086212. Past it the recovered longitude is destroyed too: at
+            // lon 0 it comes back -100.990547487986 rather than 0.
+            // `git diff 9.8.1 master -- src/projections/ccon.cpp src/projections/sconics.cpp` is
+            // empty, so no upstream fix is in flight.
             new Pin("ccon", 180.0,
-                    "central conic (lat_1=45): lat -75 and below collapse onto the apex and invert "
-                            + "to lat 60; the south pole inverts to +90"),
+                    "[upstream] central conic (lat_1=45): the southern hemisphere is reflected onto "
+                            + "the northern one, not collapsed - lat -75 comes back as +60 and lat "
+                            + "-85 as +83.9 - and the south pole inverts to +90 (ccon.cpp, "
+                            + "ccon_s_inverse; PROJ 9.8.1 answers identically)"),
             new Pin("gs48", REFUSED,
                     "modified stereographic for the 48 states: 32/68 probes wrong outside it"),
             new Pin("gs50", REFUSED,
                     "modified stereographic for the 50 states: 50/68 probes wrong outside it"),
+            // Shares its cause with somerc below: both lose the quadrant when the point is more than
+            // 90 deg from the projection centre, because the inverse reconstructs longitude through
+            // an atan of a ratio whose two arguments have both changed sign. Same answer from PROJ
+            // 9.8.1 to the printed digit; `git diff 9.8.1 master -- src/projections/gstmerc.cpp
+            // src/projections/somerc.cpp` is empty.
             new Pin("gstmerc", 179.6,
-                    "[suspect] Gauss-Schreiber TM folds a point 180 deg from the central meridian "
-                            + "onto the near side: (-179.9,0) inverts to lon 0.5036, no refusal"),
+                    "[upstream] Gauss-Schreiber TM folds a point 180 deg from the central meridian "
+                            + "onto the near side: (-179.9,0) inverts to lon 0.5036, no refusal "
+                            + "(gstmerc.cpp, gstmerc_s_inverse; PROJ 9.8.1 answers identically)"),
             new Pin("hammer", REFUSED,
                     "the antimeridian and both poles land exactly on the bounding ellipse, whose "
                             + "boundary the inverse refuses"),
@@ -252,45 +300,114 @@ public class RegistryRoundTripAuditTest {
                             + "the tens of thousands of degrees"),
             new Pin("lagrng", REFUSED,
                     "Lagrange: the antimeridian lands on the bounding circle, which is refused"),
-            new Pin("lcc", 180.0,
-                    "[suspect] with lat_1=30/lat_2=60 the far (south) pole projects to a finite "
-                            + "point - the cone apex - which inverts to +90; the forward should "
-                            + "refuse it"),
+            // lcc was pinned here at 180.0 with the note "the forward should refuse it". It now
+            // does (LambertConformalConicProjection.project, lcc.cpp:27-33), so the projection
+            // round-trips on all 67 probes it accepts, worst error 3.0e-14 degrees, and no pin of
+            // any kind is needed: the audit skips probes the forward refuses. This test told me to
+            // delete the entry rather than the other way round - it reports OVER-PINNED when a
+            // pinned projection starts passing.
             new Pin("lee_os", 88.194,
                     "Lee oblique stereographic: the far hemisphere is not injective, 7 probes wrong"),
             new Pin("mil_os", 46.019,
                     "Miller oblique stereographic: the far hemisphere is not injective, 7 wrong"),
             new Pin("murd2", 179.0,
-                    "Murdoch II (lat_1=30, lat_2=60): the southern hemisphere folds onto lat 58.15"),
+                    "[upstream] Murdoch II (lat_1=30, lat_2=60): the southern hemisphere is "
+                            + "reflected onto the northern one - lat -75 comes back as +58.1 and lat "
+                            + "-85 as +82.7 (sconics.cpp, murd2_s_inverse; PROJ 9.8.1 answers "
+                            + "identically, apex of the fold at 89.5028 deg in both)"),
+            // "all four |lat| >= 89.9 probes" understated the reach: 89.9 is simply the closest
+            // point to the pole on the ladder. Measured directly, (0, 89.8) throws as well (last
+            // correction -4.7656e-4) and (0, 89.0) succeeds to 4.4e-12 deg.
+            //
+            // Adjudicated. The iteration itself is bit-faithful: nell_h.cpp has NITER 9 and EPS 1e-7,
+            // the same update and the same phi = 0 seed, and NellHProjection matches all of it. The
+            // only difference is what happens when the 9 run out - PROJ snaps to a pole, we throw -
+            // so this is a house rule and not a porting error in either direction. Measured on the
+            // oracle, forward then inverse: 89.8 comes back as 90.000000000000000, a silent 22.26 km,
+            // and at lon 45 the longitude comes back 45.157079313685; 89.05 round-trips correctly to
+            // 89.049999999982546. Our boundary is latitude 89.05069318341576.
+            //
+            // "Too few iterations" was closer to right than a previous note here claimed, and the
+            // distinction matters to anyone reading this to decide what upstream should do:
+            //
+            //  - Short of the pole, NITER really is the whole problem. Simulating the loop exactly,
+            //    89.8 exhausts at 9 but converges at 12 steps to 89.800000000000, and 89.9 likewise.
+            //    So for the band this pin is actually about, a bigger loop would fix upstream.
+            //  - AT the pole it would not, because dy/dphi = 2(1 - sec^2(phi/2)/2) is zero at pi/2,
+            //    making it a double root with only linear convergence. The loop stops at 23 steps
+            //    with the latitude still 4.5e-6 deg out - about 50 cm - and 200 iterations give the
+            //    same answer in the same 23 steps. |V| < EPS is not an error bound there, so a snap
+            //    is still needed; it wants conditioning on p rather than on exhaustion.
+            //  - The exhaustion branch's lam = 2*x is NOT a second, independent slip. 1.0 +
+            //    cos(M_HALFPI) is exactly 1.0 in doubles (cos is 6.12e-17, below half an ulp), so
+            //    that line agrees with the normal one at the value it snaps to. The 0.157 deg of
+            //    longitude is entirely downstream of the latitude being wrong.
             new Pin("nell_h", REFUSED,
-                    "[suspect] Nell-Hammer's Newton inverse raises ConvergenceFailureException at "
-                            + "all four |lat| >= 89.9 probes, where the forward is perfectly happy"),
+                    "[fail-closed] Nell-Hammer's Newton inverse throws ConvergenceFailureException "
+                            + "at every ladder probe with |lat| >= 89.9, and at 89.8 too, where the "
+                            + "forward is happy. PROJ does not refuse - it returns latitude 90 for "
+                            + "an input of 89.8, a silent 22.26 km. NonConvergenceTest names nell_h "
+                            + "as one of five kernels where upstream's pole-clamp really is on a "
+                            + "failure path, and asserts this throw (nell_h.cpp, nell_h_s_inverse)"),
             new Pin("omerc", 1.2070,
                     "0.1 deg from the antipode of the oblique centre the recovered longitude is "
                             + "1.207 deg out; 11 probes wrong"),
+            // ccon and pconic have different forwards but recover the same lat/lon to about 1e-13,
+            // which is worth knowing: whatever is reflecting the southern hemisphere is shared
+            // between them rather than being two separate arithmetic slips.
             new Pin("pconic", 180.0,
-                    "perspective conic (lat_1=30, lat_2=60): as ccon, lat -75 and below fold onto "
-                            + "lat 60"),
+                    "[upstream] perspective conic (lat_1=30, lat_2=60): as ccon, and to within 1e-13 "
+                            + "of ccon's recovered coordinates - lat -75 comes back as +60 "
+                            + "(sconics.cpp, pconic_s_inverse; PROJ 9.8.1 answers identically)"),
             new Pin("peirce_q", REFUSED,
                     "Peirce quincuncial: 11 probes on the square's edges and corners are refused"),
             new Pin("poly", REFUSED,
                     "polyconic far from the central meridian: 32 wrong, 22 refused, the rest "
                             + "inverting to latitudes beyond the poles (-105.7 deg)"),
+            // Four failing probes, not two: as well as +/-90 it misses at +/-89.9, by 1.4999e-5 deg,
+            // which clears the 1e-5 bar by half a part in three. So the error does not switch on at
+            // the pole itself - it grows towards it, and the ladder happens to catch it just as it
+            // crosses the tolerance.
+            // Adjudicated, and the cause given here previously - "the asin argument saturates at the
+            // pole" - was wrong. Nothing saturates and nothing is clamped. putp4p.cpp squashes the
+            // latitude with asin(0.883883476 * sin phi) on the way out and unsquashes it with
+            // asin(1.13137085 * sin phi) on the way back, and those two constants are not exact
+            // reciprocals: 1/0.883883476 is 1.1313708505169522, so the second is 5.2e-10 short.
+            // At the pole the product is 0.9999999995430745, which is BELOW one, so asin returns
+            // 89.998267950 deg rather than 90 - a shortfall of 0.00173205 deg, which is the pinned
+            // tolerance to five figures. Substituting the exact reciprocal recovers 90 exactly.
+            // The fix upstream is one more digit in one constant; we are faithful to the digit.
             new Pin("putp4p", 0.0017321,
-                    "[suspect] Putnins P4' recovers 89.9983 for an input of 90 - 190 m - because "
-                            + "the inverse's asin argument saturates at the pole"),
+                    "[upstream] Putnins P4' recovers 89.99826795 for an input of 90 - 193 m - "
+                            + "because the inverse's unsquashing constant 1.13137085 is 5.2e-10 short "
+                            + "of the reciprocal of the forward's 0.883883476 (putp4p.cpp, "
+                            + "putp4p_s_inverse; PROJ 9.8.1 answers identically)"),
             new Pin("som", REFUSED,
                     "Space Oblique Mercator refuses both poles on the inverse after accepting them "
                             + "on the forward"),
             new Pin("somerc", 179.6,
-                    "[suspect] Swiss oblique Mercator folds the far side onto the near side: "
-                            + "(-179.9,0) inverts to lon 0.5036 with no refusal; 39 probes wrong"),
+                    "[upstream] Swiss oblique Mercator folds the far side onto the near side: "
+                            + "(-179.9,0) inverts to lon 0.5036 with no refusal; 39 probes wrong. "
+                            + "Not a longitude-wrap artefact - forcing the wrap path with "
+                            + "+lon_0=0.0000001 moves the answer by 2e-7 deg and nothing more "
+                            + "(somerc.cpp, somerc_e_inverse; PROJ 9.8.1 answers identically)"),
             new Pin("sterea", 1.2070,
                     "oblique stereographic 0.1 deg from the antipode, where the scale factor is "
                             + "~1e9: recovered longitude 1.207 deg out"),
+            // "rescaled" is measured, not assumed, and now also explained: putp4p.cpp registers both
+            // projections against the same forward and the same inverse, differing only in C_x and
+            // C_y (0.874038744/3.883251825 against 1.0/4.442882938). 3.883251825/4.442882938 is
+            // 0.87403874..., which is exactly the C_x ratio, so the two forwards differ by the
+            // constant 1.14406 that was measured, and the inverses - which divide the same two
+            // constants back out before touching either latitude constant - agree to the last digit
+            // at 89.99826794912813. The 5.2e-10 constant shortfall described under putp4p is shared
+            // verbatim, because it is the same function.
             new Pin("weren", 0.0017321,
-                    "[suspect] Werenskiold I is Putnins P4' rescaled and saturates identically at "
-                            + "the pole"),
+                    "[upstream] Werenskiold I is Putnins P4' rescaled - literally the same forward "
+                            + "and inverse in PROJ, with different C_x and C_y - so it misses the "
+                            + "pole by the same 0.00173205 deg, to the last printed digit, and misses "
+                            + "at 89.9 for the same reason (putp4p.cpp, putp4p_s_inverse; PROJ 9.8.1 "
+                            + "answers identically)"),
     };
 
     // -------------------------------------------------------------------------------- the test

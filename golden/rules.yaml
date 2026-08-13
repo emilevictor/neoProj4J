@@ -2356,7 +2356,17 @@ rules:
     # they surfaced next door. See NUM-NWL9D-ANDRAE-POLE-RADIUS-TRANSPOSED, which went 6 -> 10 by
     # the same four rows. THE REFUSAL TO ABSORB STATUS CHANGES IS WHAT MADE THE DEFECT VISIBLE;
     # a looser rule here would have kept all ten rows and reported nothing.
-    expected_rows: 19320
+    # RE-PINNED 2026-08-13 by the kernels stream, -10, and enumerable: `REG esri:2934` and
+    # `REG esri:21100`, probes 0..4 each. They sat here because `fy` drifted sub-ULP and that was
+    # the largest moved dimension on the row. The forward wrap in `Projection.projectRadians` is no
+    # longer gated on a non-zero `+lon_0`, so the recovered longitude on these two -- the only
+    # shipped definitions pairing a `+lon_0` past 180 with a `+pm` -- is now reduced into +/-180.
+    # `ix` moves by exactly one turn, which puts the row's magnitude at 360 and far outside this
+    # rule's 1e-6 band, so this rule correctly let them go. Claimed by
+    # PROJ-FORWARD-WRAP-CANONICALISES-RECOVERED-LONGITUDE, which has the arithmetic. THE BAND DID
+    # THE WORK AGAIN: a rule that tolerated large magnitudes would have kept all ten and said
+    # nothing about a longitude convention changing.
+    expected_rows: 19310
     reason: |
       PROVISIONAL AND NOT OWNED BY THIS MODULE. Placeholder for the sub-microscopic movement caused by
       wiring in PROJ 9.4-9.6's Karney auxiliary-latitude core (9.8.1:src/latitudes.cpp, and the
@@ -2671,3 +2681,79 @@ rules:
     expect:
       dimensions: [fx, fy, fz, ix, iy, iz]
       magnitude: {min: 1.0e-1, max: 1.0e7}
+
+  # ---------------------------------------------------------------------------------------------
+
+  - id: PROJ-FORWARD-WRAP-CANONICALISES-RECOVERED-LONGITUDE
+    status: active
+    expires: 2027-06-30
+    # PINNED at 10, and enumerable: `REG esri:2934` and `REG esri:21100`, probes 0..4 each. Those
+    # are the only two rows in the whole report that moved -- 10 of 41,425 changed rows -- so this
+    # rule and NUM-KARNEY-LATITUDE-CORE's -10 are the entire golden delta of the kernels PR.
+    #
+    # The two keys are the SAME DEFINITION, byte for byte, at esri:1816 and esri:2668:
+    #   +proj=merc +lat_ts=0 +lon_0=216.8077194444444 +k=0.997000 +x_0=3900000 +y_0=900000
+    #   +ellps=bessel +pm=jakarta +units=m +no_defs
+    # They are the only shipped definitions that combine a `+lon_0` beyond 180 with a `+pm`, which
+    # is why nothing else in 8,984 definitions moves.
+    #
+    # NO COORDINATE MOVED. Every one of the 10 rows changed by exactly one turn, and the arithmetic
+    # is exact rather than approximate: master recovered 216.80771944444436 and this recovers
+    # -143.19228055555564, and the first minus 360 IS the second, to the bit. Diffing this run's
+    # golden.tsv against master's, `ix` is THE ONLY COLUMN THAT DIFFERS on all 10 rows -- fx, fy,
+    # fz, iy and iz are bit-identical, so the forward never moved at all.
+    #
+    # WHY `dimensions` NAMES `fy` AND `iy` ANYWAY, since that reads as a contradiction and is not.
+    # The report's `moved` column is measured against the COMMITTED 1.4.3 baseline, not against
+    # master, and these 10 rows were already CHANGED there: `fy` on all ten and `iy` on eight, by
+    # 1e-9 and smaller, from the Karney auxiliary-latitude work. Those tiny movements are why the
+    # rows used to be claimed by NUM-KARNEY-LATITUDE-CORE. This rule inherits them, so it has to
+    # sanction the union of every moved set in the report -- `fy,ix` on probe 0 and `fy,ix,iy` on
+    # probes 1..4 -- or `GoldenDiff` rejects the row for moving in a dimension the rule does not
+    # allow. Magnitude is the MAX over the moved dimensions, so the band below is still set by `ix`
+    # alone: the sub-micron fy and iy cannot reach it. `fx`, `fz` and `iz` are deliberately left
+    # out, so that anything moving in them stops this rule matching and surfaces the row.
+    expected_rows: 10
+    reason: |
+      THE RECOVERED LONGITUDE IS NOW INSIDE +/-180, WHERE A GEOGRAPHIC LONGITUDE BELONGS. These
+      rows used to report 216.808 deg for a point on the 143.192 deg W meridian -- the correct
+      meridian, named by a number outside the range the convention allows.
+
+      WHY A MERCATOR ROW MOVED WHEN THE CHANGE IS IN THE SHARED FORWARD FUNNEL AND NOT IN MERC.
+      This is the part that is easy to misattribute, so it is written out. The change hoisted the
+      longitude wrap out of `if (projectionLongitude != 0)` in `Projection.projectRadians`. These
+      definitions have `+lon_0=216.8`, which is NOT zero, so the guard was already open for merc
+      and merc's own forward is untouched -- confirmed by fx and fy being bit-identical against
+      master's own run of the same probes. The row
+      moves on the RETURN leg: a geographic CRS is projected too, through `longlat`, and `longlat`
+      has no `+lon_0`, so its effective lam0 is zero and its wrap is exactly the one that never
+      used to run. The recovered 216.808 passed back through it unreduced.
+
+      HOW THE 216.808 AROSE, since a number that large looks like a defect on its own and is not:
+      the inverse kernel returns lam = -106.812 deg, the funnel adds `+lon_0` to get 109.996, and
+      `PrimeMeridian` then adds Jakarta's 106.808 to bring it to Greenwich. Each step is right and
+      the sum is 216.808, which is past the antimeridian. The wrap is the step that was missing.
+
+      NOT A PARITY CLAIM FOR THIS DEFINITION, and this is worth stating so nobody reads it as one.
+      PROJ 9.8.1 inverts these coordinates to -142.8718573972, which is 0.320 deg from our
+      -143.192. That disagreement is PRE-EXISTING and unchanged by this rule's rows: it was the
+      same 0.320 deg before, just written as 216.808 instead. Measured, not assumed --
+      `proj -I -f "%.10f"` on the definition above. So this rule declares a change of
+      REPRESENTATION only, and the 0.320 deg remains open and unrelated.
+
+      THE CAUSE OF THAT 0.320 DEG IS NOW KNOWN, recorded here because the next person to read this
+      rule will ask. PROJ's merc lets `+lat_ts` override `+k`; we let `+k` win. Three oracle runs
+      on the definition above: `+lat_ts=0` with and without `+k=0.997` both give easting
+      20193564.578396, while `+k=0.997` alone gives 20144683.884660. Our scale is therefore 0.997
+      where PROJ's is 1, and 106.8117 * 0.003 = 0.32044 -- the residual to five digits. It affects
+      47 of the 59 registry definitions that carry `+lat_ts`, since those 47 also carry a `+k`. It
+      is pre-existing, has its own task, and is not touched by this rule.
+    match:
+      sections: [REG]
+      keys: ["esri:2934", "esri:21100"]
+      classifications: [CHANGED]
+      status_from: "OK"
+      status_to: "OK"
+    expect:
+      dimensions: [fy, ix, iy]
+      magnitude: {min: 3.59e2, max: 3.61e2}

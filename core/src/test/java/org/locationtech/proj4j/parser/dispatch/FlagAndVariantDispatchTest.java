@@ -198,11 +198,18 @@ public class FlagAndVariantDispatchTest {
 
     /**
      * The forward honours it too. {@code fwd_prepare} skips <em>both</em> of its {@code adjlon}
-     * calls under {@code +over} ({@code fwd.cpp:82-83}, {@code :109-111}); this class's forward
-     * funnels wrap only when {@code lon_0 != 0}, so this assertion is specifically that
-     * {@code +over} suppresses that one and does <b>not</b> also suppress the subtraction of
-     * {@code lon_0} &mdash; folding the two into one guard would silently change the central
-     * meridian instead of the wrapping.
+     * calls under {@code +over} ({@code fwd.cpp:82-83}, {@code :111-112}), and this assertion is
+     * specifically that {@code +over} suppresses the wrap and does <b>not</b> also suppress the
+     * subtraction of {@code lon_0} &mdash; folding the two into one guard would silently change
+     * the central meridian instead of the wrapping.
+     *
+     * <p>The forward funnel used to wrap only when {@code lon_0 != 0}, because both statements sat
+     * inside one {@code if (projectionLongitude != 0)}. That guard is gone: upstream subtracts
+     * {@code lam0} unconditionally ({@code fwd.cpp:108}) and wraps whenever {@code +over} is off
+     * ({@code fwd.cpp:111-112}), with neither line referring to {@code lam0}. The
+     * {@code lon_0 == 0} leg below could not be written before &mdash; without a central meridian
+     * nothing wrapped, so {@code +over} and its absence gave the same easting and there was no
+     * flag behaviour to assert.
      */
     @Test
     public void overSuppressesTheForwardWrapWithoutLosingLon0() {
@@ -212,6 +219,15 @@ public class FlagAndVariantDispatchTest {
         assertEquals(6400000 * 190 * ProjectionMath.DTR, eastingAt200, 1e-6);
         assertEquals("without +over the same point must wrap to -170 from the central meridian",
                 6400000 * -170 * ProjectionMath.DTR, forward(base, 200, 0).x, 1e-6);
+
+        // And with no central meridian at all, where the old guard made +over a no-op. Measured:
+        // plain was 22340214.425527416 (200 deg, unwrapped) before the fix and is
+        // -17872171.540421937 (-160 deg) after; the +over easting is unchanged by the fix.
+        String noLon0 = "+proj=eqc +a=6400000";
+        assertEquals("with lon_0 absent the forward must still wrap 200 to -160",
+                6400000 * -160 * ProjectionMath.DTR, forward(noLon0, 200, 0).x, 1e-6);
+        assertEquals("+over must still keep 200 at 200 with lon_0 absent",
+                6400000 * 200 * ProjectionMath.DTR, forward(noLon0 + " +over", 200, 0).x, 1e-6);
     }
 
     /**

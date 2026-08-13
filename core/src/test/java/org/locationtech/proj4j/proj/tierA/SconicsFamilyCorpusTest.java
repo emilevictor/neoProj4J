@@ -115,10 +115,11 @@ public class SconicsFamilyCorpusTest {
 
     /**
      * {@code sconics.cpp:44-51} rejects a definition with no {@code +lat_1}/{@code +lat_2}.
-     * Proj4J cannot tell "absent" from "zero", but it does not need to: with both at their
-     * {@code 0.0} default, {@code del} and {@code sig} are zero and the
-     * {@code |del| < EPS || |sig| < EPS} test rejects them — which is upstream's error
-     * condition reached by upstream's own guard.
+     * With both at their {@code 0.0} default, {@code del} and {@code sig} are zero and
+     * {@code SimpleConicProjection.initialize()}'s {@code |del| < EPS || |sig| < EPS} test
+     * would reject them on its own; since the presence check landed in
+     * {@code Proj4Parser.setParameters} this case is now refused a step earlier, and names
+     * {@code lat_1} — which is also the parameter PROJ names when both are absent.
      */
     @Test
     public void missingStandardParallelsIsRejectedRatherThanGuessed() {
@@ -134,6 +135,88 @@ public class SconicsFamilyCorpusTest {
                         expected.getMessage().contains("lat_1"));
             }
         }
+    }
+
+    /**
+     * <b>Exactly one</b> standard parallel is the case the {@code |del| < EPS} test cannot
+     * see, and it is the one that mattered. A single parallel leaves {@code del} and
+     * {@code sig} at half of it, both non-zero, so the setup looked well-formed and was
+     * answered as though the other parallel had been typed as 0.
+     *
+     * <p>Measured on {@code +proj=murd2 +a=6400000} at 10E 20N: we returned
+     * {@code (1016992.395865934, 2297381.269569689)} where PROJ 9.8.1 exits with "Missing
+     * parameter: lat_2 should be specified". That is 1,191 km from the
+     * {@code (1122158.107229810, 3483769.275111472)} that {@code +lat_1=30 +lat_2=60} gives —
+     * a different question answered, not a rounding error, and nothing in the output said so.
+     *
+     * <p>The check lives in {@code Proj4Parser} rather than in the projection because
+     * upstream tests <em>presence</em> ({@code pj_param}'s {@code t} sigil) and a
+     * {@link Projection} cannot see presence: an omitted {@code +lat_2} and an explicit
+     * {@code +lat_2=0} are both {@code 0.0} in the same field by then.
+     */
+    @Test
+    public void exactlyOneStandardParallelIsRefusedLikeUpstream() {
+        for (String name : new String[] {"euler", "murd1", "murd2", "murd3", "pconic",
+                "tissot", "vitk1"}) {
+            assertRefusedNaming(name, "+proj=" + name + " +a=6400000 +lat_1=30", "lat_2");
+            assertRefusedNaming(name, "+proj=" + name + " +a=6400000 +lat_2=60", "lat_1");
+        }
+    }
+
+    /**
+     * The other side of the same coin, and the reason the check above is a presence test
+     * rather than a zero test. <b>PROJ accepts an explicit zero standard parallel and
+     * answers.</b> A guard that read {@code 0.0} as "absent" would refuse these two, which
+     * trades upstream's defect for a locally invented divergence — the harder of the two to
+     * defend, since upstream's is at least reproducible.
+     *
+     * <p>Both rows measured on the binaries, {@code +proj=murd2 +a=6400000} forward at
+     * 10E 20N. {@code +lat_1=30 +lat_2=0} matches PROJ to every printed digit;
+     * {@code +lat_1=0 +lat_2=60} differs by 2 &micro;m in the northing's last ulp
+     * (PROJ prints {@code 2604267.019108736}), which is why the tolerance below is 1e-5 m
+     * and not exact.
+     *
+     * <p>Building a sconics projection <em>directly from Java</em> rather than from a
+     * definition string bypasses the presence check, because the values are then all a caller
+     * has. That is a stated limitation, not an oversight; see
+     * {@code SimpleConicProjection.initialize()}'s comment.
+     */
+    @Test
+    public void anExplicitZeroParallelIsAcceptedLikeUpstream() {
+        ProjCoordinate a = projectAt("+proj=murd2 +a=6400000 +lat_1=30 +lat_2=0", 10.0, 20.0);
+        assertEquals("+lat_2=0 easting", 1016992.395865934, a.x, 1e-5);
+        assertEquals("+lat_2=0 northing", 2297381.269569689, a.y, 1e-5);
+
+        ProjCoordinate b = projectAt("+proj=murd2 +a=6400000 +lat_1=0 +lat_2=60", 10.0, 20.0);
+        assertEquals("+lat_1=0 easting", 928382.344182429, b.x, 1e-5);
+        assertEquals("+lat_1=0 northing", 2604267.019108736, b.y, 1e-5);
+
+        // Every member must accept them, not just murd2 -- the guard is on the shared base.
+        for (String name : new String[] {"euler", "murd1", "murd2", "murd3", "pconic",
+                "tissot", "vitk1"}) {
+            projectAt("+proj=" + name + " +a=6400000 +lat_1=30 +lat_2=0", 10.0, 20.0);
+            projectAt("+proj=" + name + " +a=6400000 +lat_1=0 +lat_2=60", 10.0, 20.0);
+        }
+    }
+
+    private static void assertRefusedNaming(String name, String def, String parameter) {
+        try {
+            project(def);
+            fail(name + ": \"" + def + "\" supplies one standard parallel and must be"
+                    + " refused, as PROJ refuses it. Accepting it answers as though "
+                    + parameter + "=0 had been given.");
+        } catch (InvalidValueException expected) {
+            assertTrue(name + ": the message should name " + parameter + ", was: "
+                    + expected.getMessage(),
+                    expected.getMessage().contains(parameter));
+        }
+    }
+
+    private static ProjCoordinate projectAt(String def, double lon, double lat) {
+        Projection p = new CRSFactory().createFromParameters("t", def).getProjection();
+        ProjCoordinate out = new ProjCoordinate();
+        p.project(new ProjCoordinate(lon, lat), out);
+        return out;
     }
 
     /**

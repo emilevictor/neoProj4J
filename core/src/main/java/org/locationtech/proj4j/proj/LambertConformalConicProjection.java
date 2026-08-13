@@ -92,9 +92,26 @@ public class LambertConformalConicProjection extends ConicProjection {
 
 	public ProjCoordinate project(double x, double y, ProjCoordinate out) {
 		double rho;
-		if (Math.abs(Math.abs(y) - ProjectionMath.HALFPI) < 1e-10)
+		if (Math.abs(Math.abs(y) - ProjectionMath.HALFPI) < 1e-10) {
+			/*
+			 * lcc.cpp:27-33, and the inner refusal was missing here. A Lambert conformal conic has
+			 * a cone with an apex over one pole, and only that pole projects to a point; the other
+			 * one is infinitely far away and has no image on the map. `n` carries the sign of the
+			 * apex, so `y * n <= 0` is exactly "the pole on the far side from the apex".
+			 *
+			 * Without the refusal both poles collapsed to rho = 0 and therefore to the same
+			 * easting and northing. With +lat_1=30 +lat_2=60 the forward of (0, -90) was
+			 * bit-for-bit the forward of (0, +90), and inverting it returned +90: a 180 degree
+			 * error in latitude, accepted silently and with no hint in the output that the answer
+			 * was for the opposite hemisphere. The other pole still projects, as it must.
+			 */
+			if (y * n <= 0.0) throw new ProjectionException(
+					"lcc: latitude " + y + " rad is the pole opposite the cone's apex, and no point "
+							+ "on the map corresponds to it. The cone's apex is over the "
+							+ (n > 0.0 ? "north" : "south") + " pole, because lat_1 and lat_2 give "
+							+ "n = " + n + " (lcc.cpp, lcc_e_forward)");
 			rho = 0.0;
-		else {
+		} else {
 			rho = c * (spherical ?
 			    Math.pow(Math.tan(ProjectionMath.QUARTERPI + .5 * y), -n) :
 			      Math.pow(ConformalLat.tsfn(y, Math.sin(y), e), n));

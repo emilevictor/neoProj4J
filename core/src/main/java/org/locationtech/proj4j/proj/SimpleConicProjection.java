@@ -158,16 +158,33 @@ public class SimpleConicProjection extends ConicProjection {
 	 * well — unrelated to the requested parallels, and with no counterpart upstream, where
 	 * {@code sconics} declares no latitude limits at all.
 	 *
-	 * <p><b>On the missing-parameter check.</b> {@code sconics.cpp:44-51} raises
-	 * {@code PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE} when either {@code +lat_1} or
-	 * {@code +lat_2} is absent, before computing anything. Proj4J cannot distinguish
-	 * "absent" from "given as zero" — both leave the field at its {@code 0.0} default — but
-	 * it does not need to: with both absent, {@code del} and {@code sig} are both zero and
-	 * the {@code |del| < EPS || |sig| < EPS} test already rejects them. The two cases that
-	 * differ are {@code +lat_1=0 +lat_2=0} and a single parallel given as zero, and both are
-	 * degenerate and rejected too. So the guard below covers upstream's error condition
-	 * exactly, and reports it as an {@link InvalidValueException} naming the values, rather
-	 * than as the previous {@code "Error -42"}.
+	 * <p><b>On the missing-parameter check, and why half of it is not here.</b>
+	 * {@code sconics.cpp:44-51} raises {@code PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE} when
+	 * either {@code +lat_1} or {@code +lat_2} is absent, before computing anything, and it
+	 * does that by testing <em>presence</em> — {@code pj_param}'s leading {@code t} sigil.
+	 * A {@link Projection} cannot see presence: an omitted {@code +lat_2} and an explicit
+	 * {@code +lat_2=0} both arrive as {@code 0.0} in the same field. So upstream's condition
+	 * is split across two places, and the guard below is only the part that can be expressed
+	 * in terms of values.
+	 *
+	 * <p>What the guard below does cover is <b>both</b> parallels missing, because then
+	 * {@code del} and {@code sig} are both zero and {@code |del| < EPS || |sig| < EPS}
+	 * rejects them; it also covers the genuinely degenerate setups upstream rejects on the
+	 * same test, {@code lat_1 = lat_2} and {@code lat_1 = -lat_2}. What it cannot cover is
+	 * <b>exactly one</b> parallel missing. A single parallel leaves {@code del} and
+	 * {@code sig} at half of it, both non-zero, so the setup looks perfectly well-formed
+	 * here. An earlier version of this note claimed that case was degenerate and rejected
+	 * too. It is not: {@code +proj=murd2 +a=6400000 +lat_1=30} was accepted and answered as
+	 * though {@code +lat_2=0} had been typed, 1,191 km at 10E 20N from the answer for
+	 * {@code +lat_1=30 +lat_2=60}.
+	 *
+	 * <p>That half now lives in {@code Proj4Parser.setParameters}, which is where presence is
+	 * still known. Note that it must be a presence test and not a zero test: PROJ accepts
+	 * {@code +lat_1=30 +lat_2=0} and {@code +lat_1=0 +lat_2=60} and answers both, so reading
+	 * zero as absent would refuse two setups upstream honours. Building this projection
+	 * directly from Java, rather than from a definition string, therefore bypasses the
+	 * presence check — the values are all a Java caller has, and one parallel left at its
+	 * default is indistinguishable from one deliberately set to the equator.
 	 */
 	public void initialize() {
 		super.initialize();

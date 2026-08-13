@@ -42,7 +42,7 @@ import org.locationtech.proj4j.util.ProjectionMath;
  *     coo.lpz.lam = adjlon(coo.lpz.lam);
  * </pre>
  *
- * <p>Proj4J instead clamped:
+ * <p>Proj4J's <b>inverse</b> funnel instead clamped:
  *
  * <pre>
  * if (dst.x &lt; -Math.PI) dst.x = -Math.PI;
@@ -53,9 +53,27 @@ import org.locationtech.proj4j.util.ProjectionMath;
  *
  * <p>A clamp is not a reduction. It <em>discards</em> the revolution count where {@code adjlon}
  * removes it, so 533.2&deg; and 180&deg; — which are 353&deg; apart — become the same answer, and
- * nothing is raised. And the {@code projectionLongitude != 0} guard meant that with
+ * nothing is raised. And this funnel's {@code projectionLongitude != 0} guard meant that with
  * {@code +lon_0=0} no reduction happened at all, so the identical bad input threw for
  * {@code +lon_0=15} and returned a plausible wrong coordinate for {@code +lon_0=0}.
+ *
+ * <h2>Which funnel, and which removal</h2>
+ *
+ * <p>Everything above is about {@code inverseProjectRadians}, and the code it quotes — note the
+ * {@code +} in {@code dst.x + projectionLongitude}, which is {@code inv_finalize} <em>adding</em>
+ * {@code lam0} back — was removed with the fix this file was written for. It is history here, not
+ * a live defect.
+ *
+ * <p>The <b>forward</b> funnel {@code projectRadians} carried a guard of exactly the same shape,
+ * around the mirror-image statements ({@code lam0} <em>subtracted</em>, then wrapped), and it was
+ * a <em>separate</em> defect removed <em>separately</em> and later. Do not read the two as one
+ * change: while the forward guard survived, a longitude outside {@code [-180, 180]} with no
+ * {@code +lon_0} reached the kernel raw and every projection behaved as though {@code +over} were
+ * on. Upstream guards neither direction on {@code lam0} — {@code fwd.cpp:108} subtracts
+ * unconditionally and {@code fwd.cpp:111-112} wraps whenever {@code +over} is off. The forward
+ * side is pinned in
+ * {@code failopen.RawLongitudeDomainCheckTest.outOfRangeLongitudesProjectToTheSameSpotAsTheirWrappedEquivalent};
+ * nothing in this file exercises it.
  *
  * <p>Measured on {@code +proj=lsat}, whose inverse kernel accumulates along-track rotation in
  * {@code lamt - p22 * lamdp}: at {@code (130, 45)} with path 120 the kernel returns 533.2&deg;;
