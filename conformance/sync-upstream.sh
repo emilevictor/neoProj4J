@@ -22,10 +22,12 @@ set -euo pipefail
 PROJ_REV=9.8.1
 PROJ_REV_SHA=f08fa86c478c4bbbf003b1ec751dd84aa6eca486
 
-PROJ_DIR_DEFAULT=/Volumes/git/PROJ
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+# Default: a PROJ checkout sitting beside this repository. Override with $1 or $PROJ_DIR.
+PROJ_DIR_DEFAULT="$SCRIPT_DIR/../../PROJ"
 PROJ_DIR="${1:-${PROJ_DIR:-$PROJ_DIR_DEFAULT}}"
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 RES="$SCRIPT_DIR/src/test/resources"
 MANIFEST="$RES/gie-manifest.sha256"
 

@@ -21,9 +21,9 @@ name: Determinism
 # This workflow does the comparison. That is the difference between asserting the guarantee and
 # proving it.
 #
-# VERIFICATION STATUS. Unlike everything else in .github/, the Java side of this has been run.
-# StrictMathGoldenTableTest and NanBitPatternTest were executed locally on five JDK/ISA combinations
-# before this file was written:
+# VERIFICATION STATUS. The Java side of this has been run across more JDKs and instruction sets
+# than any other check here. StrictMathGoldenTableTest and NanBitPatternTest were executed outside
+# CI on five JDK/ISA combinations before this file was written:
 #
 #   Temurin  8.0.502  x86-64    StrictMath.sin native (JNI fdlibm)     54,265 pass
 #   Temurin 11.0.32   x86-64    StrictMath.sin native (JNI fdlibm)     54,265 pass

@@ -633,7 +633,8 @@ public class StrictMathGoldenTableTest {
      * @return true if an intrinsic exists on x86-64 or AArch64 today
      */
     private static boolean isIntrinsified(String fn) {
-        // Per numerics.md's Math-vs-StrictMath table. tanh is excluded although it gained an
+        // The functions HotSpot intrinsifies on x86-64 and AArch64, and so the ones where Math and
+        // StrictMath are expected to differ. tanh is excluded although it gained an
         // intrinsic in JDK 21: requiring divergence for it would fail this test on 8, 11 and 17 for
         // a reason that is not a defect.
         return "sin".equals(fn) || "cos".equals(fn) || "tan".equals(fn)

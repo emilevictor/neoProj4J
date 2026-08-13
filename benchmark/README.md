@@ -13,11 +13,14 @@ permitted *precisely because this module is never published* — no downstream c
 by its bytecode level, and it is not in the default reactor, so it cannot raise the floor for anyone.
 Do not copy that `<release>` into `core`, `epsg` or `geoapi`.
 
+Build and run this module on **JDK 21**. Point `JAVA_HOME` at your own JDK 21 installation —
+`export JAVA_HOME=$(/usr/libexec/java_home -v21)` on macOS, or the install path of your
+distribution's JDK 21 package on Linux — and put its `bin` on the path:
+
 ```bash
-export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
 export PATH="$JAVA_HOME/bin:$PATH"
 
-# From the repository root, once the bench profile is wired into the root pom:
+# From the repository root, using the bench profile:
 mvn -Pbench -pl benchmark -am package
 
 # Or, without the profile, build core+epsg into the local repo first and then this module alone:
@@ -28,12 +31,13 @@ mvn -f benchmark/pom.xml package
 Either way the artifact is `benchmark/target/benchmarks.jar` — a shaded uber-jar with
 `org.openjdk.jmh.Main` as its `Main-Class`.
 
-**Always use an isolated local repository when building concurrently with other work.** Parallel
-Maven runs in this repository have truncated the `epsg` jar mid-read and produced 34 spurious
-repo-wide failures:
+**If another build is running against the same local repository, give this one a repository of its
+own.** Two concurrent Maven runs here have been seen to truncate the `epsg` jar mid-read, which
+then fails builds all over the reactor for a reason that has nothing to do with the change under
+test. Any scratch directory will do:
 
 ```bash
-mvn -B -Dmaven.repo.local=/tmp/m2-bench ...
+mvn -B -Dmaven.repo.local=<a scratch directory> ...
 ```
 
 A benign jgitver `[ERROR] file doesn't exist: …jar` line appears even on success. Judge by
@@ -69,7 +73,7 @@ java -jar target/benchmarks.jar -l
 |---|---|
 | `SinglePointTransformBenchmark` | **the regression baseline** — one `transform` in the exact shape the consumer uses (fresh `ProjCoordinate` in, one reused out), over all 8 CRS pairs |
 | `EtmercBenchmark` | `etmerc` vs `tmerc`, forward and inverse, across the 3° seam (Δλ = 0 / 1.5 / **3** / 6 / 20) |
-| `SolverBenchmark` | head-to-head legacy vs Karney-core for every `numerics.md` row that has both implementations, at 4 latitudes |
+| `SolverBenchmark` | head-to-head legacy vs Karney-core for every routine that still has both implementations in the tree, at 4 latitudes |
 | `MathDispatchBenchmark` | `Math` vs `StrictMath` for all 15 relevant functions, plus four `hypot` variants — **see the architecture caveat below** |
 | `CrsParseBenchmark` | CRS creation at the init file's first / middle / last entry |
 | `TransformCacheBenchmark` | cache hit vs miss, and object-key vs string-pair-key lookup |
@@ -97,11 +101,12 @@ loop ops/s, and it is only meaningful when both arms run **in the same JMH fork*
 speed, turbo state and noisy neighbours cancel. A control measured in a different fork on a
 different day answers a different question.
 
-`VectorApiBenchmark`, which `reference/performance.md` also lists, is **not** here. The Vector API
-still requires `--add-modules` at *runtime* and prints a warning, which is unacceptable in a library
-shipped into someone else's Spark executor; `performance.md` defers it, and a benchmark for a
-deferred, opt-in-artifact-only idea would be the only thing in this module that could not inform a
-decision. Add it if and when a separate opt-in artifact is on the table.
+**There is no Vector API benchmark, and that is a decision, not an omission.** The Vector API still
+requires `--add-modules` at *runtime* and prints a warning, which is unacceptable in a library
+shipped into someone else's Spark executor. So the Vector API is not on the table for this project
+unless it is a separate opt-in artifact, and a benchmark for an idea nobody can act on would be the
+only thing in this module that could not inform a decision. Add one if and when that opt-in artifact
+is proposed.
 
 ---
 
@@ -128,14 +133,19 @@ out-param, a `List` iterator on a per-point path, a boxing `Objects.hash` on the
 Those are invisible to a timing gate at this signal-to-noise ratio and lethal at 100,000 vertices
 per geometry.
 
-The policy targets, from `reference/performance.md`:
+The policy targets. Each is the `targetBytesPerOp` of the named rule in `allocation-baseline.json`,
+and the rule's own `why` records the reasoning and the measurement:
 
-- **every bulk method `== 0`** — non-negotiable and not ratchetable. With a non-null `status` array,
-  zero allocation per point is how the error taxonomy is delivered at no per-point cost.
-- **single-point `<= 40 B/op`** — exactly one `ProjCoordinate` (12-byte header + three doubles,
-  padded to 40 under compressed oops), which is the caller's, not proj4j's.
-- **`GridShiftBenchmark.inverseShift == 0`** — the sharpest target in the library. That path is
-  measured at *up to 49 allocations per vertex*, i.e. 4.9 M objects for one 100 k-vertex geometry.
+- **every bulk method `== 0`** (`bulk-zero-allocation`) — non-negotiable and not ratchetable. With a
+  non-null `status` array, zero allocation per point is how the error taxonomy is delivered at no
+  per-point cost.
+- **single-point `<= 40 B/op`** (`single-point-transform`) — exactly one `ProjCoordinate` (12-byte
+  header + three doubles, padded to 40 under compressed oops), which is the caller's, not proj4j's.
+- **`GridShiftBenchmark.inverseShift == 0`** (`gridshift-inverse-zero`) — the sharpest target in the
+  library, and now met: that arm went **160 → 0 B/op on 2026-08-03** when `Grid.shift` stopped
+  allocating an iterator and `nad_cvt`/`nad_intr` stopped returning a fresh `PolarCoordinate` per
+  trip of the `MAX_TRY = 9` loop. Its zero is asserted outside JMH as well, by
+  `datum.GridShiftRewriteTest#theShiftPathAllocatesNothing`.
 
 ### Coverage — what Tier 1 does *not* gate
 
@@ -272,7 +282,7 @@ timing, **it explains them**. "`pow` went from 0 to 5" names the cause; "12% slo
 `org.locationtech.proj4j` class it loads. That is the entire transformation: no constant-pool entry
 is added or removed, so every `CONSTANT_Class_info`, `CONSTANT_Methodref_info` and `invokestatic`
 index is untouched. A facade that lived in `core` would put a counter increment on the hot path of a
-published library, which is the kind of thing the rest of `performance.md` exists to prevent. See
+published library, which this project does not do. See
 `counting/CountingClassLoader.java` for the format details and the one documented false-positive
 case.
 
@@ -310,10 +320,11 @@ accident.
 
 The entire `StrictMath` question is about **cross-architecture divergence**. HotSpot ships
 `@IntrinsicCandidate` implementations of `sin cos tan log log10 exp pow` on both architectures, and
-they differ from each other and from fdlibm. That divergence is the reason
-`reference/numerics.md` mandates `StrictMath` for those seven despite a 1.5–3× cost, and it is the
-reason the cost is worth paying: the consumer requires **bit-for-bit determinism across executors
-and JVMs**, and a Spark cluster is not guaranteed homogeneous.
+they differ from each other and from fdlibm. That divergence is why this project's policy is
+`StrictMath` (or `FastStrictTrig`, which is bit-identical to it) for those seven despite the extra
+time, and it is why the cost is worth paying: the consumer requires **bit-for-bit determinism across
+executors and JVMs**, and a Spark cluster is not guaranteed homogeneous. `core`'s
+`util/FastStrictTrig` javadoc is where that policy and its evidence are written down.
 
 A single-architecture run tells you the *local* tax and says **nothing** about the thing the policy
 is for. A result from one architecture presented as "the cost of `StrictMath`" is a **wrong answer**,
@@ -329,9 +340,10 @@ not an incomplete one.
 is wrong: `StrictMath.sin/cos/tan` are still `native` JNI calls into compiled fdlibm on 17 —
 `Modifier.isNative` is true on Corretto **and** Temurin 17.0.20, and `java.lang.FdLibm$Sin` is absent
 from a JDK 17 image entirely, 5 `FdLibm` nested classes on 17 against 23 on 21. The boundary is
-**per-function**: on 17 `log` is also still native while `pow`/`exp` are already pure Java. Getting
-this wrong nearly shipped an MR-JAR that would have pushed JDK 17 onto the slow path — see
-`reference/performance.md`, "The Java baseline".)* Confirmed independently of JMH via
+**per-function**: on 17 `log` is also still native while `pow`/`exp` are already pure Java. The full
+version-by-version account, including the argument-magnitude tiers, is in `core`'s
+`util/FastStrictTrig` javadoc — read that before making any decision that turns on which JDK is
+slow here.)* Confirmed independently of JMH via
 `ThreadMXBean.getThreadAllocatedBytes` over 5×10⁶ calls:
 
 | call | B/op |
@@ -342,19 +354,20 @@ this wrong nearly shipped an MR-JAR that would have pushed JDK 17 onto the slow 
 | `StrictMath.tan` | 32.00 |
 | `StrictMath.exp` / `log` / `atan` / `asin` / `log1p` / `sinh` / `hypot` / `pow` | 0.00 |
 
-**This bears directly on `reference/numerics.md` row 13.** That row prices the `StrictMath` policy as
-"−1.5–3× on the 7 intrinsics" — a *time* cost. It does not mention allocation, and the allocation is
-arguably the larger problem for this consumer: a UTM transform makes roughly four `sin` and four
-`cos` calls per point, so ~256 B/point, i.e. **~25 MB of garbage for one 100,000-vertex geometry**,
-inside a Spark executor. Time cost is linear and predictable; garbage at that rate is young-GC
-pressure across every task on the executor.
+**This bears directly on the `StrictMath` policy.** The policy is usually argued as a *time* cost —
+`StrictMath` is slower than the intrinsic, and determinism is worth the slowdown. Allocation is not
+usually mentioned, and it is arguably the larger problem for this consumer: a UTM transform makes
+roughly four `sin` and four `cos` calls per point, so ~256 B/point, i.e. **~25 MB of garbage for one
+100,000-vertex geometry**, inside a Spark executor. Time cost is linear and predictable; garbage at
+that rate is young-GC pressure across every task on the executor.
 
-It does not invalidate row 13 — determinism is still a hard requirement — but it changes the
-mitigation. `numerics.md`'s sine/cosine-*preserving* APIs (`MeridianArc.mlfn(phi, sphi, cphi)`,
-`ConformalLat.tsfnSinCos`, `AuthalicLat.forward(phi, sinphi, cosphi)`, `Clenshaw6.convert(zeta, s, c)`)
-go from a micro-optimisation to the primary defence, because each avoided `sin`/`cos` now saves 32 B
-as well as 100-odd ns. `exp`/`log`/`pow` are unaffected, so the policy is only expensive for three of
-the seven.
+That does not weaken the policy — determinism is still a hard requirement — but it changes the
+mitigation. The sine/cosine-*preserving* APIs (`MeridianArc.mlfn(phi, sphi, cphi)`,
+`ConformalLat.tsfnSinCos`, `AuthalicLat.forward(phi, sinphi, cosphi)`, `Clenshaw6.convert(zeta, s, c)`,
+all in `core`'s `util` package) go from a micro-optimisation to the primary defence, because each
+avoided `sin`/`cos` saves 32 B as well as the call. `exp`/`log`/`pow` are unaffected, so the policy
+is only expensive for three of the seven. `core`'s own answer is `FastStrictTrig`, which is
+bit-identical to `StrictMath.sin/cos/tan` and allocates nothing.
 
 The `math-dispatch-strictmath` rule pins this at a ratchet of 64 (the `strictSinCos` arm calls two of
 them) with a target of 0, so a JDK that fixes `FdLibm`'s scratch array tightens it automatically
@@ -461,7 +474,7 @@ rebuild or to pass `--alloc-baseline` / `--op-counts` explicitly.
 **RE-CAPTURED SINCE, AND THE ROW ABOVE IS THE 2026-08-01 CAPTURE, KEPT FOR THE PROVENANCE ARGUMENT
 BELOW.** `allocation-baseline.json`'s own `capturedAt` now reads
 `8f0fbd81bf53f95bd3c824a18a65f673c7ae2635+uncommitted`, `2026-08-02T16:21:38Z`, JDK 21.0.11+10-LTS /
-aarch64 / Mac OS X, and the file holds **25 rules and 171 per-benchmark ratchets, all enforced, none
+aarch64 / Mac OS X, and the file holds **25 rules and 170 per-benchmark ratchets, all enforced, none
 reported-only**; `op-counts.json` holds **8 pairs × 20 leaves = 160**, no `TBD`. Verified independently
 in the container on 2026-08-03: `0 breaches; 245 gated, 0 EXCLUDED; 245 arms`, 21 m 23 s.
 
@@ -533,8 +546,8 @@ un-gate itself.
 
 Each rule carries two numbers, and the difference is the point:
 
-- `targetBytesPerOp` — the **policy**. What `reference/performance.md` says the number should be once
-  the work has landed. **Never edit this to make a build green.**
+- `targetBytesPerOp` — the **policy**. What the number should be once the optimisation work the
+  rule's `why` describes has landed. **Never edit this to make a build green.**
 - `maxBytesPerOp` — the **ratchet**. What the number actually is today. The gate fails on exceeding
   *this*. It may only ever go down.
 
@@ -678,8 +691,8 @@ number cannot be told apart from a different starting point.
 entry per line specifically so that the diff is readable: a Tier 2 refresh should be a small number
 of changed integers, and if it is not, something larger happened than the commit claims.
 
-**A falling op count is the expected, correct outcome** of a `reference/numerics.md` rewrite —
-closed forms replacing Newton loops. Say so in the commit message. **A rising count is an extra
+**A falling op count is the expected, correct outcome** of a numerics rewrite — closed forms
+replacing Newton loops. Say so in the commit message. **A rising count is an extra
 iteration, a reintroduced `pow`, or a lost fast path**, and it is not noise: there is no noise in
 this measurement.
 
@@ -740,7 +753,7 @@ this measurement.
 >   breaches. That is the cost, visible in the gate's own output rather than inferred.
 >
 > The claim that only two Tier 1 rules could reject anything was true of the all-`TBD` state and is
-> no longer true: **171 enforced per-benchmark ratchets are live** (153 when this was written, before
+> no longer true: **170 enforced per-benchmark ratchets are live** (153 when this was written, before
 > the bulk arms rejoined and `crs-parse` was re-gated). Nothing is reported-only any more, so the
 > "coverage loss shows up in the same run" bullet above describes a state that no longer exists —
 > those nine arms would now be **breaches**, which is what it said should eventually happen.
@@ -794,6 +807,7 @@ rather than asserting it.
 
 ## Root pom wiring
 
-This module is added by a profile, never to the default `<modules>`. The exact snippet is in this
-module's git history and in the task report; it consists of a `<module>benchmark</module>` inside a
-`bench` profile's `<modules>`.
+This module is added by a profile, never to the default `<modules>`. The wiring is a
+`<module>benchmark</module>` inside the root pom's `bench` profile — see the `<id>bench</id>`
+profile in `pom.xml`. Keep it there: putting this module in the default `<modules>` would pull JMH
+into every build and put a `<release>17</release>` module in the published reactor.

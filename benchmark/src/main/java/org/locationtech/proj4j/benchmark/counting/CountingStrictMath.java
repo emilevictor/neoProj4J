@@ -32,10 +32,10 @@ import org.locationtech.proj4j.benchmark.counting.OpCounters.Op;
  *
  * <p>The counted methods delegate to {@code StrictMath}. The <b>uncounted</b> ones delegate to
  * {@code Math}, deliberately: {@code abs}, {@code floor}, {@code ceil}, {@code rint},
- * {@code copySign}, {@code max}, {@code min} and {@code sqrt} are exactly-rounded and therefore
- * bit-identical between the two ({@code reference/numerics.md}, "Guaranteed bit-reproducible
- * everywhere"), and routing them through {@code Math} avoids depending on which JDK version added
- * which {@code StrictMath} overload.
+ * {@code copySign}, {@code max}, {@code min} and {@code sqrt} are exactly rounded, so they are
+ * bit-identical between {@code Math} and {@code StrictMath} on every JVM and are not part of the
+ * determinism question at all. Routing them through {@code Math} avoids depending on which JDK
+ * version added which {@code StrictMath} overload.
  *
  * <p>{@code sqrt} is an exception to that rule: it is exact, so its <i>value</i> is delegated to
  * {@code Math}, but it is still <b>counted</b>, because a change in the number of square roots per

@@ -68,7 +68,7 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- JUnit 5. The conformance runner needs @TestFactory: 8017 assertions cannot be modelled
+        <!-- JUnit 5. The conformance runner needs @TestFactory: 7923 assertions cannot be modelled
              as static @Test methods, and JUnit 4's Parameterized gives useless failure names.
              junit-vintage is NOT needed here - this module has no JUnit 4 tests. core/ keeps
              JUnit 4 untouched. -->
@@ -134,7 +134,7 @@
     <profiles>
         <profile>
             <!-- mvn -Pconformance verify
-                 Runs the full 8017-assertion corpus sweep and diffs it against the checked-in
+                 Runs the full 7923-assertion corpus sweep and diffs it against the checked-in
                  expected-outcome manifest.
 
                  mvn -Pconformance verify -Dgie.regenerate=true

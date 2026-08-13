@@ -57,12 +57,15 @@ import org.openjdk.jmh.annotations.Warmup;
  * <b>Do not quote {@code noGridHit} as the cost of a grid shift.</b> When real CONUS grids ship, add
  * a NAD27-to-NAD83 CONUS arm and this comment becomes wrong - fix it then.
  *
- * <p><b>Tier 1 pins {@link #inverseShift} at 0 B/op</b>, and it is the sharpest allocation target in
- * the library: {@code performance.md} measures the inverse grid-shift path at <b>up to 49
- * allocations per vertex</b>, which is 4.9 million objects for one 100,000-vertex geometry. Two
- * distinct causes, both fixable without touching the arithmetic: {@code Grid.shift} iterating a
- * {@code List} field with a for-each ({@code Grid.java:89}), and {@code nad_cvt}/{@code nad_intr}
- * returning fresh {@code PolarCoordinate} objects per trip of a {@code MAX_TRY = 9} loop.
+ * <p><b>Tier 1 pins {@link #inverseShift} at 0 B/op</b>, and it was the sharpest allocation target
+ * in the library: <b>160 B/op, now 0</b>, recorded in the {@code gridshift-inverse-zero} rule of
+ * {@code allocation-baseline.json}. Two causes, both removed without touching the arithmetic:
+ * {@code Grid.shift} iterated a {@code List} field with a for-each, and {@code nad_cvt}/
+ * {@code nad_intr} returned fresh {@code PolarCoordinate} objects per trip of a
+ * {@code MAX_TRY = 9} loop. {@code Grid.shift} now uses an indexed loop with a {@code Grid[]}
+ * overload for the bulk path, and every intermediate is a local {@code double} written into the
+ * caller's own {@code ProjCoordinate}. The zero is asserted outside JMH as well, by
+ * {@code datum.GridShiftRewriteTest#theShiftPathAllocatesNothing}.
  *
  * <p>{@link #inverseShift} is also the only arm here whose cost is genuinely data-dependent: the
  * inverse is a fixed-point iteration bounded at {@code MAX_TRY = 9} with {@code TOL = 1e-12}, so its
@@ -172,15 +175,17 @@ public class GridShiftBenchmark {
      * that reframes what its number means. It used to be the floor - dispatch overhead and nothing
      * else. {@code Grid.shift} now raises {@code CrsTransformException} on a miss (correctly: a
      * failure must never be expressed as a plausible coordinate), so what is timed here is dispatch
-     * plus exception construction, and {@code reference/performance.md} prices a
-     * {@code fillInStackTrace} at <b>1-10 microseconds</b> - two to three orders above the dispatch
-     * it was meant to isolate.
+     * plus exception construction.
      *
-     * <p>That makes this the direct measurement of performance.md's sharpest rule ("No exceptions on
-     * the hot path"), and the number to watch when {@code Proj4jException.fillInStackTrace} is
-     * overridden to return {@code this}. <b>Its Tier 1 rule still carries {@code targetBytesPerOp:
-     * 0}, which is now the target for the errno-style rewrite rather than a description of the
-     * current path</b>; expect the ratchet to sit far above it until that lands.
+     * <p>That makes this the direct measurement of the project's rule that refusing a point must not
+     * cost more than transforming one. This arm is where the cost of a refusal is priced, and it is
+     * the measurement {@code Proj4jException.fillInStackTrace} cites: it was 1,440 B/op and 585 ns
+     * per refusal, and overriding {@code fillInStackTrace} to return {@code this} unless
+     * {@code -Dproj4j.exceptions.stackTraces=true} removed 864 of those bytes. <b>Its Tier 1 rule
+     * still carries {@code targetBytesPerOp: 0} against a ratchet of 576</b>; the remaining 576 is
+     * the message, not the exception - {@code outsideGrid} builds a {@code StringBuilder}, two
+     * {@code Double.toString} results and the grid-name list on a path that fires once per point
+     * outside the declared coverage. See the {@code gridshift-dispatch-zero} rule.
      */
     @Benchmark
     public ProjCoordinate noGridHit() {

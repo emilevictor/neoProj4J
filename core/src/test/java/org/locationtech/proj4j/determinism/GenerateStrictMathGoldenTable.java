@@ -32,7 +32,10 @@ import java.io.Writer;
  * on it. Regeneration procedure, in full:
  *
  * <pre>
- * mvn -B -Dmaven.repo.local=/tmp/m2-det -pl core -am install -DskipTests -Dmaven.javadoc.skip=true
+ * mvn -B -pl core -am install -DskipTests -Dmaven.javadoc.skip=true
+ *   # -am is required: the root pom sets maven.install.skip=true, so -pl core alone has nothing
+ *   # to resolve its reactor dependencies from. Add -Dmaven.repo.local=&lt;dir&gt; if another Maven
+ *   # build may run at the same time.
  * java -cp core/target/classes:core/target/test-classes \
  *      org.locationtech.proj4j.determinism.GenerateStrictMathGoldenTable \
  *      core/src/test/resources/org/locationtech/proj4j/determinism/strictmath-golden.tsv

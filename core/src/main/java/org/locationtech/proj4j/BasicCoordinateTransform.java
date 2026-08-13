@@ -110,8 +110,8 @@ public class BasicCoordinateTransform implements CoordinateTransform, BulkCoordi
     private final boolean srcInverseAvailable;
 
     // ------------------------------------------------------------------------------------------
-    // Hoisted invariants: everything reference/performance.md's cost table lists as recomputed
-    // per point although constant for the transform's lifetime. Read by the bulk path only, so
+    // Hoisted invariants: values the per-point path re-derived on every point although they are
+    // constant for the transform's lifetime. Read by the bulk path only, so
     // the single-point path stays byte-for-byte the 1.4.3 body plus its fail-closed checks.
     //
     // Hoisting is arithmetically neutral: each field below is the value of a *pure predicate or

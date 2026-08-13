@@ -32,7 +32,7 @@ import java.util.List;
  * <h2>{@code *.gie.failing} is excluded</h2>
  *
  * <p>Ten GIGS files are quarantined upstream with a {@code .failing} suffix and are not part of the
- * 8,017-assertion metric. The glob {@code *.gie} excludes them by construction rather than by a
+ * 7,923-assertion metric. The glob {@code *.gie} excludes them by construction rather than by a
  * filter, so there is no predicate to get backwards. Nine of the ten fail for a lexical reason
  * (missing {@code \} continuations, so their {@code +step} lines are swallowed as comments) and one,
  * {@code 5110}, is a genuine numerical failure; none of that is this class's problem, but running them

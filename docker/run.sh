@@ -14,29 +14,37 @@
 #
 #     check         mirrors                              expected today
 #     ------------  -----------------------------------  ------------------------------------------
-#     ci            ci.yaml   job build-and-test          FAILS on MetaCRSTest only (see below)
+#     ci            ci.yaml   job build-and-test          passes; core 2,141 tests, 0 skipped
 #     conformance   conformance.yaml  job corpus          passes, 7441/7900, regressed 0
-#     golden        golden.yaml       job golden          FAILS on ~2,291 UNEXPLAINED rows
+#     golden        golden.yaml       job golden          FAILS on 2,291 UNEXPLAINED rows
 #     determinism   determinism.yaml  job bits (one leg)  passes, 22 tests
-#     bench         bench.yaml        job gate            passes; OPT-IN, ~16 min, needs a quiet box
+#     bench         bench.yaml        job gate            passes; OPT-IN, ~21 min, needs a quiet box
 #
-# TWO OF THESE ARE EXPECTED TO FAIL, AND THE SUMMARY SAYS WHICH AND WHY. They are reported as
+# ONE OF THESE IS EXPECTED TO FAIL, AND THE SUMMARY SAYS WHICH AND WHY. It is reported as
 # EXPECTED-FAIL, not as PASS: the check really did fail, and the run prints its measured numbers.
-# The expectation is not hardcoded to a verdict either - each is re-derived from the run:
+# The expectation is not hardcoded to a verdict either - it is re-derived from the run:
 #
-#   * ci is EXPECTED-FAIL only while the ONLY failing class is MetaCRSTest, whose input
-#     (epsg/src/main/resources/proj4/proj4-epsg.csv) is stale and is being regenerated. If ci goes
-#     green the summary says so. If anything ELSE fails, it is an unexpected failure and the run
-#     exits non-zero. Neither outcome is baked in.
 #   * golden is EXPECTED-FAIL only while its failure is UNEXPLAINED rows and nothing else. A
 #     COUNT_MISMATCH, DEAD_RULE, EXPIRED_RULE or PENDING_RULE_FIRED is a real failure and is
-#     reported as one, because those mean the rule set has stopped describing the tree.
+#     reported as one, because those mean the rule set has stopped describing the tree. A green
+#     golden is not the goal and is not what this script waits for. The criterion is that the six
+#     figures in the REPORT are unchanged -- but read that as an instruction to you, not a claim
+#     about automation: nothing diffs the produced report against the pinned expectation, so the
+#     comparison is by eye. The test is already red, so its pass/fail bit says nothing about a
+#     change; the counts are the whole signal. See task #104.
+#   * ci used to be expected to fail too, on MetaCRSTest alone, while that test's CSV input was
+#     being regenerated. The regeneration landed and ci is green. The XFAIL branch in check_ci is
+#     left in place because it derives the expectation from the run rather than asserting it: if
+#     MetaCRSTest ever goes red again on its own, the branch explains it instead of the run simply
+#     going red with no account of why. If anything ELSE fails, that is an unexpected failure and
+#     the run exits non-zero.
 #
 # TRAPS THIS SCRIPT IS WRITTEN AGAINST. Each of these has produced a false green on this project:
 #
 #   1. -Dmaven.test.failure.ignore=true forces exit 0. It appears nowhere here. When the exit code
-#      IS the measurement it cannot be used, and getting past core's expected MetaCRSTest failure
-#      is done with -Dtest= narrowing instead, exactly as the workflows do.
+#      IS the measurement it cannot be used. Where a check needs `-am` to build core without core's
+#      own suite being able to stop the reactor, that is done with -Dtest= narrowing instead,
+#      exactly as the workflows do.
 #   2. Surefire's single `*` does not cross a package separator. The conformance tests live in
 #      sub-packages (bridge/ manifest/ parse/ report/ runner/) and need `**`; golden's and
 #      determinism's are flat and use `*`. A pattern that matches nothing prints BUILD SUCCESS.
@@ -72,7 +80,7 @@ Checks (default: all)
   conformance     the PROJ 9.8.1 gie/GIGS corpus sweep     - mirrors conformance.yaml/corpus
   golden          the 53,430-row behavioural sweep         - mirrors golden.yaml/golden
   determinism     the raw-bit StrictMath golden, one leg   - mirrors determinism.yaml/bits
-  bench           the Tier 1/2 performance gate            - mirrors bench.yaml/gate  [~16 min]
+  bench           the Tier 1/2 performance gate            - mirrors bench.yaml/gate  [~21 min]
 
 Options
   --strict              an EXPECTED failure also exits non-zero
@@ -90,7 +98,7 @@ Options
 Examples
   ./docker/run.sh                            # the four default checks
   ./docker/run.sh conformance                # one check
-  ./docker/run.sh bench                      # the opt-in 16-minute gate
+  ./docker/run.sh bench                      # the opt-in 21-minute gate
   ./docker/run.sh conformance --break-conformance   # positive control: must exit 1
   ./docker/run.sh --reset-cache              # prove the result does not depend on a warm cache
 EOF
@@ -149,9 +157,11 @@ if [ -z "${PROJ4J_IN_CONTAINER:-}" ]; then
     trap 'rm -rf "$CTX"' EXIT
     cp "$HERE/Dockerfile" "$CTX/Dockerfile"
 
-    # This host is behind a TLS-intercepting firewall, so both curl and the JVM need its root CA or
-    # nothing downloads. On a machine without one - or on a real runner - the file stays empty and
-    # the Dockerfile's CA stage is a no-op, which is the case worth keeping working.
+    # On a host behind a TLS-intercepting proxy, both curl and the JVM need that proxy's root CA or
+    # nothing downloads; point PROJ4J_DOCKER_CA at the bundle (or set SSL_CERT_FILE /
+    # REQUESTS_CA_BUNDLE, which the loop below also honours). On a host without one - or on a real
+    # runner - the file stays empty and the Dockerfile's CA stage is a no-op, which is the case
+    # worth keeping working.
     CA=""
     for cand in "${PROJ4J_DOCKER_CA:-}" "${SSL_CERT_FILE:-}" "${REQUESTS_CA_BUNDLE:-}" \
                 /etc/ssl/certs/ca-bundle.crt; do
@@ -167,7 +177,7 @@ if [ -z "${PROJ4J_IN_CONTAINER:-}" ]; then
     echo "==> building $IMAGE"
     # `${arr[@]+"${arr[@]}"}` rather than `"${arr[@]}"`, throughout the host half of this script:
     # macOS ships bash 3.2, where expanding an EMPTY array under `set -u` is an "unbound variable"
-    # error. bash 4.4 fixed it; the host this was written for has not.
+    # error. bash 4.4 fixed it, but the host half of this script has to keep working on 3.2.
     docker build ${BUILD_FLAGS[@]+"${BUILD_FLAGS[@]}"} -t "$IMAGE" -f "$CTX/Dockerfile" "$CTX" || exit 2
 
     RUN_FLAGS=(--rm -v "$REPO_ROOT:/src:ro" -v "$VOLUME:/root/.m2" -v "$OUT:/out")
@@ -299,7 +309,15 @@ break_conformance() {
 # =====================================================================================
 # CHECK: ci   -- mirrors .github/workflows/ci.yaml, job build-and-test
 # =====================================================================================
-CI_MIN_TESTS=1700          # measured 1,735 in `core` alone on 2026-08-01
+# A FLOOR, NOT AN EXPECTED COUNT. The reading it guards is 2,573 tests - core 2,141, conformance 345
+# (its unit tests; the corpus sweep is behind -Pconformance and does not run here), db 75, geoapi
+# 12, and no test sources in epsg or grids-us-legacy. On a warm tree none of those are skipped; in
+# this container they are a clean first build, so NoGeoApiInCoreTest's two Assumes fire and the
+# runner reports 2 skips. That is a skip, not a pass, which is why it is printed. 1,700 is well below
+# that so ordinary additions do not have to touch this line. It is also, by the same token, 873
+# below reality, so it would no longer catch a whole module dropping out of the reactor; raising it
+# is a change to what the harness asserts and belongs in its own commit, not in a docs pass.
+CI_MIN_TESTS=1700
 check_ci() {
     hdr "ci  -- mvn -B -ntp clean install   (ci.yaml / build-and-test)"
     cd "$WORK" || return 2
@@ -348,17 +366,18 @@ check_ci() {
 
     if [ "$rc" -eq 0 ]; then
         say ""
-        say "ci is GREEN. It was expected to fail on MetaCRSTest, whose input"
-        say "epsg/src/main/resources/proj4/proj4-epsg.csv was stale and was being regenerated."
-        say "If that regeneration has landed, this is the intended new state - not a fluke."
+        say "ci is GREEN, which is the expected state. It used to be an expected FAILURE on"
+        say "MetaCRSTest, whose input core/src/test/resources/proj4-epsg.csv was mid-regeneration."
+        say "That regeneration landed and MetaCRSTest now passes 9 of 9, so green is the norm here"
+        say "and a red MetaCRSTest would be a real finding rather than a known one."
         record ci PASS "$ran tests, 0 failures" \
-            "green; the MetaCRSTest expectation no longer applies (proj4-epsg.csv looks regenerated)"
+            "green, as expected; the old MetaCRSTest expectation no longer applies"
         return
     fi
 
     if [ "$offenders" = "org.locationtech.proj4j.MetaCRSTest" ]; then
         record ci XFAIL "$ran tests, $((fails + errs)) failure(s) - MetaCRSTest only" \
-            "EXPECTED: MetaCRSTest reads epsg/src/main/resources/proj4/proj4-epsg.csv, which is stale and is being regenerated. It is the only failing class, so nothing else regressed."
+            "ISOLATED: MetaCRSTest is the only failing class, so nothing else regressed. This is no longer an expected failure - it reads core/src/test/resources/proj4-epsg.csv, which was stale while that file was being regenerated, and since the regeneration landed the test passes 9 of 9. Treat a red MetaCRSTest as a finding about that CSV and investigate it; this branch exists to name the cause, not to excuse it."
     elif [ -z "$offenders" ]; then
         # A reactor failure with every test green is the interesting case: something in the build
         # itself broke, and while `core` was red nobody could see it because the reactor stopped
@@ -372,7 +391,7 @@ check_ci() {
             "the build failed with no failing test - a compile, plugin or packaging error. All $ran tests passed, so this is a build problem, not a behavioural one."
     else
         record ci FAIL "$ran tests, $((fails + errs)) failure(s) in: $offenders" \
-            "classes other than MetaCRSTest failed; only MetaCRSTest is expected to"
+            "ci is expected to be fully green, so every class listed above is a real failure"
     fi
 }
 
@@ -598,7 +617,9 @@ check_golden() {
     say "Non-vacuity satisfied: the gate ran, over the full $want-line table, with no skips."
 
     # ---- classify the failure ----------------------------------------------------------
-    # 41 rules, all with a pinned expected_rows, is the state the backlog is being worked against.
+    # 44 rules, all `status: active` and all with a pinned expected_rows, is the state the backlog
+    # is being worked against. The count is read from the file below rather than trusted from this
+    # comment - it has been written down as 38, 41 and 42 at various points and was wrong each time.
     local rules pinned
     rules=$(grep -cE '^  - id:' golden/rules.yaml)
     pinned=$(grep -cE '^    expected_rows: [0-9]+' golden/rules.yaml)
@@ -747,7 +768,7 @@ check_bench() {
     cd "$WORK" || return 2
     rm -f benchmark/target/jmh-result.json
 
-    say "This is the slow one: ~16 minutes, and it wants a quiet machine. It is deliberately NOT"
+    say "This is the slow one: ~21 minutes, and it wants a quiet machine. It is deliberately NOT"
     say "part of the default run. JMH measures bytes/op, which is a bytecode property and is"
     say "robust to a busy box - but the run still takes real wall-clock, and a container competing"
     say "for CPU with a browser will take longer, not lie."
@@ -886,7 +907,7 @@ summary() {
         esac
     done
 
-    # The "why" column is the whole point of the two expected failures. Printed in full, below the
+    # The "why" column is the whole point of an expected failure. Printed in full, below the
     # table, so a red line is never just red.
     if [ "$nxfail" -gt 0 ] || [ "$nfail" -gt 0 ] || [ "$npass" -gt 0 ]; then
         printf '\n'

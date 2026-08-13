@@ -35,13 +35,13 @@ import org.openjdk.jmh.annotations.Warmup;
 /**
  * CRS creation cost, <b>parameterised by position in the init file</b>.
  *
- * <p>This is not an arbitrary parameterisation. {@code Proj4FileReader.readParametersFromFile}
- * ({@code :35-56}) opens the classpath resource and linearly tokenises the <b>888 KB</b>
- * {@code proj4/nad/epsg} file with a {@code StreamTokenizer} <b>on every single call</b>
- * ({@code :76-90}), allocating per entry scanned. So the cost of creating a CRS is a function of how
- * far down the file its code happens to sit, and a benchmark that only measured
- * {@code EPSG:4326} - which sits at line 498 of 11,731, in the first 4% - would report roughly a
- * twentieth of the worst case and would be blind to the entire problem.
+ * <p>This is not an arbitrary parameterisation. {@code Proj4FileReader} used to open the classpath
+ * resource and linearly tokenise the <b>888 KB</b> {@code proj4/nad/epsg} file with a
+ * {@code StreamTokenizer} <b>on every single call</b>, allocating per entry scanned, so the cost of
+ * creating a CRS was a function of how far down the file its code happened to sit. A benchmark that
+ * only measured {@code EPSG:4326} - which sits in the first 4% of the file - would have reported a
+ * small fraction of the worst case and been blind to the entire problem. That is why the parameter
+ * exists, and it is why the parameter has to stay now that the cost is flat.
  *
  * <p>The three parameter values are the file's actual first, middle and last entries, measured on
  * the checked-in {@code epsg} file (5,755 entries, 11,731 lines):
@@ -50,10 +50,11 @@ import org.openjdk.jmh.annotations.Warmup;
  *   <li>{@code MIDDLE} - {@code EPSG:5937}, line 5,855, entry 2,878 of 5,755.</li>
  *   <li>{@code LATE} - {@code EPSG:9054}, line 11,732, the very last entry.</li>
  * </ul>
- * The expected shape is a near-linear ramp from EARLY to LATE. <b>If the ramp flattens, the fix
- * landed</b> - parsing each init file once into a {@code Map<String,String[]>} (~5,755 entries at
- * ~120 B, about 1 MB) is what {@code reference/performance.md} prescribes. Keep these three
- * parameters afterwards: the flat ramp is the evidence.
+ * The expected shape was a near-linear ramp from EARLY to LATE. <b>The ramp is gone: the fix
+ * landed.</b> {@code io/InitFileCache} parses each init file once into a map, and
+ * {@code createFromName} now reads 2,480 / 2,872 / 1,136 B/op across the three positions - see the
+ * {@code crs-parse} rule in {@code allocation-baseline.json}, which records the before and after.
+ * Keep all three parameters: the flat ramp is the evidence that it stays fixed.
  *
  * <p>If the {@code epsg} file is regenerated the line numbers above move. The codes are still valid
  * subjects, but re-derive the positions before quoting them, and update this comment - a stale

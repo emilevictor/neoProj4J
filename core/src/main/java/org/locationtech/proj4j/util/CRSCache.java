@@ -74,8 +74,8 @@ import java.util.concurrent.atomic.AtomicLong;
  *       rethrown, exactly as before - so a stream of unresolvable names cannot grow the cache at
  *       all, and a caller sees the same exception it would have seen from {@code CRSFactory}.</li>
  *   <li><b>A successful {@code null} from {@code readEpsgFromParameters} now <em>is</em>
- *       memoised.</b> A record correction goes with this: {@code reference/performance.md} said
- *       this class "memoises null on IOException". <b>It did not.</b> {@code computeIfAbsent}
+ *       memoised.</b> It was not before, despite the {@code computeIfAbsent} call reading as
+ *       though it were: {@code computeIfAbsent}
  *       installs no mapping when the function returns {@code null}, so both a genuine "no such
  *       code" and an {@code IOException} simply re-ran the full dictionary scan on every call. A
  *       genuine {@code null} is a stable property of an immutable classpath dictionary and is now

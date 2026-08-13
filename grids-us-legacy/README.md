@@ -1,6 +1,7 @@
 # proj4j-grids-us-legacy
 
-The interim US datum-shift grid pack. **1,318,352 bytes unpacked**, ~1.13 MiB as a jar. Resources only:
+The interim US datum-shift grid pack. **1,318,365 bytes unpacked** (264,424 + 1,053,928 + 13),
+~1.13 MiB as a jar. Resources only:
 no code, no dependencies, nothing to compile.
 
 > ## ⚠️ This pack now adds only `alaska`
@@ -14,8 +15,8 @@ no code, no dependencies, nothing to compile.
 > upstream blob (`44b4900f`, SHA-256 `504d184f…`), so adding this pack changes no CONUS answer; it
 > costs 1,053,928 further bytes to extend coverage to Alaska. Decide on that basis.
 >
-> The two copies live at **different resource paths on purpose** — `proj4/nad/conus` here,
-> `proj4j-data/grids/conus` there — so the two jars never collide. That matters most for `INDEX`:
+> The two copies live at **different resource paths on purpose** — `proj4j-data/grids/conus` here,
+> `proj4/nad/conus` in `proj4j-epsg` — so the two jars never collide. That matters most for `INDEX`:
 > `ClasspathResourceResolver.loadIndex()` reads it with `ClassLoader.getResource`, which returns the
 > **first** match only, so two artifacts publishing `/proj4j-data/grids/INDEX` would make
 > `Proj.availableGrids()` depend on classpath order. This pack keeps sole ownership of that prefix.
@@ -80,19 +81,11 @@ copy of `conus`.
 (1,400,000 B). A data bump that blows the budget is a build failure here rather than a surprise in a
 downstream container image.
 
-## Not in the reactor
+## In the reactor, and published
 
-This module is deliberately **not** listed in the root `pom.xml` `<modules>` yet. Add it with:
+This module is listed in the root `pom.xml` `<modules>` and is published, unlike `conformance`,
+`golden` and `benchmark`. A plain `mvn install` builds it.
 
-```xml
-<modules>
-    <module>core</module>
-    <module>epsg</module>
-    <module>geoapi</module>
-    <module>grids-us-legacy</module>
-    <module>conformance</module>
-</modules>
-```
-
-Note the root pom sets `maven.install.skip=true`, so inter-module dependencies resolve from the reactor
-and builds must always pass `-am`.
+The root pom sets `maven.install.skip=true`, so nothing this build produces lands in your local
+repository and inter-module dependencies can only resolve from the reactor. Any `-pl <module>`
+command must therefore also pass `-am`, or it fails to resolve `proj4j`.

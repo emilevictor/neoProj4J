@@ -39,8 +39,9 @@ import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Warmup;
 
 /**
- * Head-to-head for every row of {@code reference/numerics.md}'s ranked-changes table that has both
- * an old and a new implementation in the tree.
+ * Head-to-head for every numerical routine that has both an old and a new implementation in the
+ * tree: the {@code @Deprecated} solver in {@code ProjectionMath} against the Karney-series
+ * replacement in {@code util}.
  *
  * <p>The pairing is the point. Each {@code legacy*} method calls the {@code @Deprecated} routine in
  * {@code ProjectionMath}; each {@code karney*} method calls the {@code AuxLat}/{@code Clenshaw6}
@@ -50,8 +51,8 @@ import org.openjdk.jmh.annotations.Warmup;
  *
  * <p>The legacy routines are deprecated, not deleted, precisely so this comparison can exist. When
  * the last caller of one of them is gone, keep the {@code legacy*} arm here and add a comment - the
- * ratio is the evidence for a claim in the skill, and deleting the baseline arm makes the claim
- * unverifiable.
+ * ratio is the only evidence that the replacement was not a slowdown, and deleting the baseline arm
+ * makes that unverifiable for good.
  *
  * <p>Parameterised over latitude because several of these are ill-conditioned in a specific regime:
  * {@code tsfn} loses relative precision near the pole, {@code phi2}'s {@code pow}-bearing loop trip
@@ -128,7 +129,7 @@ public class SolverBenchmark {
     }
 
     // ============================================================================================
-    // numerics.md row 2: MeridianArc replaces enfn/mlfn/inv_mlfn.
+    // MeridianArc replaces enfn/mlfn/inv_mlfn.
     // Forward: series vs series, expect near parity. Inverse: closed form vs a 10-step Newton loop
     // that calls sin, cos, mlfn and sqrt per trip, so expect the largest ratio in this class.
     // ============================================================================================
@@ -154,7 +155,7 @@ public class SolverBenchmark {
     }
 
     // ============================================================================================
-    // numerics.md row 3: ConformalLat.phi2 replaces ProjectionMath.phi2.
+    // ConformalLat.phi2 replaces ProjectionMath.phi2.
     // Legacy is a pow-bearing fixed-point loop; the replacement is at most two sqrt/sinh steps.
     // ============================================================================================
 
@@ -169,7 +170,7 @@ public class SolverBenchmark {
     }
 
     // ============================================================================================
-    // numerics.md row 5: tsfn rewrite. tan + pow becomes exp + log1p.
+    // The tsfn rewrite: tan + pow becomes exp + log1p.
     // ============================================================================================
 
     @Benchmark
@@ -189,9 +190,10 @@ public class SolverBenchmark {
     }
 
     // ============================================================================================
-    // numerics.md row 4: AuthalicLat replaces authset/authlat. The largest visible accuracy delta
-    // in the whole table (up to 1.6 mm on laea/aea/cea/eqearth/nzmg), so the speed result matters
-    // less here than knowing it is not a regression.
+    // AuthalicLat replaces authset/authlat. The largest accuracy win of the set: the third-order
+    // legacy series is 1.58 mm off at latitude 20.8 on GRS80, against a 0.1 mm bar, and it moves
+    // laea, aea, cea, eqearth, healpix and nzmg - see AuthalicLat's javadoc. So the speed result
+    // matters less here than knowing it is not a regression.
     // ============================================================================================
 
     @Benchmark
@@ -215,9 +217,9 @@ public class SolverBenchmark {
     }
 
     // ============================================================================================
-    // numerics.md row 14: purge Math.hypot. Kept here as well as in MathDispatchBenchmark because
-    // MathHelpers.norm2 is the specific replacement core calls, and its cost relative to the
-    // solvers above is what decides whether row 14 is worth doing at a given site.
+    // Purging Math.hypot. Kept here as well as in MathDispatchBenchmark because MathHelpers.norm2
+    // is the specific replacement core calls, and its cost relative to the solvers above is what
+    // decides whether the substitution is worth making at a given site.
     // ============================================================================================
 
     @Benchmark

@@ -56,11 +56,11 @@ import org.locationtech.proj4j.spi.ProjDatabase;
  *
  * <h2>Every row here is real, and here is how to re-verify it</h2>
  *
- * <p>Not one number below was invented or copied from Proj4J's own output. Each was read out of the
- * Homebrew {@code proj 9.8.1} database and can be re-read:
+ * <p>Not one number below was invented or copied from Proj4J's own output. Each was read out of a
+ * local {@code proj 9.8.1} install's database and can be re-read:
  *
  * <pre>
- * sqlite3 /opt/homebrew/share/proj/proj.db \
+ * sqlite3 &lt;your PROJ 9.8.1 share/proj&gt;/proj.db \
  *   "select code,name,method_name,accuracy,grid_name,grid2_name from grid_transformation
  *     where source_crs_code='4267' and target_crs_code='4269';"
  * </pre>

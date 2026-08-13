@@ -31,12 +31,15 @@ import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Warmup;
 
 /**
- * Quantifies the cost of {@code reference/numerics.md}'s {@code Math} vs {@code StrictMath} policy.
- * This benchmark exists <b>solely</b> to put a number on row 13 of that file's ranked-changes table,
- * which is the one change whose speed effect is a deliberate loss:
+ * Quantifies the cost of this project's {@code Math} vs {@code StrictMath} policy.
  *
- * <blockquote>13 | {@code StrictMath} policy + {@code strictfp} | none | <b>-1.5-3x on the 7
- * intrinsics</b> | yes, &lt;= 1 ulp - but this is what delivers determinism</blockquote>
+ * <p><b>The policy.</b> Where a result must be reproducible across architectures and JVMs, core uses
+ * {@code StrictMath} - or {@link org.locationtech.proj4j.util.FastStrictTrig}, which is bit-identical
+ * to it and allocates nothing - rather than {@code Math}. That is a deliberate loss of speed bought
+ * for determinism, and it is the only decision in the library whose expected effect on a timing is
+ * negative. This benchmark exists <b>solely</b> to put a number on that loss, so the trade is argued
+ * from a measurement rather than from a remembered figure. No ns/op for it is recorded anywhere in
+ * this repository (see {@code GateChecker}: Tier 3 is deliberately not stored), so quote a run.
  *
  * <p><b>THE CAVEAT THAT MAKES OR BREAKS THIS BENCHMARK: it must be run on both x86-64 and AArch64.</b>
  * The entire {@code StrictMath} question is about <i>cross-architecture divergence</i>. HotSpot ships
@@ -46,7 +49,7 @@ import org.openjdk.jmh.annotations.Warmup;
  * from one architecture presented as "the cost of StrictMath" is a wrong answer, not an incomplete
  * one.
  *
- * <p>Three groups, matching the policy table exactly:
+ * <p>Three groups, and the arms are grouped by how the policy treats them:
  * <ul>
  *   <li><b>Intrinsified</b> - {@code sin cos tan exp log log10 pow}. These are the ones that
  *       actually vary and the ones the policy switches to {@code StrictMath}. The

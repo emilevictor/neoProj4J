@@ -125,9 +125,32 @@ inconsistent with the tree it describes.
 
 An earlier draft of this review described the gate as "golden byte-identical to the baseline." That
 was wrong, and the correction matters. `golden` compares the tree against **released 1.4.3**, so
-41420 of 53430 rows legitimately differ — 39129 of them claimed by a rule as intended. The workable
-gate is that **the golden report is unchanged between the branch point and the change**, not that it
-is empty.
+41,425 of 53,430 rows legitimately differ — 39,134 of them claimed by a rule as intended. The
+workable gate is that **the golden report is unchanged between the branch point and the change**,
+not that it is empty.
+
+**A second correction, and this one is a gap rather than a wording slip.** Saying the report "is
+gated" overstates what is automated, and the phrasing came from `golden.yaml`'s own header comment,
+so it had spread to `docker/run.sh` and `golden/README.md` before it was caught. What the code
+actually does:
+
+- `GoldenMasterTest` fails on **any** UNEXPLAINED row, and on `DEAD_RULE`, `PENDING_RULE_FIRED`,
+  `EXPIRED_RULE` or `COUNT_MISMATCH` (`GoldenMasterTest.java:30`).
+- `golden.yaml`'s non-vacuity step asserts that the test existed, ran exactly once, was not skipped,
+  that at least 40 tests ran in the module with none skipped, and that the generated table has the
+  **same line count** as the committed baseline.
+- The six-figure report line appears in the failure message, and the expected value is pinned as
+  **prose** in `golden.yaml` and in `golden/README.md`.
+
+Nothing compares the produced report against that pinned line. A person does, by reading the job
+output.
+
+That matters more than it sounds, because **the test's pass/fail signal is saturated**. It already
+fails, so a change that adds an unexplained row does not flip it — it fails before and after. All
+the information is in the counts, and the counts are checked by eye. The line-count assertion
+catches a truncated sweep, and the rule-health classifications catch a rule set that has stopped
+matching the tree, but a drift of a few hundred rows between UNCHANGED and UNEXPLAINED would pass
+every automated check in the job. Filed as #104.
 
 ## Findings
 
@@ -1053,7 +1076,7 @@ checkout. All of that is gone; the prose is class Javadoc.
 Its header also contained a stale number: it quoted a "7,845-assertion corpus" while
 `gie-corpus-index.tsv` holds 7,931 and `conformance/pom.xml:127` says 8,017 — three numbers in three
 places. The figure was dropped rather than replaced, since a fourth guess would not help. Reconciling
-the remaining three is a documentation item.
+the remaining three was left as a documentation item, and PR 5 did it — see below.
 
 ### What the test-sufficiency change added, and what it found
 
@@ -1273,6 +1296,48 @@ passes through `generate-resources`. So the repair is to the documented command 
 to the phase bindings. The index itself is sound — both verifier runs above pass against the shipped
 bytes.
 
+#### The gate was vacuous in the other direction too
+
+Fixing the phase exposed a second defect underneath, which the first had been hiding. Run the
+regeneration at a phase that works and `git diff --exit-code` **still** fails — on one line:
+
+```
+-generatedAtUtc=2026-04-11T00:00:00Z
++generatedAtUtc=2026-08-11T02:48:44Z
+```
+
+`GenerateIndex` stamps that field from `SOURCE_DATE_EPOCH`, which `db/README.md` mentions in passing
+but never tells the contributor to set. Unset, it falls back to the wall clock, so the diff is
+non-empty after every run — the proof reports "not reproducible" for a regeneration that was
+bit-perfect. The `.pjdx` index itself is unaffected and matched its pinned SHA-256 on every run.
+
+So the same gate reported "reproducible" when nothing had run, and "not reproducible" when everything
+had. Neither reading came from the data.
+
+Three phases were measured rather than reasoned about, because the obvious repair — name the phase
+the executions are bound to — does not work:
+
+| target phase | result |
+|---|---|
+| `validate` (documented) | BUILD SUCCESS, 0.5 s, nothing executed |
+| `generate-resources` | BUILD FAILURE — with `-am` the reactor has no `core` jar to resolve against at that phase, because the root POM sets `maven.install.skip` |
+| `process-classes` | works, 8.9 s |
+| `install` | works, 20.6 s, and runs the tests |
+
+The invocation that proves something, verified to exit 0 with 502,422 field comparisons passing:
+
+```
+SOURCE_DATE_EPOCH=1775865600 \
+  mvn -Pregen-db -pl db -am process-classes -Dproj.db.source=/path/to/proj.db
+git diff --exit-code
+```
+
+Fixed in PR 5, in `db/pom.xml` and `db/README.md`. Note what is *not* fixed: no workflow runs this,
+so the reproducibility of the shipped binary is still a contributor step nobody is obliged to
+perform. Making it a CI gate is a change to `.github/`, with a real cost — it needs `sqlite3` and a
+built `proj.db` on the runner — and is left as a separate decision rather than folded into a
+documentation change.
+
 ## Documentation
 
 ### Machine-specific content
@@ -1367,8 +1432,13 @@ then invoke them without the path prefix.
 
 Beyond those already listed: golden's row count is given as 53,430 everywhere and 53,431 twice at
 `docker/README.md:192` (53,430 is right — the baseline file has 53,431 *lines*, one of them a
-header); rules pinned is 41/41 at `docker/README.md:165-166` and 42/42 at three other places (42 is
-right); the `bench` runtime is "~16 min" at `docker/run.sh:21,75,750` and 21m23s everywhere else;
+header); rules pinned is 41/41 at `docker/README.md:165-166` and 42/42 at three other places, and
+**neither is right — a YAML count of `golden/rules.yaml` gives 44**, which is what
+`golden/README.md:322`, `.github/workflows/README.md:165` and `golden.yaml:27` already say. That
+last one is worth quoting, because it is the only place in the repository that treats the number as
+a thing to measure rather than remember: "this file has said 38, 41 and 42 at various points, so
+count rather than assume." The stale figures are in `CHANGELOG.md` and `docker/`; the `bench`
+runtime is "~16 min" at `docker/run.sh:21,75,750` and 21m23s everywhere else;
 `.github/workflows/README.md:6-12` retracts a claim that `:226` still makes 214 lines later;
 `docker/README.md:22` gives the default-check runtime as 1m56s warm against `:324`'s re-measured
 0m46s; and the db module's authority list is five items in `README.md:86` and six in
@@ -1387,8 +1457,39 @@ the benchmark sources' Javadoc, `benchmark/pom.xml:107`, `conformance/pom.xml`,
 This document is the first file in that directory. It does not discharge any of the 42 references,
 all of which point at other filenames.
 
+**Resolved in PR 5.** A re-scan after that PR finds **one** mention of a phantom path left in the
+tree, and it is the sentence at `conformance/pom.xml:123` that *records* the problem — "It cited
+`reference/performance.md`, which has never existed in this repository." That one is correct and
+was deliberately kept.
+
+The other 41 were not deleted wholesale, because a citation is not noise: each was carrying a claim,
+and dropping the sentence would have dropped the claim with it. Each was resolved one of three ways.
+
+- **Repointed at something real**, where the substance did exist somewhere — the `targetBytesPerOp`
+  fields and `why` prose in `allocation-baseline.json`, the `<id>bench</id>` profile in the root
+  POM, `AuthalicLat`'s Javadoc, `MathHelpers.norm2`, `core/util/FastStrictTrig`,
+  `Proj4jException.fillInStackTrace`, `benchmark.CrsPair`.
+- **Restated as project policy** with no attribution, where the claim was sound but had no source
+  and did not need one — that the counting facade is test-only, that refusing a point must not cost
+  more than transforming one.
+- **Deleted as unverifiable**, where nothing in the repository supported the figure. Five of these,
+  and they are the reason this exercise was worth doing rather than a tidy-up: "up to 49 allocations
+  per vertex" (cited at three sites, replaced by the measured 160 → 0 B/op), "prices a
+  `fillInStackTrace` at 1–10 microseconds" (replaced by this repo's own 585 ns / 1,440 B), a
+  "10–1000×" cache hit/miss ratio, "the documented 1.5–3× time" for `StrictMath`, and six
+  `numerics.md` row numbers pointing into a table nobody can read.
+
+**A dangling citation was concealing a wrong figure at least once.** `allocation-baseline.json`
+attributed the JDK's pure-Java FdLibm rewrite to **JDK 17**. It is JDK 21: through 17,
+`StrictMath.sin`/`cos`/`tan` are `native` JNI calls into compiled fdlibm and allocate nothing.
+Verified here by reflection on the build JDK — `Modifier.isNative` is `false` for all three on
+Temurin 21.0.11 — and `FastStrictTrig`'s Javadoc already documented the 21-not-17 distinction,
+including that `java.lang.FdLibm$Sin` is absent from a JDK 17 image. The citation had been standing
+in for the evidence that would have caught it.
+
 Also dangling: `docker/README.md:52` cites `epsg/src/main/resources/proj4/proj4-epsg.csv` as
-MetaCRSTest's input, which actually lives at `core/src/test/resources/proj4-epsg.csv`;
+MetaCRSTest's input, which actually lives at `core/src/test/resources/proj4-epsg.csv` — and the same
+wrong path appears in three `say`/`record` string literals at `docker/run.sh:365`, `:369` and `:374`.
 `RELEASE-NOTES.md:715` cites `conformance/NOTICE-gie.md`, which is at
 `conformance/src/test/resources/NOTICE-gie.md`.
 

@@ -4,7 +4,7 @@
     "Tier 2 baseline: transcendental calls per single transform, per CRS pair.",
     "Fully deterministic - one transform of the pinned sample point in CrsPair.",
     "Regenerate with: java -cp target/benchmarks.jar org.locationtech.proj4j.benchmark.gate.GateChecker --record",
-    "A count that DROPS is the expected outcome of a numerics.md rewrite; say so in the commit message.",
+    "A count that DROPS is the expected outcome of a deliberate numerical change; say so in the commit message.",
     "A count that RISES is an extra iteration or a reintroduced transcendental."
   ],
   "capturedAt": {

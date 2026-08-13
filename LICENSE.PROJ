@@ -3,11 +3,11 @@ PROJ license -- applies to the datum-shift grid redistributed by this project.
 Covered file:
 
   epsg/src/main/resources/proj4/nad/conus
-      packaged in the proj4j-epsg artifact as /proj4/nad/conus
+      packaged in the neoproj4j-epsg artifact as /proj4/nad/conus
 
   grids-us-legacy/src/main/resources/proj4j-data/grids/conus
   grids-us-legacy/src/main/resources/proj4j-data/grids/alaska
-      packaged in the proj4j-grids-us-legacy artifact as /proj4j-data/grids/{conus,alaska}
+      packaged in the neoproj4j-grids-us-legacy artifact as /proj4j-data/grids/{conus,alaska}
 
 Provenance:
 

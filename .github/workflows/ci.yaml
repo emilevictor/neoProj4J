@@ -7,14 +7,16 @@ name: CI
 # .github/workflows/README.md. A job marked advisory uses `continue-on-error: true`
 # and must never be the reason a merge is held up.
 #
-# NOTE ON VERIFICATION: none of THIS file has been executed. The claim it used to carry -
-# that there is no JDK and no Maven on the authoring machine - was RETRACTED: Temurin 21 and
-# Maven 3.9.16 are installed, and Gradle-managed JDKs were present all along in a directory
-# the original survey never checked. Temurin 8 and 11 have since been added too. So "it could
-# not be checked locally" is no longer a reason for anything here; where a comment below gives
-# it as one, that comment is describing a past moment and should be re-checked before being
-# trusted. See .github/workflows/determinism.yaml, whose Java side HAS been run locally on
-# five JDK/architecture combinations.
+# THE BUILD ITSELF RUNS ON JDK 21. That is what every job here installs, apart from the two
+# that exist specifically to try another JDK: `jdk-ea` on the current early-access line and
+# `jdk8-runtime`, which builds on 21 and forks only the test JVM onto a real JDK 8. The root
+# pom's <release>8</release> is a SOURCE AND BYTECODE LEVEL, not a claim that a JDK 8 is
+# installed anywhere; `--release` is a javac 9+ flag and JDK 8 cannot run this build at all.
+# The two are easy to conflate and this file has done it before.
+#
+# VERIFICATION STATUS: none of this YAML has executed on a runner. The Maven command the
+# `build-and-test` job runs - `mvn -B -ntp clean install` - has been run outside CI, including
+# through ./docker/run.sh ci, which mirrors it flag for flag.
 
 # The push trigger is restricted to the long-lived branches on purpose. Unfiltered
 # `on: [push, pull_request]` fires TWICE for every commit on a PR branch - once as a push
@@ -41,10 +43,12 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # BLOCKING. The gate. Compiles all four modules (core, epsg, geoapi, conformance)
-  # and runs their fast tests. `mvn clean install` on the conformance module compiles
-  # it and runs only its unit tests - the corpus sweep is behind the `conformance`
-  # profile, so this job stays cheap. If this is red, nothing else matters.
+  # BLOCKING. The gate. Compiles the root pom's default reactor - core, epsg, geoapi,
+  # grids-us-legacy, db and conformance - and runs their fast tests. `mvn clean install`
+  # on the conformance module compiles it and runs only its unit tests; the corpus sweep
+  # is behind the `conformance` profile, so this job stays cheap. golden and benchmark are
+  # behind their own profiles and are not built here at all. If this is red, nothing else
+  # matters.
   #
   # WHY NO JDK 8 LEG: the root pom sets <release>8</release> on maven-compiler-plugin.
   # `--release` is a javac 9+ flag; JDK 8 cannot honour it and the build would fail at

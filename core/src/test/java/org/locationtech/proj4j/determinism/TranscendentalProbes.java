@@ -416,7 +416,7 @@ final class TranscendentalProbes {
             }
         }
         // hypot with operands spanning many exponents apart, where the scaled form differs most
-        // from sqrt(x*x + y*y) - the substitution numerics.md prescribes for the hot path.
+        // from sqrt(x*x + y*y) - the substitution MathHelpers.norm2 makes on the hot path.
         for (int k = -400; k <= 400; k += 17) {
             out.add(1.0);
             out.add(StrictMath.pow(2.0, k));

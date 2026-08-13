@@ -24,10 +24,9 @@ import org.locationtech.proj4j.benchmark.counting.OpCounters.Op;
  * <p><b>How this is reached.</b> {@link CountingClassLoader} rewrites the string
  * {@code "java/lang/Math"} in the constant pool of every {@code org.locationtech.proj4j} class it
  * loads into this class's internal name. Nothing in {@code core} references this file, at compile time
- * or otherwise - which is the whole point. {@code reference/performance.md} calls for a
- * <b>test-only</b> facade, and a facade that lived in {@code core} would put a counter increment on
- * the hot path of a published library, which is exactly the kind of thing the rest of that document
- * exists to prevent.
+ * or otherwise - which is the whole point. <b>The counting facade is test-only by policy:</b> a facade
+ * that lived in {@code core} would put a counter increment on the hot path of a published library,
+ * and this library does not put instrumentation on its hot path.
  *
  * <p><b>Every method here must have the same name and descriptor as the {@code java.lang.Math} method
  * it stands in for</b>, because the rewrite changes only the class name; the {@code NameAndType}
@@ -57,7 +56,7 @@ public final class CountingMath {
     }
 
     // ============================================================================================
-    // Counted: the ten from reference/performance.md.
+    // Counted: the ten of OpCounters.Op that the projection kernels spend their time in.
     // ============================================================================================
 
     public static double sin(double a) {
@@ -160,9 +159,9 @@ public final class CountingMath {
     }
 
     // ============================================================================================
-    // Uncounted pass-throughs. Exact operations (guaranteed bit-reproducible per
-    // reference/numerics.md) plus the handful of integer helpers, present only so that a class that
-    // also calls one of these still links after the rewrite.
+    // Uncounted pass-throughs. Exactly-rounded operations, which are bit-reproducible on every JVM
+    // and so are not part of the determinism question, plus the handful of integer helpers. Present
+    // only so that a class that also calls one of these still links after the rewrite.
     // ============================================================================================
 
     public static double abs(double a) { return Math.abs(a); }
@@ -214,11 +213,12 @@ public final class CountingMath {
     public static int multiplyExact(int x, int y) { return Math.multiplyExact(x, y); }
 
     /**
-     * Present for linkage only. {@code reference/numerics.md} says <b>do not use
-     * {@code Math.fma}</b> - on hardware without FMA it falls back to a {@code BigDecimal} path, and
-     * it changes results via single rounding, which collides with the determinism requirement. If the
-     * counting run ever reports a call reaching this method, that is a defect in {@code core}, not in
-     * the gate.
+     * Present for linkage only. <b>{@code core} does not use {@code Math.fma}, and must not start.</b>
+     * It rounds once where two separate operations round twice, so a result computed with it differs
+     * from the same result computed without it, and on hardware with no FMA instruction the JDK falls
+     * back to a {@code BigDecimal} path that is orders of magnitude slower. Either half on its own
+     * would disqualify it here. There is no call to it anywhere in {@code core} today; if the counting
+     * run ever reaches this method, that is a defect in {@code core}, not in the gate.
      */
     public static double fma(double a, double b, double c) { return Math.fma(a, b, c); }
 

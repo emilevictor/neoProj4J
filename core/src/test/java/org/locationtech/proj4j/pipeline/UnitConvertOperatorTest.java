@@ -53,8 +53,7 @@ public class UnitConvertOperatorTest {
     }
 
     /**
-     * The heart of {@code gie-comparator.md}'s trap 6, and the one behaviour in this
-     * class that must <em>not</em> be tidied up.
+     * The one behaviour in this class that must <em>not</em> be tidied up.
      *
      * <p>{@code unitconvert.cpp:487-493} raises the unit domain only for the
      * normalised names {@code "Radian"} and {@code "Degree"}. {@code grad}

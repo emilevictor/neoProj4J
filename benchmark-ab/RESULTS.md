@@ -33,9 +33,9 @@ sets before it prints anything.
 ### Configuration
 
 `-f 2 -wi 5 -i 5 -w 1s -r 1s`, plus the class's own `-XX:+UseSerialGC`. JMH 1.37, JDK 21.0.11
-Temurin, macOS 26.6 on an Apple M5 Max (18 cores). **This is a laptop, and the `Error` column is
-JMH's 99.9 % confidence half-width** — every claim below is qualified by whether the two intervals
-overlap.
+Temurin, macOS 26.6 on an Apple M5 Max (18 cores). **That is a laptop, not a dedicated runner, and
+the `Error` column is JMH's 99.9 % confidence half-width** — every claim below is qualified by
+whether the two intervals overlap.
 
 ## Per-arm results
 
@@ -166,16 +166,23 @@ arithmetic, and should be treated as regressions:**
 
 ## Reproducing
 
+Point `JAVA_HOME` at a **JDK 21** install — see below for why 23+ does not work — and set
+`STASH` to any writable scratch directory:
+
 ```
-export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home   # JDK 21, not 23+
 mvn -B -ntp -Pbench-ab -pl benchmark-ab clean
 mvn -B -ntp -Pbench-ab,bench-ab-baseline -pl benchmark-ab package -DskipTests     # no -am
-cp benchmark-ab/target/benchmarks-ab-baseline.jar /tmp/
+cp benchmark-ab/target/benchmarks-ab-baseline.jar "$STASH"/
 mvn -B -ntp -Pbench-ab -pl benchmark-ab clean
 mvn -B -ntp -Pbench-ab -pl benchmark-ab -am package -DskipTests
-java -jar benchmarks-ab-baseline.jar -f 2 -wi 5 -i 5 -w 1s -r 1s -rf json -rff baseline.json
-java -jar benchmarks-ab-fork.jar     -f 2 -wi 5 -i 5 -w 1s -r 1s -rf json -rff fork.json
+java -jar "$STASH"/benchmarks-ab-baseline.jar        -f 2 -wi 5 -i 5 -w 1s -r 1s -rf json -rff baseline.json
+java -jar benchmark-ab/target/benchmarks-ab-fork.jar -f 2 -wi 5 -i 5 -w 1s -r 1s -rf json -rff fork.json
 ```
+
+The `cp` and the `"$STASH"` path on the first `java -jar` are both load-bearing: the second `clean`
+destroys `benchmark-ab/target/`, so the baseline jar has to be run from wherever it was stashed. A
+bare `java -jar benchmarks-ab-baseline.jar` either fails outright or picks up a stale jar left in the
+working directory, which yields a plausible and meaningless A/B result.
 
 **JDK 21 is not optional.** On JDK 23+ javac silently stops running classpath annotation processors,
 JMH emits no `META-INF/BenchmarkList`, and the jar reports zero benchmarks with no other symptom.

@@ -1,17 +1,17 @@
 # A clean, pinned Linux build environment for proj4j's five check suites.
 #
-# WHY THIS EXISTS. Running the suites on the authoring Mac is unconvincing: the JDK, the OS, the
-# default Locale and a ~/.m2 full of other agents' snapshots all differ from any real runner. This
-# image fixes all four. It is not a replacement for .github/workflows/** - docker/run.sh reuses
-# those workflows' exact Maven commands so the two cannot drift.
+# WHY THIS EXISTS. Running the suites on a developer's own machine is unconvincing: the JDK, the
+# OS, the default Locale and a ~/.m2 full of locally built snapshots all differ from any real
+# runner. This image fixes all four. It is not a replacement for .github/workflows/** -
+# docker/run.sh reuses those workflows' exact Maven commands so the two cannot drift.
 #
 # PINNING.
 #   * Base image is pinned by DIGEST, not just by tag. The digest below is the multi-arch manifest
-#     LIST digest, so it resolves to linux/arm64 on this Apple Silicon host and to linux/amd64 on a
-#     normal CI runner - the same pin, two architectures. `docker buildx imagetools inspect` on it
+#     LIST digest, so it resolves to linux/arm64 on an arm64 host and to linux/amd64 on a normal
+#     x86-64 CI runner - the same pin, two architectures. `docker buildx imagetools inspect` on it
 #     shows both.
 #   * Maven is fetched from archive.apache.org (immutable, unlike dlcdn) and its tarball is checked
-#     against the SHA-512 Apache publishes. 3.9.16 is the version on the authoring machine.
+#     against the SHA-512 Apache publishes. 3.9.16 is the version the project develops against.
 #   * apt package versions are NOT pinned. They are ca-certificates/curl/git/rsync/locales only -
 #     nothing on the measurement path - and pinning them would make the image un-buildable the
 #     first time Ubuntu rolls a point release. This is the one genuinely floating input; it is
@@ -48,13 +48,13 @@ RUN set -eux; \
 
 # OPTIONAL CORPORATE CA, AND IT IS A HOST QUIRK RATHER THAN PART OF THE DESIGN.
 #
-# The machine this was written on sits behind a TLS-intercepting firewall: archive.apache.org and
+# Behind a TLS-intercepting proxy - a common corporate setup - archive.apache.org and
 # repo.maven.apache.org both present a certificate issued by an internal CA, so an un-doctored
 # container gets `curl: (60) SSL certificate problem: self-signed certificate in certificate chain`
 # and Maven cannot resolve a single dependency. docker/run.sh detects the host's bundle (from
-# $SSL_CERT_FILE / $REQUESTS_CA_BUNDLE / /etc/ssl/certs/*-ca-bundle.crt) and drops it into the build
-# context; if there is none - which is the case on a normal machine and on GitHub Actions -
-# extra-ca.crt is written EMPTY and this stage does nothing at all.
+# $PROJ4J_DOCKER_CA / $SSL_CERT_FILE / $REQUESTS_CA_BUNDLE / /etc/ssl/certs/*-ca-bundle.crt) and
+# drops it into the build context; where there is none - which is the case on an ordinary machine
+# and on GitHub Actions - extra-ca.crt is written EMPTY and this stage does nothing at all.
 #
 # Two truststores have to be taught, not one: `update-ca-certificates` covers curl/git, and a
 # separate keytool import covers the JVM, whose cacerts file the OS store does not feed. Missing the

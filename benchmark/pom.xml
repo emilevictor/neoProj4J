@@ -103,9 +103,11 @@
                          gate tool `var`, text blocks and the modern collection factories, and it
                          lets the harness run on the JDK that Spark actually uses.
 
-                         Do NOT copy this <release> into core, epsg or geoapi. Those ship, and
-                         reference/performance.md's "The Java baseline" section owns that decision
-                         (11 plus a META-INF/versions/17 multi-release JAR). -->
+                         Do NOT copy this <release> into core, epsg or geoapi. Those ship, and the
+                         published bytecode floor is set once, in the root pom's
+                         maven-compiler-plugin configuration (<release>8</release>). Raising it is a
+                         breaking change for every downstream consumer, so it is a decision for the
+                         root pom, not for a module. -->
                     <release>17</release>
                     <debug>true</debug>
                     <encoding>UTF-8</encoding>

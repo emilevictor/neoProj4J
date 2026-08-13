@@ -43,21 +43,21 @@ import org.openjdk.jmh.annotations.Warmup;
  * the <b>ratio</b> of hit to miss (which is how much the cache is worth) and the <b>absolute</b>
  * cost of the key comparison (which is pure overhead on every hit).
  *
- * <p>{@code reference/performance.md} prescribes keying the transform cache on the <b>canonical
- * string pair</b> rather than on CRS object equality, for two reasons: {@code String.hashCode} is
- * cached in the object so a repeat lookup is a field read, and it sidesteps the
- * {@code Projection.equals}/{@code hashCode} defects entirely. {@link #objectKeyLookup} and
- * {@link #stringPairKeyLookup} are the head-to-head for that decision, run in the same fork so the
- * ratio is meaningful.
+ * <p>A transform cache should be keyed on the <b>canonical string pair</b> rather than on CRS object
+ * equality. {@code String.hashCode} is cached in the object, so a repeat lookup is a field read,
+ * whereas {@code CoordinateReferenceSystem.hashCode} descends into {@code Projection.hashCode},
+ * which mixes twenty-odd doubles on every call and is deliberately not memoised (the setters are
+ * public, so a cached hash would be both stale and a data race - see the comment in
+ * {@code Projection.hashCode}). {@link #objectKeyLookup} and {@link #stringPairKeyLookup} are the
+ * head-to-head for that decision, run in the same fork so the ratio is meaningful.
  *
  * <p><b>Two things are deliberately not benchmarked, and the reasons are the findings:</b>
  * <ol>
  *   <li><b>An unbounded miss stream.</b> {@code util/CRSCache} <i>was</i> an unbounded
  *       {@code ConcurrentHashMap} keyed on user-supplied strings, so a benchmark that fed it a
- *       distinct key per invocation would grow the map until the fork died. That is exactly the OOM
- *       vector {@code performance.md} identifies for untrusted per-row input; a benchmark that
- *       demonstrates it by crashing is not a benchmark, and the fix is a correctness change, not a
- *       performance one. <b>The bound landed in Stage D</b> - access-ordered LRU, default 1,024
+ *       distinct key per invocation would grow the map until the fork died. That is the OOM vector
+ *       an unbounded cache keyed on untrusted per-row input has; a benchmark that demonstrates it by
+ *       crashing is not a benchmark, and the fix is a correctness change, not a performance one. <b>The bound landed in Stage D</b> - access-ordered LRU, default 1,024
  *       entries per key space via {@code -Dproj4j.crsCache.maxEntries} (note: not the
  *       {@code proj4j.crsCacheSize} the old text here proposed) - so an eviction-pressure arm is
  *       now possible and is the obvious next addition.</li>
@@ -74,8 +74,9 @@ import org.openjdk.jmh.annotations.Warmup;
  *
  * <p>There is <b>no transform-level cache in proj4j today</b> - {@code CoordinateTransformFactory}
  * constructs a new {@code BasicCoordinateTransform} on every call. {@link #createTransformUncached}
- * is what a transform cache would eliminate, and is the target for the {@code TransformCache.get}
- * that {@code performance.md}'s serialisation design already assumes exists.
+ * is what a transform cache would eliminate, so it is the figure to weigh such a cache against. No
+ * design for one is written down anywhere in this repository; this arm is the measurement, not a
+ * commitment to build it.
  */
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
@@ -138,8 +139,9 @@ public class TransformCacheBenchmark {
 
     /**
      * The miss, i.e. the full 888 KB init-file scan and parse. The ratio against
-     * {@link #crsCacheHit} is what the CRS cache is worth; {@code performance.md} estimates
-     * 10-1000x, and this is where that number comes from.
+     * {@link #crsCacheHit} is what the CRS cache is worth. Quote it from a run of these two arms in
+     * the same fork; no ratio is recorded anywhere in this repository, because Tier 3 timings are
+     * deliberately not stored.
      */
     @Benchmark
     public CoordinateReferenceSystem crsCacheMissEquivalent() {
