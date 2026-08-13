@@ -308,7 +308,46 @@ public class TransverseMercatorProjection extends CylindricalProjection {
         return zone;
     }
 
+    /**
+     * The 1..60 range check both {@code setUTMZone} implementations share.
+     *
+     * <p>It lives here, on the class {@code +proj=utm} is bound to, rather than being written
+     * twice: {@link ExtendedTransverseMercatorProjection} is a sibling and not a subclass -
+     * both extend {@link CylindricalProjection} - so there is no common base below
+     * {@code Projection} to hang it on, and a UTM zone is not a concept {@code Projection}
+     * has.
+     *
+     * <p>{@code golden}'s {@code Probes} carries the same 1..60 test for the same reason: a
+     * zone outside the range names a central meridian that does not exist, and computing one
+     * anyway is the silent-wrong-answer shape rather than an error.
+     *
+     * @throws InvalidValueException if {@code zone} is not in 1..60
+     */
+    static void checkUTMZone(int zone) {
+        if (zone < 1 || zone > 60) {
+            throw new InvalidValueException(ErrorCause.INVALID_PARAM_VALUE,
+                    "Invalid value for +zone: " + zone + ". A UTM zone is 1 to 60 inclusive; "
+                            + "PROJ rejects anything else at parse time and there is no central "
+                            + "meridian outside that range.");
+        }
+    }
+
+    /**
+     * Installs the UTM frame for a zone: the zone's central meridian, {@code k = 0.9996},
+     * {@code x_0 = 500000} and, when {@link #setSouthernHemisphere(boolean) +south} is set,
+     * {@code y_0 = 10000000}.
+     *
+     * @param zone the UTM zone, 1 to 60 inclusive
+     * @throws InvalidValueException if the zone is outside 1..60. {@code PJ_PROJECTION(utm)}
+     *         range-checks it the same way at parse time
+     *         ({@code 9.8.1:src/projections/tmerc.cpp}: {@code if (zone > 0 && zone <= 60)
+     *         --zone; else "Invalid value for zone"}), and the arithmetic below has no other
+     *         guard - {@link #getZoneFromNearestMeridian(double)} clamps, but the {@code +zone}
+     *         path does not go through it, so {@code +zone=61} used to yield a central meridian
+     *         of 183&deg; and {@code +zone=0} one of -183&deg;.
+     */
     public void setUTMZone(int zone) {
+        checkUTMZone(zone);
         utmZone = zone;
         zone--;
         projectionLongitude = (zone + .5) * Math.PI / 30. - Math.PI;

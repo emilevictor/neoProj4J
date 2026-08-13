@@ -27,7 +27,6 @@ import org.locationtech.proj4j.proj.AiryProjection;
 import org.locationtech.proj4j.proj.CassiniProjection;
 import org.locationtech.proj4j.proj.ColombiaUrbanProjection;
 import org.locationtech.proj4j.proj.EquidistantAzimuthalProjection;
-import org.locationtech.proj4j.proj.ExtendedTransverseMercatorProjection;
 import org.locationtech.proj4j.proj.FoucautSinusoidalProjection;
 import org.locationtech.proj4j.proj.GeneralSinusoidalProjection;
 import org.locationtech.proj4j.proj.HammerProjection;
@@ -275,8 +274,24 @@ public class Proj4Parser {
                         .setH0(parseDouble(Proj4Keyword.h_0, s));
         }
 
+        /*
+         * +south is read with pj_param's 'b' sigil, not by presence: utm does
+         *
+         *     P->y0 = pj_param(P->ctx, P->params, "bsouth").i ? 10000000. : 0.
+         *
+         * (9.8.1:src/projections/tmerc.cpp), so a bare +south is true and +south=f is
+         * explicitly FALSE - hence parseBoolean and not containsKey, exactly as +over
+         * below. Testing containsKey made "+proj=utm +zone=33 +south=f" southern, i.e. a
+         * 10,000 km error on a definition PROJ reads as northern.
+         *
+         * Note +south=0 is now an ERROR rather than false, and that is a deliberate
+         * divergence, not parity: 9.8.1 reads the first character only and answers
+         * "northern" for +south=0 without complaint. parseBoolean says why we refuse
+         * instead of guessing, and lists the other three values where we differ.
+         */
         if (params.containsKey(Proj4Keyword.south))
-            projection.setSouthernHemisphere(true);
+            projection.setSouthernHemisphere(
+                    parseBoolean(Proj4Keyword.south, params.get(Proj4Keyword.south)));
 
         /*
          * +over is global, not operator-scoped: fwd_prepare skips both of its adjlon
@@ -356,15 +371,47 @@ public class Proj4Parser {
             if (s != null)
                 tmerc.setAlgorithm(s);
 
+            /*
+             * Keyed on "the operation is utm", not on "this object is a
+             * TransverseMercatorProjection". Registry binds both tmerc (:513) and utm
+             * (:564) to this one class, but upstream reads the zone in
+             * PJ_PROJECTION(utm) alone - "tzone"/"izone" at tmerc.cpp:644,646 -
+             * and PJ_PROJECTION(tmerc) never looks at it.
+             *
+             * Without the guard, "+proj=tmerc +zone=33" installed the whole UTM frame
+             * and put (12, 56) at 312928.56 where 9.8.1 gives 746631.15: the same
+             * 434 km error the etmerc branch below was deleted for, on the one host
+             * that is actually in the golden corpus (mod/tmerc/zone). Measured against
+             * the installed 9.8.1, which projects "+proj=tmerc +zone=33 +ellps=GRS80"
+             * and bare "+proj=tmerc +ellps=GRS80" to the same point.
+             */
             s = params.get(Proj4Keyword.zone);
-            if (s != null)
+            if (s != null && "utm".equals(params.get(Proj4Keyword.proj)))
                 tmerc.setUTMZone(parseInt(Proj4Keyword.zone, s));
         }
-        if (projection instanceof ExtendedTransverseMercatorProjection) {
-            s = params.get(Proj4Keyword.zone);
-            if (s != null)
-                ((ExtendedTransverseMercatorProjection) projection).setUTMZone(parseInt(Proj4Keyword.zone, s));
-        }
+        /*
+         * There is deliberately NO +zone dispatch for etmerc.
+         *
+         * PJ_PROJECTION(etmerc) is four lines in 9.8.1:src/projections/tmerc.cpp - reject a
+         * sphere, then setup(P, PODER_ENGSAGER) - and never calls pj_param for "zone" or
+         * "south". Only PJ_PROJECTION(utm), twenty lines further down, reads either. So
+         * "+proj=etmerc +zone=33" is plain etmerc upstream: the token is parsed, retained
+         * and never read, which is what PROJ does with any key no operator asks for
+         * (init.cpp validates nothing, and paralist::used feeds pj_get_def alone).
+         *
+         * PROJ4J used to honour it here, which installed the whole UTM frame - lon_0 from
+         * the zone, k = 0.9996, x_0 = 500000 - and put the answer 434 km east of PROJ's.
+         * ExtendedTransverseMercatorProjection.setUTMZone survives as a public setter for
+         * callers that genuinely want a UTM frame on the exact algorithm; it is simply not
+         * reachable from a proj-string any more. Do not re-add this branch.
+         *
+         * The same was true of tmerc, for the same reason and by the same 434 km, and
+         * deleting only this branch would have left that half live - see the guard just
+         * above, which keys the surviving dispatch on +proj=utm rather than on the class.
+         *
+         * +south is a different question and is NOT narrowed here: it is dispatched
+         * generally through Projection above, as it always has been.
+         */
         /*
          * +shape / +scrollx / +scrolly are read by peirce_q and by nothing else
          * (adams.cpp:405-453), so they are dispatched on the concrete class in the
@@ -1183,14 +1230,39 @@ public class Proj4Parser {
     }
 
     /**
-     * {@code pj_param}'s {@code b} sigil ({@code param.cpp}): an absent value or
+     * {@code pj_param}'s {@code b} sigil ({@code param.cpp}): a bare flag or
      * {@code T}/{@code t} is true, {@code F}/{@code f} is false, and anything else is an
      * error rather than a silent default.
+     *
+     * <p>Two places where this is deliberately not a faithful port, both measured
+     * against an installed 9.8.1 rather than read off the source:
+     *
+     * <ul>
+     * <li><b>A bare {@code +south} is true; {@code +south=} written with an empty value
+     * is false.</b> {@code createParameterMap} stores {@code null} for the first and
+     * {@code ""} for the second, so the two are distinguishable here even though a raw
+     * {@code pj_param} read of {@code '\0'} would call both true. Upstream never gets
+     * that far: its tokenizer drops a key with an empty value before the sigil sees it,
+     * so {@code +proj=utm +zone=33 +south=} projects <i>northern</i>. Reading {@code ""}
+     * as true put that point 10,000 km away, and it failed open - no exception, just a
+     * wrong answer. Confirmed the same way for {@code +approx=}.</li>
+     *
+     * <li><b>Anything else throws, where upstream guesses.</b> The {@code b} sigil reads
+     * the <i>first character only</i> and its {@code default:} branch sets {@code errno}
+     * and {@code value.i = 0} ({@code param.cpp:199-215}) - but nothing checks that
+     * {@code errno}, so the zero is used. That makes {@code +south=tomato} southern and
+     * {@code +south=yes} northern in 9.8.1, both silently. {@code +south=true} is
+     * <i>true</i> upstream, on the {@code t}, and {@code +south=false} is false. We
+     * reject all four. Refusing a definition beats picking a hemisphere off its first
+     * letter, and no registry entry writes any of them - {@code +south} appears 722
+     * times across {@code epsg/src/main/resources/proj4/nad}, every one of them
+     * bare.</li>
+     * </ul>
      */
     private static boolean parseBoolean(String key, String s) {
-        if (s == null || s.length() == 0 || "T".equals(s) || "t".equals(s))
+        if (s == null || "T".equals(s) || "t".equals(s))
             return true;
-        if ("F".equals(s) || "f".equals(s))
+        if (s.length() == 0 || "F".equals(s) || "f".equals(s))
             return false;
         throw new InvalidValueException("Invalid value for +" + key + ": " + s
                 + ". Should be empty, T/t or F/f");
@@ -1224,8 +1296,16 @@ public class Proj4Parser {
      * {@code Integer.parseInt} accepts both of the latter forms, which is why this is a
      * separate method rather than a widening of {@link #parseInt}.
      *
-     * <p>{@link #parseInt} keeps its looser grammar for {@code +zone}, whose only caller
-     * is {@code setUTMZone} and whose behaviour is not being changed here.
+     * <p>{@link #parseInt} keeps its looser grammar for {@code +zone}, whose only caller is
+     * {@code TransverseMercatorProjection.setUTMZone}. Most of the gap has closed from the
+     * other end: {@code setUTMZone} now range-checks 1..60 and raises the same
+     * {@link ErrorCause#INVALID_PARAM_VALUE} the {@code i} sigil would have, so
+     * {@code +zone=-5} is refused either way and only the message differs. What survives is
+     * {@code +zone=+33} and {@code +zone=" 33 "}: an explicit sign and surrounding whitespace
+     * are errors to {@code pj_param} and an in-range zone to {@code Integer.parseInt}, so
+     * those two forms are accepted here and rejected upstream. Narrowing +zone to this
+     * method would fix that and is a separate change - nothing in the corpus or the shipped
+     * registries writes a zone in either form.
      *
      * @throws InvalidValueException with {@link ErrorCause#INVALID_PARAM_VALUE} for
      *         anything outside that grammar

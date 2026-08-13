@@ -2157,7 +2157,12 @@ rules:
     # this rule states is unchanged and is still true of the 14038 that remain; only the
     # population it applies to shrank. Verified on a frozen A/B, and the arithmetic is
     # itemised in that rule's reason.
-    expected_rows: 14038
+    # RE-PINNED 14038 -> 14037 by PARSE-TMERC-IGNORES-ZONE, at the end of this file. Exactly one
+    # row: `SYN mod/tmerc/zone` probe 0, which sat inside the 1 cm band at 3.4e-4 m and is now
+    # 5.0e6 m outside it because `+proj=tmerc +zone=31` no longer installs the UTM frame. It is
+    # the second of the two things the note above says will move this rule -- a row crossing the
+    # ceiling -- and it crossed outward, so this rule gives it up rather than gaining anything.
+    expected_rows: 14037
     reason: |
       PROJ 9.8.1 RUNS PODER/ENGSAGER FOR `+proj=tmerc` AND `+proj=utm`; PROJ4J UP TO 1.4.3 ALWAYS
       RAN EVENDEN/SNYDER. This is the single largest behavioural change in the release and the
@@ -2612,3 +2617,57 @@ rules:
       allow_inside_change: true
       allow_nonfinite: true
       magnitude: {min: 1.0e4, max: 1.0e8}
+
+  # ---------------------------------------------------------------------------------------------
+  - id: PARSE-TMERC-IGNORES-ZONE
+    status: active
+    expires: 2027-06-30
+    # PINNED at 5, the whole of `SYN mod/tmerc/zone`.
+    #
+    # Only ONE of the five moved a headline figure. Probe 0 was INTENDED under
+    # PROJ-TMERC-PODER-ENGSAGER-DEFAULT at magnitude 3.4e-4 m, inside that rule's 1 cm band,
+    # because 1.4.3 built the same UTM frame this library did and the only thing left between
+    # them was the kernel. It is now 5.0e6 m out of that band, so that rule drops 14038 -> 14037
+    # and this one picks the row up. Probes 1-4 were already UNEXPLAINED before this change, at
+    # 1.4e-1 to 3.7e1 m, and are claimed here too: whatever used to explain them, the reason they
+    # differ from 1.4.3 now is this and nothing else, by four to seven orders of magnitude.
+    expected_rows: 5
+    reason: |
+      `+proj=tmerc +zone=31` NO LONGER BUILDS A UTM FRAME. Upstream reads the zone in
+      `PJ_PROJECTION(utm)` alone -- `"tzone"`/`"izone"` at 9.8.1 `tmerc.cpp:644,646` -- and
+      `PJ_PROJECTION(tmerc)` never looks at it. proj4j read it for both, because `Registry` binds
+      `tmerc` and `utm` to the one `TransverseMercatorProjection` class and the dispatch was keyed
+      on the class. It is now keyed on `+proj=utm`, so `tmerc` accepts the key and ignores it, as
+      9.8.1 does.
+
+      MEASURED, not inferred: 9.8.1 projects `+proj=tmerc +zone=33 +ellps=GRS80` and bare
+      `+proj=tmerc +ellps=GRS80` to the same point, and this library now does too.
+
+      THE FRAME THAT IS NO LONGER INSTALLED is the whole of it -- zone 31 moved `lon_0` from the
+      definition's own 10 to 3, `lat_0` from 45 to 0, `k_0` from 1 to 0.9996 and `x_0` from 0 to
+      500000. So the movement is a frame shift, not a kernel difference, and it is the same size
+      as the frame:
+
+        probe 0  (10, 45)          1051706.26 5006840.97  ->        0.00        0.00
+        probe 1  (-11.2132, 30)    -877889.12 3405362.25  -> -2070137.82 -1467491.17
+        probe 2  ( 31.2132, 30)    3275517.61 3679032.56  ->  2070137.82 -1467491.17
+        probe 3  (-11.2132, 60)    -288654.67 6736782.66  -> -1169722.49  1859923.03
+        probe 4  ( 31.2132, 60)    2039975.09 6989994.80  ->  1169722.49  1859923.03
+
+      Probe 0 sits exactly on the definition's own `lat_0`/`lon_0`, so once the zone stops
+      overriding them it forwards to the origin exactly. That is the cleanest evidence available
+      that the frame is gone rather than merely altered.
+
+      WHY NO OTHER KEY MOVES. `mod/utm/zone` is untouched -- `utm` still reads the zone, and its
+      five rows stay where they were. There is no `etmerc` host in the SYN sweep. Every one of the
+      1,820 `zone=` values in the shipped registries sits on a `+proj=utm` definition, so no REG
+      row can reach this path; that was counted, and it is why the REG sections do not move.
+    match:
+      sections: [SYN]
+      keys: ["mod/tmerc/zone"]
+      classifications: [CHANGED]
+      status_from: "OK"
+      status_to: "OK"
+    expect:
+      dimensions: [fx, fy, fz, ix, iy, iz]
+      magnitude: {min: 1.0e-1, max: 1.0e7}

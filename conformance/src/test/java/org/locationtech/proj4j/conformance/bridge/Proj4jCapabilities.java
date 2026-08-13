@@ -26,9 +26,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.locationtech.proj4j.Registry;
-import org.locationtech.proj4j.proj.ExtendedTransverseMercatorProjection;
-import org.locationtech.proj4j.proj.Projection;
-import org.locationtech.proj4j.proj.TransverseMercatorProjection;
 import org.locationtech.proj4j.units.Angle;
 import org.locationtech.proj4j.util.ProjectionMath;
 
@@ -39,7 +36,7 @@ import org.locationtech.proj4j.util.ProjectionMath;
  * <p><b>Why this is a hand-maintained table and not a read of
  * {@code Proj4Keyword.supportedParameters()}.</b> That allow-list answers "will
  * {@code Proj4Parser} refuse this key?", which is a different question from "will
- * proj4j act on it?". Three keys are in the allow-list and are read by the parser
+ * proj4j act on it?". Two keys are in the allow-list and are read by the parser
  * yet have no effect on {@code Projection.projectRadians}:
  *
  * <ul>
@@ -51,10 +48,16 @@ import org.locationtech.proj4j.util.ProjectionMath;
  *     {@code cs2cs_emulation_setup}).</li>
  * <li>{@code +pm} — likewise, only {@code BasicCoordinateTransform.java:160,170}
  *     reads {@code Projection.primeMeridian}.</li>
- * <li>{@code +zone} — applied only when the projection is a
- *     {@code TransverseMercatorProjection} or
- *     {@code ExtendedTransverseMercatorProjection}; silently dropped otherwise.</li>
  * </ul>
+ *
+ * <p>{@code +zone} was a third bullet here, described as "applied when the projection
+ * is a {@code TransverseMercatorProjection} or an
+ * {@code ExtendedTransverseMercatorProjection}, silently dropped otherwise". That
+ * sentence stopped being true when {@code Proj4Parser} keyed the dispatch on the
+ * <em>operation name</em> instead of the class: {@code +zone} is now read when and only
+ * when {@code +proj=utm}, which is exactly where {@code PJ_PROJECTION(utm)} reads
+ * {@code "tzone"}/{@code "izone"} ({@code tmerc.cpp:644,646}). It is {@link #HONOURED}
+ * now, for the reason recorded there.
  *
  * <p>Trusting the allow-list would therefore silently mis-execute those, which is
  * the one outcome that must never happen: a wrong number that looks like a pass.
@@ -90,7 +93,7 @@ final class Proj4jCapabilities {
      * {@code PeirceQuincuncialProjection} and {@code +azi}/{@code +rot} on
      * {@code SpilhausProjection}, matching {@code adams.cpp:405-453} and
      * {@code spilhaus.cpp:133-136}, so no {@code +proj=}/value combination diverges
-     * the way {@code +zone} does. {@code +scrollx} off {@code +shape=horizontal} is
+     * the way {@code +zone} used to. {@code +scrollx} off {@code +shape=horizontal} is
      * ignored by both, unvalidated by both.
      *
      * <p><b>{@code +azi} was the one drift risk, and it has been resolved by widening the
@@ -175,6 +178,21 @@ final class Proj4jCapabilities {
             // it is exactly the set of operators that read it. The conditionalFailure()
             // branch for it is therefore gone.
             "path",
+            // +zone, MOVED here from CONDITIONAL for the same reason as +path. Upstream
+            // reads "tzone"/"izone" in PJ_PROJECTION(utm) only (tmerc.cpp:644,646);
+            // PJ_PROJECTION(tmerc) never looks at it. Proj4Parser used to key the dispatch
+            // on the CLASS - TransverseMercatorProjection or its extended subclass - which
+            // installed the whole UTM frame for +proj=tmerc +zone=33 and put the answer
+            // 434 km out. It now keys on the OPERATOR NAME, "utm".equals(params.get(proj)),
+            // so the set of proj4j classes that apply the key is again exactly the set of
+            // PROJ operators that read it, and +zone on tmerc is accepted-and-ignored on
+            // both sides. Out-of-range values are refused at parse time by the shared
+            // TransverseMercatorProjection.checkUTMZone (1..60), as upstream refuses them
+            // with error 1027. The conditionalFailure() branch for it is therefore gone;
+            // what survives of the divergence is value GRAMMAR, not dispatch, and
+            // ProjDefinitionValidator already reports +zone=+33 and +zone=" 33 " on the
+            // upstream side.
+            "zone",
             // col_urban's reference height; omerc's two-point form and its off-switch
             // synonym. Upstream accepts +no_off OR +no_uoff (omerc.cpp:139-143) - proj4j
             // had only the latter, so a definition using the documented spelling was
@@ -234,9 +252,12 @@ final class Proj4jCapabilities {
      * {@link #conditionalFailure}.
      */
     static final Set<String> CONDITIONAL = set(
-            "axis", "pm", "zone", "towgs84", "datum", "nadgrids",
+            "axis", "pm", "towgs84", "datum", "nadgrids",
             // +path is no longer here: see HONOURED. It moved in the same change that gave
             // LandsatProjection setLandsat/setPath and removed its hard-coded path = 120.
+            // +zone is no longer here either: see HONOURED. It moved when Proj4Parser
+            // stopped keying the dispatch on the projection class and started keying it on
+            // +proj=utm, which is where upstream reads it.
             // The vertical axis. proj4j reads all four in the pipeline layer
             // (pipeline/Cs2csOperator, pipeline/PipelineFactory) and never on the
             // single-projection operation path, so each is safe only at its identity value.
@@ -267,9 +288,11 @@ final class Proj4jCapabilities {
      * lines of {@code fwd_finalize}/{@code inv_prepare}), and
      * {@code pipeline.Cs2csOperator} builds every one of them.
      *
-     * <p>Deliberately <b>not</b> here: {@code zone}, which is ordinary parser dispatch and
-     * not emulation at all, and {@code multiplier}, which belongs to
-     * the {@code vgridshift}/{@code deformation} operators rather than to a projection.
+     * <p>Deliberately <b>not</b> here: {@code multiplier}, which belongs to the
+     * {@code vgridshift}/{@code deformation} operators rather than to a projection.
+     * ({@code zone} used to be named here too, as ordinary parser dispatch rather than
+     * emulation. It is not a {@link #CONDITIONAL} key at all any more, so the exclusion
+     * no longer needs saying.)
      */
     private static final Set<String> EMULATION_KEYS = set(
             "axis", "pm", "towgs84", "datum", "nadgrids",
@@ -332,7 +355,7 @@ final class Proj4jCapabilities {
             }
             // peek semantics: this is a routing decision, so it must not mark the token
             // used and thereby change what pr_list() reports.
-            if (conditionalFailure(t.key(), t.value(), null) != null) {
+            if (conditionalFailure(t.key(), t.value()) != null) {
                 return true;
             }
         }
@@ -342,17 +365,22 @@ final class Proj4jCapabilities {
     // ---------------------------------------------------- conditional rules
 
     /**
-     * Whether a conditionally-honoured key, at this value and on this projection,
-     * would make proj4j diverge from PROJ.
+     * Whether a conditionally-honoured key, at this value, would make proj4j diverge
+     * from PROJ.
      *
-     * @param key        one of {@link #CONDITIONAL}.
-     * @param value      the token's value, possibly {@code null}.
-     * @param projection the already-constructed projection, or {@code null} if it
-     *                   is not available yet.
+     * <p>This used to take the constructed projection as a third argument, for the sole
+     * use of the {@code +zone} branch, which asked whether the projection was one of the
+     * two transverse Mercator classes. {@code Proj4Parser} now keys that dispatch on
+     * {@code +proj=utm} instead of on the class, so the branch would answer "safe" for
+     * every input; it and the parameter are gone. Every remaining rule is decided by the
+     * key and its value alone.
+     *
+     * @param key   one of {@link #CONDITIONAL}.
+     * @param value the token's value, possibly {@code null}.
      * @return a {@link GieFailureKind#NOT_IMPLEMENTED} failure, or {@code null} if
      *         this key is safe to pass through.
      */
-    static GieFailure conditionalFailure(String key, String value, Projection projection) {
+    static GieFailure conditionalFailure(String key, String value) {
         if ("axis".equals(key)) {
             // PROJ only inserts an axisswap step when the order is not "enu"
             // (create.cpp: `if (p && (0 != strcmp("enu", p->param)))`).
@@ -379,17 +407,6 @@ final class Proj4jCapabilities {
             return GieFailures.notImplemented(
                     "+pm=" + value + ": proj4j applies the prime meridian only in "
                             + "BasicCoordinateTransform, not in Projection.projectRadians");
-        }
-        if ("zone".equals(key)) {
-            if (projection instanceof TransverseMercatorProjection
-                    || projection instanceof ExtendedTransverseMercatorProjection) {
-                return null;
-            }
-            return GieFailures.notImplemented(
-                    "+zone=" + value + " on +proj="
-                            + (projection == null ? "?" : projection.getName())
-                            + ": Proj4Parser applies +zone only to the two transverse Mercator "
-                            + "classes and silently drops it otherwise");
         }
         if ("towgs84".equals(key)) {
             // A null Helmert is ignored by PROJ too. A non-null one makes PROJ
@@ -535,18 +552,30 @@ final class Proj4jCapabilities {
      * Whether proj4j's value grammar can represent this value the way PROJ reads
      * it.
      *
-     * <p>PROJ's grammar is strictly wider: {@code pj_atof} is C {@code strtod}
-     * and stops at the first invalid character rather than failing, angles accept
-     * DMS with {@code '}/{@code "}, a {@code d}/{@code D}/degree-sign suffix, an
-     * {@code r}/{@code R} <em>radian</em> suffix and a trailing cardinal, and
-     * {@code +to_meter} accepts a {@code num/den} ratio. Any value proj4j reads
-     * differently is a silent wrong answer, so it is reported
-     * {@link GieFailureKind#NOT_IMPLEMENTED} instead.
+     * <p>PROJ's grammar is wider in most places but <b>not strictly wider</b>, so this
+     * compares the two readings rather than asking whether ours parses. Upstream is
+     * wider in that {@code pj_atof} is C {@code strtod} and stops at the first invalid
+     * character rather than failing, and that {@code +to_meter} accepts a
+     * {@code num/den} ratio. Both sides read DMS with {@code '}/{@code "}, a
+     * {@code d}/{@code D}/degree-sign suffix, an {@code r}/{@code R} <em>radian</em>
+     * suffix and a trailing cardinal. But proj4j is wider on two counts, each
+     * deliberate and each documented on {@code Angle.parse} and
+     * {@code AngleFormat.isHemisphereLetter}: it takes {@code m} as a minutes marker
+     * that a seconds field may follow, where {@code dmstor} stops at the {@code m} and
+     * drops the seconds ({@code 12d34m57s} is {@code 12.5825} here, {@code 12.5667}
+     * upstream); and a trailing cardinal <em>assigns</em> the sign instead of
+     * multiplying the accumulated one, so {@code 123d30mw} is {@code -123.5} here and
+     * {@code +123.5} upstream, where the {@code w} is never reached. Either direction
+     * is a silent wrong answer, so it is reported
+     * {@link GieFailureKind#NOT_IMPLEMENTED}.
      *
-     * <p>This mirrors {@code Proj4Parser}'s private {@code parseAngle}/
-     * {@code parseDouble} rather than calling them, since they are not visible.
-     * The mirror is six lines and it fails <em>closed</em>: if core widens its
-     * grammar and this lags, the result is a conservative
+     * <p>{@link #proj4jAngleRadians} and {@link #proj4jDouble} mirror
+     * {@code Proj4Parser}'s private {@code parseAngleRadians}/{@code parseDouble},
+     * which are not visible from here. Only the wrapper is copied — the {@code r}
+     * suffix and the {@code trim()} — while the reading itself goes through the real
+     * {@code Angle.parse} and {@code Double.parseDouble}, so the part most likely to
+     * change is the part that cannot drift. The mirror fails <em>closed</em>: if core
+     * widens its grammar and this lags, the result is a conservative
      * {@code NOT_IMPLEMENTED}, never a wrong pass.
      *
      * @return a failure, or {@code null} when the two grammars agree.
@@ -598,8 +627,19 @@ final class Proj4jCapabilities {
     }
 
     /**
-     * A mirror of {@code Proj4Parser.parseAngle}: {@code Angle.parse} plus the
-     * {@code r}/{@code R} radian suffix.
+     * A mirror of {@code Proj4Parser.parseAngleRadians} — <em>not</em> of its sibling
+     * {@code parseAngle}, which runs the same two branches but returns <b>degrees</b>
+     * (it multiplies the {@code r}-suffix branch by {@code RTD} and leaves the
+     * {@code Angle.parse} branch alone). This method returns radians, so it is the one
+     * comparable with {@link ProjDefinitionValidator#projAngleRadians}. Getting the pair
+     * the wrong way round would be a silent factor of {@code RTD}²≈3283.
+     *
+     * <p>Only the {@code r}/{@code R} suffix is duplicated here; the DMS reading itself
+     * is delegated to the real {@code Angle.parse}, so changes to it — the trailing
+     * cardinal now <em>assigning</em> the sign rather than multiplying it, and a trailing
+     * lower-case {@code s} that closes a lettered seconds field no longer counting as
+     * South — cannot drift out of this mirror. They are exactly the changes this method
+     * exists to detect against PROJ, and {@link #valueGrammarFailure} reports them.
      *
      * @return radians, or {@code null} if proj4j would throw.
      */

@@ -34,8 +34,11 @@ class Proj4jCapabilitiesTest {
     /**
      * <b>The drift tripwire.</b> The bridge deliberately does not trust
      * {@code Proj4Keyword.supportedParameters()} to mean "proj4j acts on this" —
-     * three keys in that list are read and then ignored on the single-projection
-     * path. So it keeps its own three-way classification, and this test fails the
+     * {@code +axis} and {@code +pm} are in that list and are read and then ignored
+     * on the single-projection path. ({@code +zone} was a third until
+     * {@code Proj4Parser} keyed its dispatch on {@code +proj=utm}, which is where
+     * upstream reads it too.) So the bridge keeps its own three-way
+     * classification, and this test fails the
      * moment core's allow-list grows a key the bridge has no opinion about.
      *
      * <p>If you are reading this because the test failed: put the new key in
@@ -81,27 +84,27 @@ class Proj4jCapabilitiesTest {
     @DisplayName("the conditional rules encode PROJ's cs2cs_emulation_setup triggers")
     void conditionalRules() {
         // +axis: PROJ inserts an axisswap step only when the order is not "enu".
-        assertNull(Proj4jCapabilities.conditionalFailure("axis", "enu", null));
-        assertNotNull(Proj4jCapabilities.conditionalFailure("axis", "neu", null));
+        assertNull(Proj4jCapabilities.conditionalFailure("axis", "enu"));
+        assertNotNull(Proj4jCapabilities.conditionalFailure("axis", "neu"));
 
         // +pm: only Greenwich, by name or by angle, is a no-op.
-        assertNull(Proj4jCapabilities.conditionalFailure("pm", "greenwich", null));
-        assertNull(Proj4jCapabilities.conditionalFailure("pm", "0", null));
-        assertNotNull(Proj4jCapabilities.conditionalFailure("pm", "ferro", null));
+        assertNull(Proj4jCapabilities.conditionalFailure("pm", "greenwich"));
+        assertNull(Proj4jCapabilities.conditionalFailure("pm", "0"));
+        assertNotNull(Proj4jCapabilities.conditionalFailure("pm", "ferro"));
 
         // +towgs84: PROJ ignores an all-zero Helmert.
-        assertNull(Proj4jCapabilities.conditionalFailure("towgs84", "0,0,0", null));
-        assertNull(Proj4jCapabilities.conditionalFailure("towgs84", "0,0,0,0,0,0,0", null));
-        assertNotNull(Proj4jCapabilities.conditionalFailure("towgs84", "1,2,3", null));
+        assertNull(Proj4jCapabilities.conditionalFailure("towgs84", "0,0,0"));
+        assertNull(Proj4jCapabilities.conditionalFailure("towgs84", "0,0,0,0,0,0,0"));
+        assertNotNull(Proj4jCapabilities.conditionalFailure("towgs84", "1,2,3"));
 
         // +datum: inert only when its own defn is a null towgs84.
-        assertNull(Proj4jCapabilities.conditionalFailure("datum", "WGS84", null));
-        assertNull(Proj4jCapabilities.conditionalFailure("datum", "NAD83", null));
-        assertNotNull(Proj4jCapabilities.conditionalFailure("datum", "NAD27", null));
-        assertNotNull(Proj4jCapabilities.conditionalFailure("datum", "potsdam", null));
+        assertNull(Proj4jCapabilities.conditionalFailure("datum", "WGS84"));
+        assertNull(Proj4jCapabilities.conditionalFailure("datum", "NAD83"));
+        assertNotNull(Proj4jCapabilities.conditionalFailure("datum", "NAD27"));
+        assertNotNull(Proj4jCapabilities.conditionalFailure("datum", "potsdam"));
 
         // +nadgrids: always a hgridshift step upstream.
-        assertNotNull(Proj4jCapabilities.conditionalFailure("nadgrids", "@conus", null));
+        assertNotNull(Proj4jCapabilities.conditionalFailure("nadgrids", "@conus"));
     }
 
     @Test

@@ -138,6 +138,16 @@ public final class Probes {
             //   +south          -> the southern hemisphere, which is the entire point of the flag
             //   +datum=NAD27/83 -> North America, which is where those datums are defined, and which
             //                      is the difference between exercising the grid-shift path and not.
+            //
+            // has() tests for the key, not for its value, and that is deliberately not what the
+            // parser does any more: Proj4Parser reads +south with pj_param's b sigil, so a bare
+            // +south and +south=T/t are true, +south= and +south=F/f are false, and anything else
+            // is an InvalidValueException. Presence is still the right test here because every
+            // +south this generator can see is bare -- 722 of them across the shipped dictionaries
+            // (432 in epsg, 290 in esri, none in world/nad27/nad83), not one written with an '=',
+            // plus the single synthetic modifier, which InputSet.MODIFIERS spells "+south". Should
+            // a valued form ever appear in the input set, this has to become a value test: +south=f
+            // is northern to the parser and would be probed in the southern hemisphere here.
             String datum = d.value("datum");
             if ("NAD27".equals(datum) || "NAD83".equals(datum)) {
                 latC = 45.0;
@@ -157,16 +167,25 @@ public final class Probes {
 
         // ---- longitude centre -------------------------------------------------------------------
         // +lonc beats +lon_0 in omerc, so it is consulted first; +zone is a last resort and is the
-        // only place a longitude can come from an integer. TransverseMercatorProjection.setUTMZone
-        // overwrites lon_0 from the zone anyway, so a def carrying both is probed on the zone's
-        // meridian either way -- but +lon_0 is what the text says, so the text wins here.
+        // only place a longitude can come from an integer. Under +proj=utm a def carrying both ends
+        // up on the zone's meridian whatever the text says -- TransverseMercatorProjection.
+        // setUTMZone overwrites lon_0 from the zone, and the parser dispatches it after +lon_0 --
+        // but +zone is read for +proj=utm alone now, so under +proj=tmerc and +proj=etmerc it is
+        // parsed and never looked at and +lon_0 is the whole answer. Preferring +lon_0 is right in
+        // both cases: it is what the text says.
         double lonC = d.angle("lon_0");
         if (Double.isNaN(lonC)) lonC = d.angle("lonc");
         if (Double.isNaN(lonC)) {
             int zone = d.integer("zone");
-            // PROJ's zone->central-meridian relation. Range-checked, because
-            // TransverseMercatorProjection.setUTMZone does not check it and +zone=0 or +zone=99 must
-            // not silently produce a probe on a meridian that does not exist.
+            // PROJ's zone->central-meridian relation, range-checked here too. The parser does check
+            // the range now -- TransverseMercatorProjection.checkUTMZone rejects anything outside
+            // 1..60, from both setUTMZone implementations -- but that check is not what protects
+            // this line. The derivation never reaches it: it reads the definition text and computes
+            // the meridian arithmetically, without constructing a Projection or going near
+            // CRSFactory, so a def carrying +zone=0 or +zone=99 would arrive here unchecked. The
+            // guard is what keeps such a def from being probed on a meridian that does not exist;
+            // the def itself is rejected later, when the row is transformed, and the row records
+            // that rejection.
             if (zone >= 1 && zone <= 60) lonC = -183.0 + 6.0 * zone;
         }
         if (Double.isNaN(lonC)) {

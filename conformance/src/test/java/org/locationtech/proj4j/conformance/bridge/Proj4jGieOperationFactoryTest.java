@@ -477,10 +477,24 @@ class Proj4jGieOperationFactoryTest {
     @Test
     @DisplayName("a parameter proj4j accepts but silently ignores is NOT_IMPLEMENTED, never executed")
     void acceptedButIgnoredParametersAreNotImplemented() {
-        // +zone on a projection that is not a transverse Mercator: Proj4Parser drops it,
-        // PROJ acts on it, and no rerouting helps because the gap is the dispatch table
-        // and not the path. This is the case the rule exists for.
-        assertKind(GieFailureKind.NOT_IMPLEMENTED, op("proj=merc ellps=GRS80 zone=32"));
+        // +multiplier is in Proj4Keyword's allow-list, so the parser accepts the token,
+        // but only vgridshift and deformation read it upstream and neither is a Registry
+        // projection here. No rerouting helps, because the gap is the dispatch table and
+        // not the path. This is the case the rule exists for.
+        assertKind(GieFailureKind.NOT_IMPLEMENTED, op("proj=merc ellps=GRS80 multiplier=2"));
+
+        // INVERTED: this used to be `+zone=32` on merc, asserted NOT_IMPLEMENTED on the
+        // grounds that "Proj4Parser drops it and PROJ acts on it". The second half was
+        // never true - PJ_PROJECTION(merc) does not read "zone" any more than
+        // PJ_PROJECTION(tmerc) does; only PJ_PROJECTION(utm) reads it
+        // (tmerc.cpp:644,646). What was true was that Proj4Parser keyed its own dispatch
+        // on the projection CLASS, so +proj=tmerc +zone=33 installed the whole UTM frame
+        // and answered 434 km out, while +proj=merc +zone=32 quietly dropped it. The
+        // parser now keys on +proj=utm, which matches upstream on both, so +zone is
+        // accepted-and-ignored on either side and the definition is executable.
+        assertTrue(op("proj=merc ellps=GRS80 zone=32").isUsable(),
+                "+zone is read only when +proj=utm now, on both sides, so merc ignores it "
+                        + "exactly as upstream does");
     }
 
     @Test
@@ -544,10 +558,13 @@ class Proj4jGieOperationFactoryTest {
         // proj4j drops would be executed and answer plausibly and wrongly.
         assertKind(GieFailureKind.NOT_IMPLEMENTED,
                 op("proj=merc ellps=GRS80 towgs84=1,2,3 no_such_key=1"));
-        // ...and the projection-dependent conditionals are still judged: +zone on merc is
-        // dropped by Proj4Parser on both paths.
+        // ...and the non-emulation conditionals are still judged on the emulation route,
+        // exactly as on the single-projection path. This used to be `zone=32`, chosen
+        // because +zone was then judged against the constructed projection's class; it is
+        // HONOURED now (Proj4Parser keys it on +proj=utm, as upstream does), so the point
+        // is made with +multiplier, which no path implements.
         assertKind(GieFailureKind.NOT_IMPLEMENTED,
-                op("proj=merc ellps=GRS80 towgs84=1,2,3 zone=32"));
+                op("proj=merc ellps=GRS80 towgs84=1,2,3 multiplier=2"));
     }
 
     @Test
@@ -612,11 +629,21 @@ class Proj4jGieOperationFactoryTest {
     }
 
     @Test
-    @DisplayName("a PROJ-false boolean is NOT_IMPLEMENTED, because containsKey would enable it")
+    @DisplayName("a PROJ-false boolean is NOT_IMPLEMENTED, conservatively and on purpose")
     void projFalseBooleanIsNotImplemented() {
+        // The reason changed even though the verdict did not. It used to be exact: every
+        // boolean key was tested with Map.containsKey, so a PROJ-false value would have
+        // switched the feature ON, and refusing was the only alternative to a wrong
+        // answer. +south has since joined +over, +approx, +no_cut and +guam on
+        // Proj4Parser.parseBoolean, so for those five the value is read and agrees with
+        // PROJ; +no_uoff, +no_off, +no_rot and +hyperbolic are still presence-tested, as
+        // their 't' sigil upstream is. The refusal is deliberately left blanket rather
+        // than split per key: it errs towards a skip instead of towards a plausible wrong
+        // answer, and it costs nothing measurable, because all 102 boolean-key
+        // occurrences in the gie corpus are bare and none of them reaches this branch.
         GieOperation o = op("proj=utm zone=32 ellps=GRS80 south=F");
         assertKind(GieFailureKind.NOT_IMPLEMENTED, o);
-        assertTrue(o.failure().message().contains("containsKey"), o.failure().message());
+        assertTrue(o.failure().message().contains("is PROJ-false"), o.failure().message());
     }
 
     @Test

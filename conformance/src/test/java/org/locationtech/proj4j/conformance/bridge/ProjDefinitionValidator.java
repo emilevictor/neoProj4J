@@ -415,10 +415,21 @@ final class ProjDefinitionValidator {
     // --------------------------------------------------- PROJ value grammar
 
     /**
-     * The keys PROJ reads with {@code pj_param} type {@code 'b'}. A value other
-     * than empty, {@code t}, {@code T}, {@code f} or {@code F} is a hard error;
-     * {@code f}/{@code F} means <em>false</em>, which proj4j cannot express
-     * because {@code Proj4Parser} tests {@code Map.containsKey}.
+     * The keys PROJ reads with {@code pj_param} type {@code 'b'}. This pair of methods
+     * mirrors {@code Proj4Parser.parseBoolean}, and the mirror is the point: if the two
+     * drift apart, {@code valueGrammarFailure} starts refusing definitions proj4j would
+     * have accepted, or the other way round, and the conformance figures move for a
+     * reason that has nothing to do with a projection.
+     *
+     * <p>Both are deliberately stricter than PROJ, and it is worth saying exactly how,
+     * because the obvious reading of {@code param.cpp} is wrong. The {@code 'b'} sigil
+     * reads the <em>first character only</em>, and its {@code default:} branch
+     * ({@code param.cpp:199-215}) sets {@code errno} <em>and</em> {@code value.i = 0} —
+     * but nothing checks that {@code errno}, so the zero is used. Measured against an
+     * installed 9.8.1: {@code +south=true} is southern (on the {@code t}),
+     * {@code +south=tomato} is southern, {@code +south=yes} and {@code +south=0} are
+     * northern, all four silently. We refuse all four instead of picking a hemisphere off
+     * a first letter.
      */
     static final String[] BOOLEAN_KEYS = {
             "south", "no_uoff", "no_off", "no_defs", "wktext", "over", "geoc", "no_rot",
@@ -426,7 +437,7 @@ final class ProjDefinitionValidator {
             "R_A", "R_V", "R_a", "R_g", "R_h"
     };
 
-    /** {@code pj_param} type {@code 'b'} acceptance. */
+    /** What {@code Proj4Parser.parseBoolean} accepts: a bare flag, empty, t, T, f or F. */
     static boolean isProjBoolean(String v) {
         if (v == null || v.isEmpty()) {
             return true;
@@ -434,9 +445,19 @@ final class ProjDefinitionValidator {
         return "t".equals(v) || "T".equals(v) || "f".equals(v) || "F".equals(v);
     }
 
-    /** {@code pj_param} type {@code 'b'} value. */
+    /**
+     * What {@code Proj4Parser.parseBoolean} returns. {@code GieToken.value()} uses the
+     * same convention as {@code Proj4Parser.createParameterMap} — {@code null} for a bare
+     * flag, {@code ""} for a token written {@code key=} — and the two cases differ:
+     * a bare {@code +south} is true, while {@code +south=} is false, because PROJ's
+     * tokenizer drops a key with an empty value before the sigil ever sees it. Measured:
+     * {@code +proj=utm +zone=33 +south=} projects northern in 9.8.1.
+     *
+     * <p>No corpus row exercises the distinction. All 102 boolean-key occurrences across
+     * the gie corpus are bare, so this returns true for every one of them either way.
+     */
     static boolean projBooleanValue(String v) {
-        return !("f".equals(v) || "F".equals(v));
+        return !(v != null && (v.isEmpty() || "f".equals(v) || "F".equals(v)));
     }
 
     /**
