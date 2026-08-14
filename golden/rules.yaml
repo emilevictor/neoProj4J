@@ -1462,17 +1462,31 @@ rules:
     # deliberately left UNEXPLAINED -- see golden/README.md's 2026-08-01 triage -- and the pin is
     # what keeps them out: if a tenth key's rows ever start landing here, the count says so instead
     # of the rule quietly growing to 50.
-    expected_rows: 45
+    # RE-PINNED 2026-08-13 by the +proj=urmfps refusal, -5 = the whole of `SYN proj/urmfps`, probes
+    # 0..4. This rule requires OK -> OK; those five rows are now OK -> EXC, because urmfps has no
+    # default `+n` upstream and this tree no longer invents one. They are claimed by
+    # PARSE-URMFPS-REQUIRES-N. So the count is now 8 keys x 5 probes, and `keys:` still names
+    # `proj/urmfps`: a key that stops matching because its status changed is exactly what this
+    # rule's OK -> OK guard is for, and removing the name would hide that. Measured in this
+    # worktree with `mvn -B -Pgolden -pl golden -am verify`, from the COUNT_MISMATCH the previous
+    # pin reported.
+    expected_rows: 40
     reason: |
       The same proof as PROJ-INVERSE-CORRECTED-ROUND-TRIP-NOW-EXACT above -- `ix`/`iy` now return
       the committed probe exactly -- for eight keys whose FORWARD also moved, so
       `dimensions: [ix, iy, iz]` cannot be the guard and each forward change has to be named
-      individually instead. All eight are named, with the arithmetic:
+      individually instead. All eight are named, with the arithmetic, and so is the ninth key this
+      rule claimed until 2026-08-13, with the reason it left:
 
         SYN proj/eqc     probe 0 `fy` 5,009,377.09 -> 0 at latitude 45 with `+lat_0=45`.
-                         9.8.1:src/projections/eqc.cpp:22 is `y = P->phi0 ? lp.phi - P->phi0 :
-                         lp.phi`; 1.4.3 dropped the `phi0` subtraction, so the equidistant
-                         cylindrical ignored its own latitude of origin. 5,009,377.09 =
+                         9.8.1:src/projections/eqc.cpp:46 is `xy.y = lp.phi - P->phi0` in the
+                         spherical forward, and :73 is `xy.y = pj_mlfn(...) - Q->M0` in the
+                         ellipsoidal one this probe takes -- the same subtraction of the origin,
+                         unconditional in both; there is no ternary anywhere in the file, and
+                         line 22 is a blank line just after the licence comment block, which
+                         closes at :21. 1.4.3 dropped the `phi0`
+                         subtraction, so the equidistant cylindrical ignored its own latitude
+                         of origin. 5,009,377.09 =
                          6,378,137 * 45 deg in radians, i.e. exactly the un-subtracted value.
         SYN proj/eqdc    probe 0 `fy` 5,009,377.09 -> 0 at the CRS centre. The missing `rho0`
                          subtraction (`eqdc.cpp`: `y = Q->rho0 - rho * cos(lp.lam)`), the same
@@ -1485,10 +1499,20 @@ rules:
                          measures from `phi1` (`loxim.cpp`), 1.4.3 measured 5 degrees from
                          somewhere else.
         SYN proj/nell    probe 0 `fy` 5,009,377.09 -> 4,719,548.61, and `iy` 48.2667899 -> 45.
-        SYN proj/urmfps  probe 0 `fy` 6,592,711 -> 5,532,199.29, `iy` 54.7356103 -> 45.
-        SYN proj/wag1    identical numbers to urmfps at every probe, in both trees -- `wag1` IS
-                         `urmfps` with `+n=0.8660254037844386` fixed (`urmfps.cpp` hosts both), so
-                         the two keys agreeing digit-for-digit is a consistency check on the fix.
+        SYN proj/urmfps  NO LONGER IN THIS RULE, as of 2026-08-13. It was probe 0 `fy` 6,592,711 ->
+                         5,532,199.29, `iy` 54.7356103 -> 45, and it matched only because bare
+                         `+proj=urmfps` answered at all. It now refuses, so all five probes are
+                         OK -> EXC and belong to PARSE-URMFPS-REQUIRES-N. The kept line is not
+                         history for its own sake: the numbers above were `wag1`'s, which is the
+                         defect that rule is about.
+        SYN proj/wag1    probe 0 `fy` 6,592,711 -> 5,532,199.29 and `iy` 54.7356103 -> 45; five
+                         rows, unaffected by the urmfps refusal, because the canonical parameter
+                         set carries no `+n` and `wag1` hard-codes its own
+                         (`urmfps.cpp:71-81`). In the 1.4.3 baseline these five rows are
+                         BYTE-IDENTICAL to `SYN proj/urmfps`'s in all six numeric columns -- 1.4.3
+                         held wag1's sqrt(3)/2 in the urmfps field and read no `+n` presence -- and
+                         that identity is the record of the defect PARSE-URMFPS-REQUIRES-N removes.
+                         Verified by hand against golden/baseline/1.4.3/golden.tsv.
         SYN proj/wag2    probe 3 `fy` 9,265,677.82 -> 6,912,649.14 and `iy` 90.0015835811672 -> 60.
                          This is the cluster the deleted FAILCLOSED-POLE-OVERSHOOT-REJECTED
                          claimed: 1.4.3 round-tripped 176 m past the north pole and returned it as
@@ -1505,7 +1529,7 @@ rules:
                          THE FAIL-CLOSED OWNER: core's own `NoInverseGateTest:96` still asserts
                          "Lagrange must declare no inverse" and fails.
 
-      In every one of the 45 rows `ix` and `iy` end at the committed probe, so the forward and
+      In every one of the 40 rows `ix` and `iy` end at the committed probe, so the forward and
       inverse are now mutually consistent as well as individually changed. Whether the forward is
       RIGHT is gie's question, and six of these eight have `.gie` coverage.
 
@@ -2015,6 +2039,151 @@ rules:
       allow_nonfinite: true
 
   # ---------------------------------------------------------------------------------------------
+  - id: PROJ-GEOS-REQUIRES-A-POSITIVE-H-RATIO
+    status: active
+    expires: 2027-06-30
+    # PINNED at 5 = one key x 5 probes. Measured in this worktree from
+    # golden/target/golden/golden-report.tsv: `SYN proj/geos` probes 0 to 4, all OK -> EXC.
+    # There is no `mod/geos/*` section for a reason that has nothing to do with `+h`: modifier keys
+    # are `mod/<host>/<modifier>`, and the hosts are the six named at
+    # golden/src/main/java/org/locationtech/proj4j/golden/InputSet.java:87 -- aea, lcc, longlat,
+    # merc, tmerc, utm. `geos` is not one of them, so no `mod/geos/...` key can exist whatever the
+    # modifier list holds.
+    expected_rows: 5
+    reason: |
+      THE SAME DEFECT AS PROJ-NSPER-REQUIRES-A-POSITIVE-H-RATIO ABOVE, IN THE OTHER OPERATOR THAT
+      TAKES AN ORBIT HEIGHT. `SYN proj/geos` moves `OK` -> `EXC:InvalidValueException` at all five
+      probes, with the message
+
+        Invalid value for h: +proj=geos needs an orbit height in metres, greater than 0 and at
+        most 1e10 times the semi-major axis; got 0.0 m over a = 6378137.0 m. An omitted +h is 0
+        here, as it is upstream (geos.cpp:206,226-230)
+
+      UPSTREAM, READ RATHER THAN RECALLED. 9.8.1:src/projections/geos.cpp, `geos_setup`:
+
+          Q->h = pj_param(P->ctx, P->params, "dh").f;
+          ...
+          Q->radius_g_1 = Q->h / P->a;
+          if (Q->radius_g_1 <= 0 || Q->radius_g_1 > 1e10) {
+              proj_log_error(P, _("Invalid value for h."));
+              return pj_default_destructor(P, PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE);
+          }
+
+      There is no presence test, so an absent `+h` and an explicit `+h=0` are one input upstream
+      and are refused together. That is why the fix is a field default of 0 plus this range test,
+      and not a presence check in Proj4Parser: a presence check would refuse the absent form and
+      accept `+h=0`, which is the opposite of upstream on one of the two.
+
+      WHAT WE USED TO DO. The class held 35785831.0, the nominal geostationary height, and the
+      canonical synthetic parameter set
+      `+ellps=GRS80 +lat_0=45 +lon_0=10 +lat_1=30 +lat_2=60 +x_0=0 +y_0=0 +units=m` carries no
+      `+h`, so every `proj/geos` probe answered from a satellite the definition never mentioned.
+      Measured with proj 9.8.1: `echo "10 20" | proj -f '%.9f' +proj=geos +ellps=GRS80` is
+      `Error 1027 (Invalid value for an argument): geos: Invalid value for h.`, while
+      `+h=35785831` gives `1027290.592281427 2135974.287029047`, which this tree still returns.
+
+      Baseline is a coordinate and the current side is all-NaN. The rule vouches for nothing
+      numeric; it records that five plausible-looking coordinates for an unnamed satellite are now
+      an error. `inside` moves because the CRS no longer builds.
+
+      GIE AGREES ABOUT THE REFUSAL AND THIS CHANGE BROKE THE TWO ROWS THAT SAY SO, WHICH IS NOT
+      CORROBORATION AND HAD TO BE FIXED IN THE SAME CHANGE. builtins.gie:2183 is
+      `operation +proj=geos +R=1 +h=0` and :2188 is `+proj=geos +R=1 +h=1e11`, each followed by
+      `expect failure errno invalid_op_illegal_arg_value`. Both were GENUINE PASSES before this
+      change, not vacuous ones: proj4j built the operation -- initialize() had no test, so `+h=0`
+      was accepted -- and the forward then refused the coordinate, which GieRunner.java:450-462
+      scores as a pass through ExpectedFailureVerdict.ofTransformFailure(). With initialize()
+      throwing, construction fails instead, and a
+      Proj4jException from construction is mapped to NOT_IMPLEMENTED
+      (Proj4jGieOperationFactory.mapConstructionThrowable, the `instanceof Proj4jException` arm),
+      which ExpectedFailureVerdict.ofConstructionFailure scores VACUOUS_EXPECTED_FAILURE -- counted
+      as neither a pass nor a failure. So the conformance gate reported 2 REGRESSED. The fix is a
+      `geos` case in conformance ProjOperatorSetup, modelled on the existing nsper/tpers h/a case,
+      so the bridge decides that PROJ ITSELF refuses the definition and reports
+      INVALID_DEFINITION, which is a genuine pass again. Measured in this worktree with
+      `mvn -B -Pconformance -pl conformance -am verify`: unchanged 7446, still failing 477,
+      regressed 0, unexpected passes 0, new 0, disappeared 0. gie is the one that decides, and it
+      does not decide by being left un-run.
+    match:
+      classifications: [CHANGED]
+      sections: [SYN]
+      keys: ["proj/geos"]
+      status_from: "OK"
+      status_to: "EXC:org.locationtech.proj4j.InvalidValueException"
+    expect:
+      dimensions: [fx, fy, fz, ix, iy, iz]
+      allow_status_change: true
+      allow_inside_change: true
+      allow_nonfinite: true
+
+  # ---------------------------------------------------------------------------------------------
+  - id: PARSE-URMFPS-REQUIRES-N
+    status: active
+    expires: 2027-06-30
+    # PINNED at 5 = one key x 5 probes. Measured in this worktree from
+    # golden/target/golden/golden-report.tsv before the rule was written: `SYN proj/urmfps` probes
+    # 0 to 4, all OK -> EXC. `SYN proj/wag1` is deliberately NOT here -- see the last paragraph.
+    expected_rows: 5
+    reason: |
+      `SYN proj/urmfps` moves `OK` -> `EXC:InvalidValueException` at all five probes, with
+
+        Missing parameter: n should be specified. +proj=urmfps has no default shape parameter; an
+        omitted +n is not the same as +n=0 (urmfps.cpp:56-59)
+
+      UPSTREAM, READ RATHER THAN RECALLED. 9.8.1:src/projections/urmfps.cpp, `PJ_PROJECTION(urmfps)`:
+
+          if (!pj_param(P->ctx, P->params, "tn").i) {
+              proj_log_error(P, _("Missing parameter n."));
+              return pj_default_destructor(P, PROJ_ERR_INVALID_OP_MISSING_ARG);
+          }
+          Q->n = pj_param(P->ctx, P->params, "dn").f;
+
+      The `t` sigil is a presence test, so this check cannot live in the projection: by the time
+      initialize() runs, an omitted `+n` and an explicit `+n=0` are the same 0.0 in the same field.
+      It is in Proj4Parser, beside the sconics `+lat_1`/`+lat_2` check, for that reason.
+
+      WHAT WE USED TO DO. The field held 0.8660254037844386467637231707, which is not urmfps's
+      default -- urmfps has none -- but wag1's hard-coded value (`urmfps.cpp:78-79`, assigned with
+      no pj_param call at all). The canonical synthetic parameter set carries no `+n`, so every
+      `proj/urmfps` probe silently answered as `+proj=wag1`. Measured with proj 9.8.1:
+      `echo "10 20" | proj -f '%.9f' +proj=urmfps +a=6400000` is
+      `Error 1026 (Missing argument): urmfps: Missing parameter n.`
+
+      HOW WRONG THE OLD ANSWERS WERE: BY DISTANCE, NOT AT ALL. Measured in this worktree before the
+      fix, bare `+proj=urmfps +ellps=GRS80` at 10E 55N returned
+      `688376.287161978 6620055.430083310`, and bare `+proj=wag1 +ellps=GRS80` returns the same two
+      doubles bit for bit (0x1.501f09306e513p19, 0x1.940e5db867c26p22) -- which is also proj 9.8.1's
+      answer for wag1. The baseline table says the same thing without any new measurement: the five
+      `SYN proj/urmfps` rows in golden/baseline/1.4.3/golden.tsv are byte-identical to the five
+      `SYN proj/wag1` rows in all six numeric columns. So the harm here is not a displaced
+      coordinate; it is that a definition PROJ refuses got an answer at all, under the wrong
+      operator's name. The displacement figures belong to the other half of this change, the `+n`
+      that used to leak into wag1, and they are in ParameterDispatchTest.wag1IgnoresN.
+
+      WHY WAG1 IS NOT IN THIS RULE, AND WHY THAT IS NOT MASKING. wag1 shares the kernel by
+      inheritance, so the same change also stopped `+n` reaching wag1, where upstream never reads
+      it. No golden row records that half: every `proj/wag1` probe omits `+n`, so the golden table
+      cannot see a key it never sends. The evidence for the wag1 half is in
+      ParameterDispatchTest.wag1IgnoresN, pinned to proj 9.8.1's
+      `688376.287161978 6620055.430083310` for both spellings. The `proj/wag1` rows that do move
+      in this report belong to PROJ-INVERSE-CORRECTED-ROUND-TRIP-NOW-EXACT-FWD-ALSO and are a
+      different change.
+
+      Baseline is a coordinate and the current side is all-NaN, so this rule vouches for nothing
+      numeric. `inside` moves because the CRS no longer builds.
+    match:
+      classifications: [CHANGED]
+      sections: [SYN]
+      keys: ["proj/urmfps"]
+      status_from: "OK"
+      status_to: "EXC:org.locationtech.proj4j.InvalidValueException"
+    expect:
+      dimensions: [fx, fy, fz, ix, iy, iz]
+      allow_status_change: true
+      allow_inside_change: true
+      allow_nonfinite: true
+
+  # ---------------------------------------------------------------------------------------------
   - id: PROJ-POLYCONIC-INVERSE-CONVERGES
     status: active
     expires: 2027-06-30
@@ -2366,7 +2535,21 @@ rules:
     # PROJ-FORWARD-WRAP-CANONICALISES-RECOVERED-LONGITUDE, which has the arithmetic. THE BAND DID
     # THE WORK AGAIN: a rule that tolerated large magnitudes would have kept all ten and said
     # nothing about a longitude convention changing.
-    expected_rows: 19310
+    # RE-PINNED 2026-08-13 by the +proj=geos refusal, -2, and enumerable: `SYN proj/geos` probes 3
+    # and 4. They sat here because the RECOVERED LATITUDE drifted by 2 ULP on a coordinate this tree
+    # no longer produces: bare `+proj=geos` used to answer from a 35785831 m orbit height nobody
+    # asked for, and now refuses. That is a status change, which this rule declines on purpose, so it
+    # let both rows go and they are claimed by PROJ-GEOS-REQUIRES-A-POSITIVE-H-RATIO. The other three
+    # `proj/geos` probes -- 0, 1 and 2 -- were UNCHANGED against the baseline before this change and
+    # are in that rule's five as well, which is why this count falls by 2 and not by 5.
+    # The count is measured in this worktree with `mvn -B -Pgolden -pl golden -am verify`, from the
+    # COUNT_MISMATCH the previous pin reported. WHICH two rows, and in which dimension, is measured
+    # separately: replaying the five probes through `+proj=geos <canonical> +h=35785831`, the old
+    # class default written out by hand, reproduces the pre-change rows, and only probes 3 and 4
+    # differ from golden/baseline/1.4.3/golden.tsv -- `iy` 0x1.e000000000023p5 -> 0x1.e000000000021p5
+    # on both, which is 2 ULP or about 1.4e-14 degrees at 60 N, plus `ix` 2 ULP on probe 3. Both are
+    # far inside this rule's 1e-6 band, which is why it held them until the status changed.
+    expected_rows: 19308
     reason: |
       PROVISIONAL AND NOT OWNED BY THIS MODULE. Placeholder for the sub-microscopic movement caused by
       wiring in PROJ 9.4-9.6's Karney auxiliary-latitude core (9.8.1:src/latitudes.cpp, and the

@@ -295,6 +295,135 @@ public class ParameterDispatchTest {
         assertRejects("+proj=urm5 +a=6400000 +n=1 +alpha=90", "alpha");
     }
 
+    // --------------------------------------------------- +proj=urmfps and +proj=wag1
+
+    /**
+     * {@code urmfps} has no default shape: {@code urmfps.cpp:56-59} tests {@code +n} for presence
+     * and says "Missing parameter n." Our class holds sqrt(3)/2 in that field, which is
+     * <em>wag1's</em> hard-coded value, so a bare {@code +proj=urmfps} used to answer as
+     * {@code +proj=wag1} instead of refusing.
+     *
+     * <p>The two assertions after the refusal are the control that the guard did not switch the
+     * dispatch off: a value that reaches the operator still changes the answer, and still is not
+     * wag1's.
+     */
+    @Test
+    public void urmfpsRequiresN() {
+        assertRejects("+proj=urmfps +a=6400000", "n");
+        assertNotEquals("+n was dropped", outcome("+proj=urmfps +a=6400000 +n=0.5", 2, 1),
+                outcome("+proj=urmfps +a=6400000 +n=0.9", 2, 1));
+        assertNotEquals("bare wag1 must not be an accepted spelling of bare urmfps",
+                outcome("+proj=urmfps +a=6400000 +n=0.5", 2, 1),
+                outcome("+proj=wag1 +a=6400000", 2, 1));
+    }
+
+    /**
+     * {@code wag1} is {@code urmfps} with {@code n} assigned by the operator rather than read from
+     * the definition: {@code urmfps.cpp:71-81} calls no {@code pj_param} at all and writes
+     * {@code 0.8660254037844386467637231707}. {@code Wagner1Projection} extends
+     * {@code UrmaevFlatPolarSinusoidalProjection} to reuse the kernel and so inherited its
+     * {@code setN}, which an {@code instanceof} dispatch then called.
+     *
+     * <p>The reference is {@code proj} 9.8.1, which returns the same pair for both spellings:
+     * <pre>
+     * echo "10 55" | proj -f '%.9f' +proj=wag1 +n=0.5 +ellps=GRS80
+     * 688376.287161978 6620055.430083310
+     * </pre>
+     * Before this change the spelling that carries the key, {@code +proj=wag1 +n=0.5 +ellps=GRS80},
+     * returned {@code (891018.067867611, 6135305.446220606)} instead: 202,641.780705633 m too far
+     * east and 484,749.983862705 m too far south, 525,401.026019594 m off in a straight line, from
+     * a key PROJ never reads. Bare {@code +proj=wag1} was right all along; only the spelling with
+     * {@code +n} was wrong, which is why the first assertion below compares the two spellings
+     * rather than checking one of them. Measured in this worktree by projecting both definitions
+     * through {@code CRSFactory}, with the arithmetic done on the printed doubles.
+     */
+    @Test
+    public void wag1IgnoresN() {
+        assertEquals("+n must not reach +proj=wag1", outcome("+proj=wag1 +ellps=GRS80", 10, 55),
+                outcome("+proj=wag1 +n=0.5 +ellps=GRS80", 10, 55));
+        ProjCoordinate out = new ProjCoordinate();
+        projection("+proj=wag1 +n=0.5 +ellps=GRS80").project(new ProjCoordinate(10, 55), out);
+        assertEquals("easting", 688376.287161978, out.x, 1e-6);
+        assertEquals("northing", 6620055.430083310, out.y, 1e-6);
+    }
+
+    /**
+     * The over-refusal control. {@code +n} is out of {@code urmfps}'s own ]0,1] range in both of
+     * these, and both are legal on {@code wag1} because {@code wag1} never looks at the key. A
+     * guard that refused them, or that read an absent {@code +n} as 0, would trade upstream's
+     * defect for one of our own invention. Pinned to {@code proj} 9.8.1:
+     * <pre>
+     * echo "10 20" | proj -f '%.9f' +proj=wag1 +a=6400000 +n=0
+     * 936067.785341591 2532839.802784069
+     * </pre>
+     */
+    @Test
+    public void wag1AcceptsTheOutOfRangeNThatProjAccepts() {
+        for (String definition : new String[] {"+proj=wag1 +a=6400000 +n=0",
+                "+proj=wag1 +a=6400000 +n=5", "+proj=wag1 +a=6400000 +n=-1"}) {
+            ProjCoordinate out = new ProjCoordinate();
+            projection(definition).project(new ProjCoordinate(10, 20), out);
+            assertEquals(definition + ": easting", 936067.785341591, out.x, 1e-6);
+            assertEquals(definition + ": northing", 2532839.802784069, out.y, 1e-6);
+        }
+    }
+
+    // ------------------------------------------------- absent-parameter refusals: gn_sinu, imw_p
+
+    /**
+     * {@code gn_sinu} tests {@code +n} and then {@code +m} for presence before reading either
+     * ({@code gn_sinu.cpp:180-188}). The {@code m} half could not be caught by a value test, which
+     * is where it used to be: {@code m = 0} is legal upstream, so {@code +n=1} on its own passed
+     * the {@code m < 0} test and answered where {@code proj} 9.8.1 says "Missing parameter m."
+     */
+    @Test
+    public void generalSinusoidalRequiresMAndNamesNFirst() {
+        assertRejects("+proj=gn_sinu +a=6400000 +n=1", "m");
+        assertRejects("+proj=gn_sinu +a=6400000", "n");
+        // The other side: an explicit +m=0 is legal and must still project.
+        assertNotNull(projection("+proj=gn_sinu +a=6400000 +n=1 +m=0"));
+    }
+
+    /**
+     * {@code imw_p} tests both parallels for presence ({@code imw_p.cpp:36-41}). Its two value
+     * tests catch an absent pair, because both differences are then zero, but not exactly one
+     * absent: {@code +lat_1=30} alone left {@code lat_2} at 0, passed both, and answered.
+     * {@code proj} 9.8.1 refuses it with "Missing parameter: lat_2 should be specified".
+     */
+    @Test
+    public void imwPRefusesExactlyOneParallel() {
+        assertRejects("+proj=imw_p +ellps=GRS80 +lat_1=30", "lat_2");
+        assertRejects("+proj=imw_p +ellps=GRS80 +lat_2=30", "lat_1");
+        assertRejects("+proj=imw_p +ellps=GRS80", "lat_1");
+        // An explicit zero parallel is legal upstream and even selects its own code path
+        // (PHI_1_IS_ZERO, imw_p.cpp:207), so neither of these may be refused.
+        assertNotNull(projection("+proj=imw_p +ellps=GRS80 +lat_1=0 +lat_2=10"));
+        assertNotNull(projection("+proj=imw_p +ellps=GRS80 +lat_1=10 +lat_2=0"));
+    }
+
+    /**
+     * {@code geos} has no {@code +h} default and no presence test either: it reads {@code "dh"}
+     * and then refuses {@code h/a <= 0} ({@code geos.cpp:206,226-230}), so an absent {@code +h} and
+     * an explicit {@code +h=0} are one input upstream and are refused together. Our 35785831 m
+     * default answered for both, from a satellite the caller never named.
+     *
+     * <p>Pinned to {@code proj} 9.8.1, which still answers when {@code +h} is given:
+     * <pre>
+     * echo "10 20" | proj -f '%.9f' +proj=geos +ellps=GRS80 +h=35785831
+     * 1027290.592281427 2135974.287029047
+     * </pre>
+     */
+    @Test
+    public void geosRefusesAnAbsentOrbitHeight() {
+        assertRejects("+proj=geos +ellps=GRS80", "h");
+        assertRejects("+proj=geos +ellps=GRS80 +h=0", "h");
+        assertRejects("+proj=geos +ellps=GRS80 +h=-1000", "h");
+        ProjCoordinate out = new ProjCoordinate();
+        projection("+proj=geos +ellps=GRS80 +h=35785831").project(new ProjCoordinate(10, 20), out);
+        assertEquals("easting", 1027290.592281427, out.x, 1e-6);
+        assertEquals("northing", 2135974.287029047, out.y, 1e-6);
+    }
+
     // ------------------------------------------------------------ +proj=col_urban
 
     /**

@@ -18,9 +18,15 @@ name: Golden Master
 #
 # THIS JOB IS EXPECTED TO FAIL, AND THAT IS THE CORRECT OUTCOME. Its current assertion reads:
 #
-#     12,005 UNCHANGED · 41,425 CHANGED · 0 ADDED · 0 REMOVED · 39,134 INTENDED · 2,291 UNEXPLAINED
+#     12,002 UNCHANGED · 41,428 CHANGED · 0 ADDED · 0 REMOVED · 39,141 INTENDED · 2,287 UNEXPLAINED
 #
-# The 2,291 are the triage backlog - other streams' changes that have not yet been claimed by a
+# (Measured 2026-08-13 in a worktree with `mvn -B -Pgolden -pl golden -am verify`, and pasted from
+# that run. This line said 39,134 INTENDED and 2,291 UNEXPLAINED until then, which had already been
+# stale since the +proj=tmerc +zone re-pin. The figures that are actually asserted live in
+# golden/baseline/1.4.3/golden-expect.txt; this copy is prose and will go stale again, so read it as
+# a description of the shape of the outcome and not as the assertion.)
+#
+# The 2,287 are the triage backlog - other streams' changes that have not yet been claimed by a
 # rule - not a defect in this module and not a reason to soften the job. See golden/README.md's
 # triage sections for the breakdown and the owners. Anything that describes this job as green, or as
 # something that should be green today, is wrong.
@@ -38,9 +44,11 @@ name: Golden Master
 # committed baseline. GoldenMasterTest itself fails on any UNEXPLAINED row or on DEAD_RULE /
 # PENDING_RULE_FIRED / EXPIRED_RULE / COUNT_MISMATCH. Since the test is already red on the backlog,
 # its pass/fail bit carries no information about a change - which is why the figure check reports a
-# separate, named, greppable failure rather than relying on the exit code. rules.yaml carries 44
+# separate, named, greppable failure rather than relying on the exit code. rules.yaml carries 48
 # rules, all `status: active` and all with a pinned integer `expected_rows` - count them rather than
-# quoting a number from prose, which has been stale more than once.
+# quoting a number from prose, which has been stale more than once, including here: this said 44 on
+# 2026-08-13, when `grep -c "^  - id:" golden/rules.yaml` said 48 and `grep -c "    status: active"`
+# said 48 as well.
 #
 # DO NOT ADD `continue-on-error` TO GET PAST THEM. golden/README.md says so directly, and the
 # reason is that the alternative is strictly better: a `status: pending` rule is visible in the

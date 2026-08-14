@@ -138,6 +138,56 @@ public class BuiltinsProjectionDefectTest {
                 220685.140542979, 112983.500889396, MM_0_1);
     }
 
+    /**
+     * {@code leac} sets no parallel of its own, so both used to come from {@code AlbersProjection}'s
+     * constructor — 45.5&deg; and 29.5&deg;, the conterminous-US pair. A bare {@code +proj=leac}
+     * therefore ran the cone (+90&deg;, 45.5&deg;) where upstream runs (+90&deg;, 0&deg;), because
+     * {@code aea.cpp:222} reads {@code rlat_1} with no presence test and an absent {@code +lat_1} is
+     * 0 there.
+     *
+     * <p>Every {@code leac} row in {@code builtins.gie} and in the golden table supplies
+     * {@code +lat_1}, which is why nothing caught this. References from {@code proj} 9.8.1:
+     * <pre>
+     * echo "12 56" | proj -f '%.9f' +proj=leac +ellps=WGS84
+     * 553194.816514914 7476320.691195731
+     * echo "12 56" | proj -f '%.9f' +proj=leac +lat_1=45.5 +ellps=WGS84
+     * 720787.420562720 5760346.894499558
+     * </pre>
+     * The two are 1,724 km apart, and the second is what we used to return for the first.
+     */
+    @Test
+    public void bareLeacUsesZeroAndNotTheAlbersUnitedStatesPair() {
+        assertForward("+proj=leac +ellps=WGS84", 12, 56,
+                553194.816514914, 7476320.691195731, MM_0_1);
+        // The same input written the other way. Absence and an explicit zero are one input
+        // upstream, so these two must not diverge; a guard that read 0 as "absent" would split
+        // them and refuse a legal definition.
+        assertForward("+proj=leac +lat_1=0 +ellps=WGS84", 12, 56,
+                553194.816514914, 7476320.691195731, MM_0_1);
+        // An explicit +lat_1 still wins, so the fix is a default and not an override.
+        assertForward("+proj=leac +lat_1=45.5 +ellps=WGS84", 12, 56,
+                720787.420562720, 5760346.894499558, MM_0_1);
+    }
+
+    /**
+     * The {@code +south} twin of {@link #bareLeacUsesZeroAndNotTheAlbersUnitedStatesPair()}: the
+     * first standard parallel becomes the south pole ({@code aea.cpp:223}, {@code bsouth}) and the
+     * second is still an absent {@code +lat_1} read as 0. {@code proj} 9.8.1:
+     * <pre>
+     * echo "12 -56" | proj -f '%.9f' +proj=leac +south +ellps=WGS84
+     * 553194.816514914 -7476320.691195731
+     * </pre>
+     */
+    @Test
+    public void bareSouthernLeacUsesZeroToo() {
+        assertForward("+proj=leac +south +ellps=WGS84", 12, -56,
+                553194.816514914, -7476320.691195731, MM_0_1);
+        assertForward("+proj=leac +south +lat_1=0 +ellps=WGS84", 12, -56,
+                553194.816514914, -7476320.691195731, MM_0_1);
+        assertForward("+proj=leac +south +lat_1=45.5 +ellps=WGS84", 12, -56,
+                297372.604557325, -13881807.217400888, MM_0_1);
+    }
+
     // ------------------------------------------------------- shape 2: lost in-place reassignment
 
     /**

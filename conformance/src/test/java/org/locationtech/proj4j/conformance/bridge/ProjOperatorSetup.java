@@ -72,6 +72,12 @@ final class ProjOperatorSetup {
     /** {@code nsper.cpp:159} — {@code pn1 = h / a} must be in {@code ]0, 1e10]}. */
     private static final double NSPER_MAX_PN1 = 1.e10;
 
+    /** {@code geos.cpp:227} — {@code radius_g_1 = h / a} must be in {@code ]0, 1e10]}. */
+    private static final double GEOS_MAX_RADIUS_G_1 = 1.e10;
+
+    /** {@code imw_p.cpp:13}. */
+    private static final double IMW_P_EPS = 1.e-10;
+
     /** {@code krovak.cpp:293} — 49d30'N, used when {@code +lat_0} is absent. */
     private static final double KROVAK_DEFAULT_PHI0 = 0.863937979737193;
 
@@ -128,8 +134,20 @@ final class ProjOperatorSetup {
         if ("nsper".equals(name) || "tpers".equals(name)) {
             return nsper(a);
         }
+        if ("geos".equals(name)) {
+            return geos(a);
+        }
         if ("urm5".equals(name)) {
             return urm5(a);
+        }
+        if ("urmfps".equals(name)) {
+            return urmfps(a);
+        }
+        if ("gn_sinu".equals(name)) {
+            return gnSinu(a);
+        }
+        if ("imw_p".equals(name)) {
+            return imwP(a);
         }
         if ("s2".equals(name)) {
             return s2(a);
@@ -388,6 +406,40 @@ final class ProjOperatorSetup {
         return null;
     }
 
+    /**
+     * {@code geos.cpp:198-230}. The same {@code h / a} model as {@link #nsper}, on the
+     * other operator that takes an orbit height, plus a {@code +sweep} value set.
+     *
+     * <p>{@code +h} is read with the {@code 'd'} sigil and no presence test
+     * ({@code :206}), so an absent {@code +h} is 0 and is refused by the same value test
+     * as an explicit {@code +h=0} — which is exactly what {@code builtins.gie:2183}
+     * asserts. As in {@code nsper}, the lower bound needs no ellipsoid because
+     * {@code a > 0} is already established and the upper bound does.
+     *
+     * <p>The {@code +sweep} guard ({@code :212-218}) is transcribed although no corpus
+     * row carries the keyword and although proj4j ignores {@code +sweep} altogether:
+     * this class says what PROJ 9.8.1 does with a definition, not what proj4j does with
+     * it. Upstream compares {@code sweep_axis[0]} against {@code 'x'}/{@code 'y'} and
+     * then requires {@code sweep_axis[1] == '\0'}, so the legal set is the two
+     * one-character strings and nothing else, including the empty one.
+     */
+    private static GieFailure geos(GieProjArgs a) {
+        GieFailure f = oneOf(a, "geos", "sweep", new String[] {"x", "y"},
+                "geos.cpp:212-218");
+        if (f != null) {
+            return f;
+        }
+        double h = number(a, "h", 0.0);
+        if (h <= 0) {
+            return invalid("geos", "h / a must be > 0 (geos.cpp:206,226-230)");
+        }
+        double[] ell = shape(a);
+        if (ell != null && h / ell[0] > GEOS_MAX_RADIUS_G_1) {
+            return invalid("geos", "h / a must be <= 1e10 (geos.cpp:226-230)");
+        }
+        return null;
+    }
+
     /** {@code urm5.cpp:37-57}. */
     private static GieFailure urm5(GieProjArgs a) {
         if (!a.contains("n")) {
@@ -401,6 +453,82 @@ final class ProjOperatorSetup {
         if (Math.sqrt(1.0 - t * t) == 0.0) {
             return invalid("urm5",
                     "n * sin(|alpha|) should be < 1 (urm5.cpp:52-58)");
+        }
+        return null;
+    }
+
+    /**
+     * {@code urmfps.cpp:48-69}: a presence test on {@code +n} ({@code :56-59}) and then a
+     * range test on the value ({@code :62-66}).
+     *
+     * <p>{@code wag1} shares {@code urmfps_setup} but is a separate {@code PROJ_HEAD}
+     * ({@code :71-81}) that assigns {@code n = 0.8660254037844386467637231707} itself and
+     * calls no {@code pj_param}, so it is deliberately not routed here. A bare
+     * {@code +proj=wag1} is legal and so is {@code +proj=wag1 +n=-1}; both are in the
+     * oracle transcript as ACCEPT rows.
+     */
+    private static GieFailure urmfps(GieProjArgs a) {
+        if (!a.contains("n")) {
+            return invalid("urmfps", "missing parameter n (urmfps.cpp:56-59)");
+        }
+        double n = number(a, "n", 0.0);
+        if (n <= 0.0 || n > 1.0) {
+            return invalid("urmfps", "n should be in ]0,1] (urmfps.cpp:62-66)");
+        }
+        return null;
+    }
+
+    /**
+     * {@code gn_sinu.cpp:172-202}: presence of {@code +n} and then of {@code +m}
+     * ({@code :180-187}), and only after both the two value tests ({@code :191-198}).
+     *
+     * <p>The order is kept because it is observable: a bare {@code +proj=gn_sinu} is
+     * refused for the missing {@code n}, not the missing {@code m}. The {@code m}
+     * presence test cannot be folded into the {@code m < 0} one either, since
+     * {@code +m=0} is legal.
+     */
+    private static GieFailure gnSinu(GieProjArgs a) {
+        if (!a.contains("n")) {
+            return invalid("gn_sinu", "missing parameter n (gn_sinu.cpp:180-183)");
+        }
+        if (!a.contains("m")) {
+            return invalid("gn_sinu", "missing parameter m (gn_sinu.cpp:184-187)");
+        }
+        if (number(a, "n", 0.0) <= 0.0) {
+            return invalid("gn_sinu", "n should be > 0 (gn_sinu.cpp:191-194)");
+        }
+        if (number(a, "m", 0.0) < 0.0) {
+            return invalid("gn_sinu", "m should be >= 0 (gn_sinu.cpp:195-198)");
+        }
+        return null;
+    }
+
+    /**
+     * {@code imw_p.cpp:32-57}, {@code phi12}, which is the whole of what
+     * {@code PJ_PROJECTION(imw_p)} can reject — the rest of its setup returns only
+     * {@code PROJ_ERR_OTHER} on a failed allocation ({@code :177-185}).
+     *
+     * <p>Presence of {@code +lat_1} and then of {@code +lat_2}, then the half difference
+     * and the half sum. The two value tests do not subsume the two presence tests: they
+     * catch an absent <em>pair</em>, because both halves are then 0, but not exactly one
+     * absent parallel. Both presence failures report
+     * {@code PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE} ({@code :38}, {@code :41}) rather
+     * than {@code MISSING_ARG}, unlike {@code urmfps} and {@code gn_sinu}; that changes
+     * the errno a corpus row would have to name, not the verdict here.
+     */
+    private static GieFailure imwP(GieProjArgs a) {
+        if (!a.contains("lat_1")) {
+            return invalid("imw_p", "lat_1 should be specified (imw_p.cpp:36-38)");
+        }
+        if (!a.contains("lat_2")) {
+            return invalid("imw_p", "lat_2 should be specified (imw_p.cpp:39-41)");
+        }
+        double phi1 = radians(a, "lat_1", 0.0);
+        double phi2 = radians(a, "lat_2", 0.0);
+        if (Math.abs(0.5 * (phi2 - phi1)) < IMW_P_EPS
+                || Math.abs(0.5 * (phi2 + phi1)) < IMW_P_EPS) {
+            return invalid("imw_p", "|lat_1 - lat_2| and |lat_1 + lat_2| should be > 0 "
+                    + "(imw_p.cpp:45-54)");
         }
         return null;
     }

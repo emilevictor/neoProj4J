@@ -47,10 +47,43 @@ import org.locationtech.proj4j.util.ProjectionMath;
  * different cones. All 16 of the projection's {@code builtins.gie} assertions failed, the forward
  * ones by about 3 km and the inverse ones by 2.4 mm against a 0.1 mm bar.
  *
- * <p>The fix is the two {@code protected} seams {@link AlbersProjection#firstStandardParallel()}
- * and {@link AlbersProjection#secondStandardParallel()} rather than field mutation, because
- * {@code initialize()} runs twice — once from the constructor and once from the parser — and any
- * scheme that <em>writes</em> the shared fields is not idempotent across those two calls.
+ * <p>The <em>mapping</em> from keyword to parallel is the two {@code protected} seams
+ * {@link AlbersProjection#firstStandardParallel()} and
+ * {@link AlbersProjection#secondStandardParallel()} rather than field mutation, because
+ * {@code initialize()} runs twice — once from the constructor and once from the parser — and a
+ * mapping that <em>rewrote</em> the shared fields on every call would not be idempotent across
+ * those two calls.
+ *
+ * <p>That is about writes made <em>by</em> {@code initialize()}. It is not an argument against the
+ * one write below, in the constructor: the constructor runs once, before the parser has assigned
+ * anything, and {@code Proj4Parser} writes {@code projectionLatitude1} only when {@code +lat_1} is
+ * actually present, so an explicit parallel still wins and a second {@code initialize()} sees the
+ * same two fields the first one did.
+ *
+ * <h2>The second defect, and why the constructor is where it is fixed</h2>
+ *
+ * <p>{@code leac} sets no parallel of its own, so before this change both came from the implicit
+ * {@code super()} call — {@code AlbersProjection}'s 45.5&deg; and 29.5&deg;, the conterminous-US
+ * Albers pair. A bare {@code +proj=leac} therefore ran the cone (+90&deg;, 45.5&deg;) where
+ * upstream runs (+90&deg;, 0&deg;). Measured at (12, 56) on {@code +ellps=WGS84}, forward, with
+ * {@code proj} 9.8.1: PROJ's bare answer is {@code (553194.816514914, 7476320.691195731)} and its
+ * {@code +lat_1=45.5} answer is {@code (720787.420562720, 5760346.894499558)}, 1,724 km apart. Our
+ * bare answer was the second of those and is now the first, and our {@code +lat_1=0} agrees with
+ * our bare answer bit for bit.
+ *
+ * <p>This is a <b>default</b> defect and not a presence one, so it does not belong in
+ * {@code Proj4Parser} beside the {@code sconics} check. Upstream reads {@code rlat_1} with no
+ * {@code 't'} presence test, so an absent {@code +lat_1} and an explicit {@code +lat_1=0} are the
+ * same input upstream and must stay the same input here. Zeroing the two fields in the constructor
+ * is exactly that equivalence, and for <em>that</em> input it cannot degenerate the cone: the first
+ * parallel is a pole and the second is 0, so {@code |phi1 + phi2| = pi/2} and
+ * {@code AlbersProjection}'s {@code |phi1 + phi2| < 1e-10} rejection cannot fire.
+ *
+ * <p>That is a statement about the bare form only, not about the operator. An explicit parallel at
+ * the <em>opposite</em> pole does reach the rejection: {@code +proj=leac +lat_1=-90 +ellps=WGS84}
+ * throws it, and so does {@code +proj=leac +south +lat_1=90}. Both are correct — {@code proj} 9.8.1
+ * refuses each with {@code Error 1027 ... Invalid value for lat_1 and lat_2: |lat_1 + lat_2| should
+ * be > 0} — so the rejection being reachable there is parity, not a defect.
  */
 public class LambertEqualAreaConicProjection extends AlbersProjection {
 
@@ -67,6 +100,13 @@ public class LambertEqualAreaConicProjection extends AlbersProjection {
         this.south = south;
         minLatitude = ProjectionMath.toRad(0);
         maxLatitude = ProjectionMath.toRad(90);
+        // Undo AlbersProjection's conterminous-US pair. leac reads one parallel and reads it into
+        // the SECOND slot, so the absent value upstream is 0 for both fields; see the class
+        // comment. projectionLatitude2 is zeroed as well although secondStandardParallel() does
+        // not read it, so that getProjectionLatitude2() cannot report a parallel this operator
+        // never uses.
+        projectionLatitude1 = 0.0;
+        projectionLatitude2 = 0.0;
         initialize();
     }
 
