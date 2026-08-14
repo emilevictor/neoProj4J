@@ -592,12 +592,27 @@ must be green" and handed a workflow verdict, you will either block a good relea
 ignore a red line, and both are worse than not looking. "Do not tag over a red required job"
 simply cannot be evaluated from `gh run list`.
 
-If the release commit came in through a pull request, ask for the required checks only:
+If the release commit came in through a pull request, read the per-check list:
 
-    gh pr checks <n> --required
+    gh pr checks <n>
 
-`--required` restricts the list to checks required by branch protection, which is what excludes
-the advisory jobs. The flag is present in `gh pr checks --help` on gh 2.97.0.
+and ignore every line whose name ends in `(advisory)`. Those are the jobs allowed to fail.
+
+DO NOT USE `--required` HERE, EVEN THOUGH IT SOUNDS LIKE THE RIGHT FLAG. It restricts the list
+to checks required by BRANCH PROTECTION, and this repository has none configured, so it filters
+out everything and prints "no required checks reported on the '<branch>' branch". Measured on
+pull request 24 on 2026-08-14, with all 18 checks pending. An empty list reads as "nothing is
+red", which is the same mistake as reading the workflow verdict, one flag further along. The
+flag is real and is documented in `gh pr checks --help` on gh 2.97.0; it just answers a question
+nobody has configured an answer to. If branch protection is ever set up, `--required` becomes
+the better form -- check that it returns a non-empty list before trusting it.
+
+The `(advisory)` suffix is a reliable filter because the workflows put it in the job name
+themselves, at ci.yaml:140, ci.yaml:185, ci.yaml:349 (which appends it from `matrix.advisory`,
+so every advisory determinism leg gets it) and conformance.yaml:429. On pull request 24 that
+split 18 checks into 6 advisory and 12 not. Note that "advisory" means allowed to fail, not
+observed to fail: six jobs carry the suffix, and the four named in the paragraph above are the
+ones that actually do go red.
 
 If the commit was pushed straight to master there is no pull request, and therefore no
 required-checks list to ask for. Read the JOB conclusions rather than the run's:
