@@ -72,10 +72,11 @@ class ProjOperatorSetupTest {
      * Definitions whose verdict this validator is expected to reproduce.
      *
      * <p>Deliberately excluded: definitions PROJ rejects for a reason
-     * {@link ProjOperatorSetup} does not model (the {@code lcc}/{@code eqdc}
-     * eccentricity guards, which need {@code pj_msfn}/{@code pj_mlfn}). Those are
-     * listed in {@link #UNMODELLED} instead, so the gap is on the record rather than
-     * silently absent.
+     * {@link ProjOperatorSetup} does not model (the {@code eqdc} eccentricity guard,
+     * which needs {@code pj_mlfn}). Those are listed in {@link #UNMODELLED} instead, so
+     * the gap is on the record rather than silently absent. The {@code lcc} and
+     * {@code omerc} eccentricity guards used to be excluded for the same reason; they
+     * are closed form and are now here, probed in both directions.
      */
     private static final Row[] ORACLE = {
             // ---- ell_set.cpp / pj_calc_ellipsoid_params: f must be in [0,1)
@@ -102,6 +103,18 @@ class ProjOperatorSetupTest {
             reject("proj=lcc ellps=GRS80", "both parallels default to 0"),
             accept("proj=lcc ellps=GRS80 lat_1=30 lat_2=45", "ordinary secant"),
             accept("proj=lcc ellps=GRS80 lat_1=0.5 lat_2=2", "corpus row builtins.gie:3833"),
+
+            // ---- lcc: the secant-cone eccentricity guard, lcc.cpp:125-131. Note the
+            //      guard is about the PAIR of parallels, not about es alone: the same
+            //      degenerate ellipsoid is accepted at 30/45 and rejected at 0/1.
+            reject("proj=lcc a=9999999 b=.9 lat_2=1",
+                    "corpus block 166: the two msfn values are equal, so the cone constant is 0"),
+            reject("proj=lcc a=9999999 b=.9 lat_1=0.5 lat_2=2", "same guard, non-zero lat_1"),
+            accept("proj=lcc a=9999999 b=.9 lat_1=30 lat_2=45",
+                    "es is just as degenerate, but the msfn ratio still differs from 1"),
+            accept("proj=lcc a=9999999 b=9999 lat_2=1", "near miss: es not close enough to 1"),
+            accept("proj=lcc a=9999999 b=.9 lat_1=1",
+                    "lat_2 defaults to lat_1, so the cone is tangent and neither guard applies"),
 
             // ---- aea / leac / eqdc
             reject("proj=aea R=6400000 lat_1=1 lat_2=-1", "|lat_1+lat_2| == 0"),
@@ -130,6 +143,19 @@ class ProjOperatorSetupTest {
             accept("proj=omerc a=6400000 lat_0=45 lat_1=45 lat_2=45.00001 lon_1=0 lon_2=1e-5",
                     "|lat_1-lat_2| is 1.7e-7 rad, just OVER TOL=1e-7"),
             accept("proj=omerc ellps=GRS80 lat_1=0.5 lat_2=2", "corpus row builtins.gie:5223"),
+
+            // ---- omerc: the two-point eccentricity guards, omerc.cpp:255-261 and
+            //      :270-275. The lat_2=30 row is the only probe that reaches the SECOND
+            //      one - p is non-zero there and F - 1/F is what collapses.
+            reject("proj=omerc lat_1=0.8 a=6400000 b=.4",
+                    "corpus block 241: H == L, so p == 0 and the centre line is undefined"),
+            reject("proj=omerc lat_1=0.8 lat_2=30 a=6400000 b=.4",
+                    "p != 0 but F - 1/F == 0, the second guard"),
+            reject("proj=omerc lat_1=0.8 a=6400000 b=.4 lat_0=20",
+                    "same, through the |lat_0| > EPS branch that computes B and E"),
+            accept("proj=omerc lat_1=0.8 a=6400000 b=4000", "near miss: H differs from L"),
+            accept("proj=omerc lat_1=0.8 lat_2=30 a=6400000 b=4000",
+                    "near miss on both guards"),
 
             // ---- omerc: the +gamma limit, which is where D matters
             accept("proj=omerc lat_0=10 R=6400000 gamma=80",
@@ -288,18 +314,22 @@ class ProjOperatorSetupTest {
 
     /**
      * Definitions {@code proj 9.8.1} rejects that {@link ProjOperatorSetup}
-     * deliberately does <em>not</em>, because the guard needs {@code pj_msfn},
-     * {@code pj_tsfn} or {@code pj_mlfn}. Asserting they come back valid pins the
-     * boundary: if someone ports those guards, this list must shrink in the same
-     * commit, and if the validator starts rejecting them by accident, this catches it.
+     * deliberately does <em>not</em>. Asserting they come back valid pins the boundary:
+     * if someone ports those guards, this list must shrink in the same commit, and if
+     * the validator starts rejecting them by accident, this catches it.
+     *
+     * <p>The {@code lcc} and {@code omerc} entries have left this list — their guards
+     * are closed form ({@code pj_msfn}, {@code pj_tsfn}) and are now ported, and their
+     * probes moved into {@link #ORACLE} in both directions. What remains is
+     * {@code eqdc}, whose guard divides by a difference of {@code pj_mlfn} values;
+     * {@link ProjOperatorSetup#eqdc} states at length why the closed-form part of that
+     * expression is <em>not</em> enough to decide it.
      */
     private static final String[] UNMODELLED = {
-            // Need pj_msfn / pj_tsfn / pj_mlfn to evaluate an `n == 0` secant-cone
-            // degeneracy at an eccentricity indistinguishable from 1.
-            "proj=lcc a=9999999 b=.9 lat_2=1",
+            // Need pj_mlfn - the AuxLat 6th-order meridian series, evaluated far outside
+            // its stated |f| <= 1/150 convergence domain - to decide `n == 0`.
             "proj=eqdc a=9999999 b=.9 lat_2=1",
             "proj=eqdc lat_1=1 ellps=GRS80 b=.1",
-            "proj=omerc lat_1=0.8 a=6400000 b=.4",
             // A repeated +o_proj: ob_tran_target_params rewrites every occurrence and
             // the resulting failure is not the one the rewrite loop reads as though it
             // should be. proj 9.8.1 rejects this with omerc's lat_1/lat_2 message,
@@ -346,7 +376,7 @@ class ProjOperatorSetupTest {
     }
 
     @Test
-    @DisplayName("guards needing pj_msfn/pj_tsfn/pj_mlfn are honestly reported as not modelled")
+    @DisplayName("guards needing pj_mlfn are honestly reported as not modelled")
     void unmodelledGuardsStayValid() {
         for (String def : UNMODELLED) {
             GieFailure f = ProjDefinitionValidator.validate(GieProjArgs.parse(def));
