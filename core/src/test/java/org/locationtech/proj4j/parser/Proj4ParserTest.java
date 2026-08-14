@@ -172,14 +172,32 @@ public class Proj4ParserTest {
     }
 
     /**
-     * {@code Units.findUnits} returns METRES for anything it does not know and
-     * never returns null, so the parser's own null guard was dead code.
+     * This test used to be {@code unknownUnitsSilentlyBecomeMetresInProjCompatibleMode}
+     * and asserted the opposite: that {@code +units=bananas} was a working CRS in metres
+     * by default. It was named after the defect and pinned it in place.
+     * <p>
+     * PROJ resolves {@code +units} against the ids of {@code pj_list_linear_units()} and
+     * refuses anything else ({@code init.cpp:679}), in every mode it has, so returning
+     * metres was never PROJ-compatible - it was a plausible wrong answer produced by
+     * {@code Units.findUnits}'s metres fallback.
      */
     @Test
-    public void unknownUnitsSilentlyBecomeMetresInProjCompatibleMode() {
-        assertSame(Units.METRES, crs("+proj=merc +ellps=GRS80 +units=bananas").getProjection().getUnits());
+    public void unknownUnitsAreRefusedInTheDefaultModeToo() {
+        try {
+            crs("+proj=merc +ellps=GRS80 +units=bananas");
+            fail("the default mode must refuse a +units value PROJ refuses");
+        } catch (InvalidValueException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("bananas"));
+        }
+        // ...and the ids it does know are unaffected.
+        assertSame(Units.METRES, crs("+proj=merc +ellps=GRS80 +units=m").getProjection().getUnits());
+        assertSame(Units.US_FEET, crs("+proj=merc +ellps=GRS80 +units=us-ft").getProjection().getUnits());
     }
 
+    /**
+     * STRICT refuses the same values the default mode does, no more: {@code +units} is
+     * no longer one of the things STRICT adds.
+     */
     @Test
     public void strictModeRejectsUnknownUnits() {
         Proj4Parser strict = new Proj4Parser(new Registry(), Proj4Parser.ParseMode.STRICT);

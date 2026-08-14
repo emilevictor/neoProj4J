@@ -180,18 +180,22 @@ public final class ProjContext {
      * {@link org.locationtech.proj4j.parser.Proj4Parser} takes, so a caller does not learn two
      * vocabularies for one decision.
      *
-     * <h4>What {@link ParseMode#STRICT} actually changes &mdash; two things, and no others</h4>
+     * <h4>What {@link ParseMode#STRICT} actually changes &mdash; one thing, and no others</h4>
      *
      * <ol>
      * <li>A key outside {@link org.locationtech.proj4j.parser.Proj4Keyword#supportedParameters()}
      *     raises {@link org.locationtech.proj4j.UnsupportedParameterException}, <b>naming the
      *     key</b>, instead of being retained and ignored.</li>
-     * <li>A {@code +units} name this library cannot resolve raises
-     *     {@link org.locationtech.proj4j.InvalidValueException} instead of silently falling back
-     *     to metres &mdash; {@code Units.findUnits} returns {@code METRES} for anything it does
-     *     not know and never returns null, so under the default {@code +units=bananas} is a
-     *     working CRS in metres.</li>
      * </ol>
+     *
+     * <p><b>This list used to have a second entry, for {@code +units}.</b> An unresolvable
+     * {@code +units} value now raises {@link org.locationtech.proj4j.InvalidValueException}
+     * in <em>both</em> modes, because that is what PROJ itself does
+     * ({@code init.cpp:679} resolves {@code +units} against the ids of
+     * {@code pj_list_linear_units()} and nothing else) &mdash; so it is parity rather than
+     * added strictness, and gating it behind {@code STRICT} left the default mode returning
+     * metres for a value PROJ refuses. {@link org.locationtech.proj4j.units.Units#linearUnitIds()}
+     * is the accepted set.
      *
      * <p><b>Duplicate keys are not affected.</b> {@code Proj4Parser}'s parameter map keeps the
      * <em>first</em> occurrence of a repeated key in both modes, which is PROJ's own rule
@@ -375,12 +379,13 @@ public final class ProjContext {
         sb.append("  domainErrorPolicy   = ").append(domainErrorPolicy).append('\n');
         sb.append("  parseMode           = ").append(parseMode)
                 .append(parseMode == ParseMode.STRICT
-                        ? "   (a PROJ.4 parameter string with a key outside the allow-list, or an "
-                                + "unresolvable +units, is refused -- stricter than PROJ, which "
-                                + "has no allow-list; applies to PROJ.4 strings only, not to "
-                                + "authority codes, WKT, PROJJSON or the 1.x CRSFactory)\n"
-                        : "   (as PROJ: an unrecognised +key is retained and ignored, and an "
-                                + "unknown +units falls back to metres)\n");
+                        ? "   (a PROJ.4 parameter string with a key outside the allow-list is "
+                                + "refused -- stricter than PROJ, which has no allow-list; applies "
+                                + "to PROJ.4 strings only, not to authority codes, WKT, PROJJSON "
+                                + "or the 1.x CRSFactory)\n"
+                        : "   (as PROJ: an unrecognised +key is retained and ignored)\n")
+                .append("                        both modes: +units must be one of PROJ's 21 "
+                        + "linear unit ids (Units.linearUnitIds()); anything else is refused\n");
         sb.append("  database            = ").append(database == null
                 ? "NONE -- operation selection falls back to the legacy datum model, which "
                         + "synthesises exactly one operation per CRS pair"

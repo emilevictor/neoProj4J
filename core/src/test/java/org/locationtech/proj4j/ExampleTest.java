@@ -46,7 +46,10 @@ public class ExampleTest {
          */
         CoordinateReferenceSystem crs = csFactory.createFromName(csName);
 
-        final String WGS84_PARAM = "+title=long/lat:WGS84 +proj=longlat +ellps=WGS84 +datum=WGS84 +units=degrees";
+        // +units=degrees dropped: not a PROJ +units id, and measured to be a complete
+        // no-op on +proj=longlat. See CoordinateTransformTester.WGS84_PARAM for the
+        // measurement and the two reasons behind it.
+        final String WGS84_PARAM = "+title=long/lat:WGS84 +proj=longlat +ellps=WGS84 +datum=WGS84";
         CoordinateReferenceSystem WGS84 = csFactory.createFromParameters("WGS84", WGS84_PARAM);
 
         CoordinateTransform trans = ctFactory.createTransform(WGS84, crs);

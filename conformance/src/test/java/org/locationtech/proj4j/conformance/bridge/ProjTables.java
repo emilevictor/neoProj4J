@@ -144,21 +144,24 @@ public final class ProjTables {
     }
 
     /**
-     * Whether proj4j's {@code Units} table really resolves {@code id}, as opposed
-     * to silently substituting metres. {@code Units.findUnits} returns
-     * {@code METRES} rather than {@code null} for an unknown name, so presence has
-     * to be established by checking that the returned unit actually answers to the
-     * name asked for.
+     * Whether proj4j accepts {@code id} as a {@code +units} value.
+     *
+     * <p>Asks {@code Units.linearUnitIds()}, which is the set proj4j's parser resolves
+     * {@code +units} against — so this answers the question the caller actually has,
+     * rather than a looser one. It used to go through {@code Units.findUnits} and accept
+     * a name or plural as well as an id ({@code "feet"} counted as resolving
+     * {@code "ft"}), which was never what {@code +units} means: PROJ resolves it against
+     * the id column of {@code pj_list_linear_units()} alone, and {@code +units=feet} is
+     * {@code "Invalid value for units"} upstream.
+     *
+     * <p>No corpus row moves as a result — every {@code +units} value in the corpus is
+     * already an id, and {@link #UNITS} is exactly those 21 ids.
      */
     public static boolean proj4jResolvesUnit(String id) {
         if (id == null) {
             return false;
         }
-        org.locationtech.proj4j.units.Unit u = org.locationtech.proj4j.units.Units.findUnits(id);
-        if (u == null) {
-            return false;
-        }
-        return id.equals(u.abbreviation) || id.equals(u.name) || id.equals(u.plural);
+        return org.locationtech.proj4j.units.Units.linearUnitIds().contains(id);
     }
 
     private static Set<String> set(String... values) {

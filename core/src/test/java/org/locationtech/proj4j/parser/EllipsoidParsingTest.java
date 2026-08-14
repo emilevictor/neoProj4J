@@ -545,8 +545,14 @@ public class EllipsoidParsingTest {
     /**
      * The positive control for the test above: a name that is genuinely absent must still throw.
      * Without this, {@code theFourAddedEllipsoidsResolveByName} could pass against an
-     * implementation that resolved <em>everything</em> to a default — which is exactly the failure
-     * mode {@code Units.findUnits} has, returning metres for any unrecognised unit name.
+     * implementation that resolved <em>everything</em> to a default.
+     *
+     * <p>{@code +units=} used to work that way. {@link org.locationtech.proj4j.units.Units#findUnits}
+     * returns {@code METRES} for any name it does not recognise, and the parser used to call it, so
+     * {@code +units=ftUS} produced a plausible wrong answer instead of an error. {@code findUnits}
+     * still behaves that way — other callers depend on it — but the parser no longer uses it, and
+     * resolves {@code +units=} against {@link org.locationtech.proj4j.units.Units#linearUnitIds()}
+     * instead. See {@code LinearUnitParsingTest}.
      */
     @Test
     public void agenuinelyUnknownEllipsoidNameStillThrows() {

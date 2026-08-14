@@ -80,7 +80,10 @@ public class ProjectionGridRoundTripper {
 
     private final CRSFactory csFactory = new CRSFactory();
 
-    static final String WGS84_PARAM = "+title=long/lat:WGS84 +proj=longlat +datum=WGS84 +units=degrees";
+    // +units=degrees dropped: not a PROJ +units id, and measured to be a complete no-op
+    // on +proj=longlat. See CoordinateTransformTester.WGS84_PARAM for the measurement
+    // and the two reasons behind it.
+    static final String WGS84_PARAM = "+title=long/lat:WGS84 +proj=longlat +datum=WGS84";
 
     private final CoordinateReferenceSystem WGS84 = csFactory.createFromParameters("WGS84", WGS84_PARAM);
 

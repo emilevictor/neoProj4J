@@ -27,7 +27,16 @@ public class CoordinateTransformTester {
     private static final CoordinateTransformFactory ctFactory = new CoordinateTransformFactory();
     CRSFactory crsFactory = new CRSFactory();
 
-    static final String WGS84_PARAM = "+title=long/lat:WGS84 +proj=longlat +datum=WGS84 +units=degrees";
+    // +units=degrees dropped: it is not a PROJ +units id (PROJ resolves +units against
+    // the linear table only, so "degrees" is "Invalid value for units" upstream) and it
+    // was measured to be a complete no-op here - on +proj=longlat, "+units=degrees",
+    // "+units=deg", "+units=m" and no +units at all all give unit=deg, fromMetres=1.0
+    // and bit-identical output. Two independent reasons, both needed: DEGREES.value is
+    // 1, exactly METRES.value (DegreeUnit:27), so the scale is unchanged; and
+    // LongLatProjection.initialize() (:51) reassigns Units.DEGREES after the parser's
+    // units block, so the reported unit is unchanged. +units=us-ft on longlat is NOT a
+    // no-op, which is how the first reason was established rather than assumed.
+    static final String WGS84_PARAM = "+title=long/lat:WGS84 +proj=longlat +datum=WGS84";
     CoordinateReferenceSystem WGS84 = crsFactory.createFromParameters("WGS84", WGS84_PARAM);
 
     public CoordinateTransformTester(boolean verbose) {

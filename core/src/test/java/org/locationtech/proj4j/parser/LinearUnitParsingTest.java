@@ -305,11 +305,22 @@ public class LinearUnitParsingTest {
      * </pre>
      * They must therefore stay out of the {@code +units} lookup, or Proj4J would accept
      * definitions PROJ rejects.
+     *
+     * <p><b>{@code deg} is deliberately not checked here, and this test used to look like it
+     * covered all three angular ids.</b> It does not: {@code Units.isKnownUnit("deg")} is
+     * <b>true</b>, because {@link Units#DEGREES} is in {@link Units#units} for
+     * {@code LongLatProjection} and the {@code geoapi} module, and it must stay true for
+     * them. The refusal of {@code deg}/{@code degree}/{@code degrees} is therefore asserted
+     * at the parse level instead — see
+     * {@link #theThreeDegreeSpellingsAreRefusedAtParseLevel()}.
      */
     @Test
     public void angularUnitIdsAreNotLinearUnitNames() {
         assertFalse("+units=rad must not resolve", Units.isKnownUnit("rad"));
         assertFalse("+units=grad must not resolve", Units.isKnownUnit("grad"));
+        // deg is the exception, and it is why the parse-level test above exists.
+        assertTrue("isKnownUnit(\"deg\") is true by design; see the comment above",
+                Units.isKnownUnit("deg"));
         for (Unit unit : Units.LINEAR_UNITS) {
             assertFalse("the linear table must not contain " + unit.abbreviation,
                     unit == Units.RADIANS || unit == Units.GRADS);
@@ -319,23 +330,318 @@ public class LinearUnitParsingTest {
         assertEquals(0.9, Units.GRADS.value, 0.0);
     }
 
-    /** STRICT mode turns the silent metres fallback into an error, for the new ids too. */
+    // ------------------------------------------------------------------
+    // +units resolves against the 21 ids and nothing else
+    // ------------------------------------------------------------------
+
+    /**
+     * Parses a definition given as an argument array, so a {@code +units} value containing
+     * a space can be tested. The whitespace-splitting entry point cannot express one.
+     */
+    private CoordinateReferenceSystem parseArgs(String... args) {
+        return new Proj4Parser(new org.locationtech.proj4j.Registry()).parse("t", args);
+    }
+
+    private void rejectedArgs(String unitsValue) {
+        try {
+            parseArgs("+proj=merc", "+ellps=GRS80", "+units=" + unitsValue);
+            fail("expected +units=" + unitsValue + " to be rejected");
+        } catch (InvalidValueException expected) {
+            assertTrue(expected.getMessage(),
+                    expected.getMessage().contains("Unknown unit: " + unitsValue));
+        }
+    }
+
+    /**
+     * <b>The realistic case, and the reason this whole area was wrong.</b> {@code ftUS} is an
+     * ordinary misspelling of the U.S. survey foot. Proj4J used to answer in metres, so a
+     * caller asking for feet got a number 1.14 million units from what they wanted with
+     * nothing to signal it; PROJ refuses. Measured against 9.8.1 on
+     * {@code +proj=utm +zone=18 +datum=WGS84} at (-75, 40):
+     *
+     * <pre>
+     * $ echo "-75 40" | cs2cs -f '%.4f' +proj=longlat +datum=WGS84 \
+     *       +to +proj=utm +zone=18 +datum=WGS84 +units=ftUS
+     * proj_create: Error 1027 (Invalid value for an argument): utm: Invalid value for units
+     * </pre>
+     *
+     * <p>Proj4J's answer there was {@code 500000.0000 4427757.2187} — the correct value in
+     * <i>metres</i>, which is exactly what makes it dangerous: it is a plausible coordinate.
+     * <p>
+     * The message text is asserted verbatim because it is depended on outside this repo.
+     */
     @Test
-    public void strictModeStillRejectsWhatProjRejects() {
-        Proj4Parser strict = new Proj4Parser(new org.locationtech.proj4j.Registry(),
-                Proj4Parser.ParseMode.STRICT);
-        for (String bad : new String[]{"rad", "grad", "furlong", "point", "min"}) {
+    public void anUnresolvableUnitsNameIsRefusedRatherThanBecomingMetres() {
+        for (String bad : new String[]{"ftUS", "usft", "ft-us", "survey-ft", "BOGUS", "parsec"}) {
+            InvalidValueException e = rejected(MERC + " +units=" + bad);
+            assertEquals("the refusal must name the value, verbatim",
+                    "Unknown unit: " + bad, e.getMessage());
+        }
+        // An empty value is the same error, not a silent default.
+        assertEquals("Unknown unit: ", rejected(MERC + " +units=").getMessage());
+    }
+
+    /**
+     * The refusal fires in the <b>default</b> parse mode, which is the whole point: it is
+     * PROJ's own behaviour, not an opt-in stricter-than-PROJ check. {@code CRSFactory} only
+     * ever selects {@code PROJ_COMPATIBLE}, so this goes through it.
+     */
+    @Test
+    public void theRefusalFiresInTheDefaultParseModeNotOnlyInStrict() {
+        assertEquals(Proj4Parser.ParseMode.PROJ_COMPATIBLE,
+                new Proj4Parser(new org.locationtech.proj4j.Registry()).getParseMode());
+        assertEquals("Unknown unit: ftUS", rejected(MERC + " +units=ftUS").getMessage());
+        // ...and an id still works through the same default-mode entry point.
+        assertSame(Units.US_FEET, crs(MERC + " +units=us-ft").getProjection().getUnits());
+    }
+
+    /**
+     * <b>{@code deg}, {@code degree} and {@code degrees} produced a plausible wrong
+     * coordinate, and {@code STRICT} did not catch it.</b>
+     *
+     * <p>{@link Units#DEGREES} is in {@link Units#units} because {@code LongLatProjection}
+     * and the {@code geoapi} module look a unit up by the {@code deg}/{@code degrees}
+     * symbol, and it carries name {@code degree}, plural {@code degrees} and abbreviation
+     * {@code deg}. {@code Units.findUnits} matches all three, so {@code +units=deg} on a
+     * projected operator used to resolve — measured at
+     * {@code +proj=utm +zone=18 +datum=WGS84} (-75, 40) as {@code (0.0000, 39.7752)}, where
+     * the answer in metres is {@code (500000.0000, 4427757.2187)}. That reads like a
+     * longitude/latitude pair and is wrong in both ordinates: longitude 0 for a point at
+     * -75. PROJ refuses all three.
+     *
+     * <p>{@code ParseMode.STRICT} did not help, because it asked
+     * {@code Units.isKnownUnit("deg")}, which is <b>true</b> — the null-returning wrapper
+     * never returned null, so the throw was never reached. That is why this is asserted at
+     * the <b>parse</b> level: {@code isKnownUnit("deg")} is still true by design, and must
+     * stay true for the WKT and geoapi callers.
+     */
+    @Test
+    public void theThreeDegreeSpellingsAreRefusedAtParseLevel() {
+        for (String spelling : new String[]{"deg", "degree", "degrees"}) {
+            assertEquals("Unknown unit: " + spelling,
+                    rejected(MERC + " +units=" + spelling).getMessage());
+            // ...in STRICT too, which is where it used to slip through.
             try {
-                strict.parse("t", (MERC + " +units=" + bad).split(" "));
-                fail("STRICT must reject +units=" + bad);
+                new Proj4Parser(new org.locationtech.proj4j.Registry(),
+                        Proj4Parser.ParseMode.STRICT)
+                        .parse("t", (MERC + " +units=" + spelling).split(" "));
+                fail("STRICT must reject +units=" + spelling);
             } catch (InvalidValueException expected) {
-                assertTrue(expected.getMessage().contains(bad));
+                assertTrue(expected.getMessage(), expected.getMessage().contains(spelling));
             }
         }
+        // The reason STRICT could not catch it, pinned so the design stays deliberate:
+        // these stay resolvable by NAME, for WktNames and geoapi/Units.
+        assertTrue("isKnownUnit(\"deg\") must stay true - WktNames and geoapi need it",
+                Units.isKnownUnit("deg"));
+        assertTrue(Units.isKnownUnit("degree"));
+        assertTrue(Units.isKnownUnit("degrees"));
+        assertSame(Units.DEGREES, Units.findUnits("deg"));
+        // ...but "deg" is not an accepted +units id.
+        assertFalse(Units.linearUnitIds().contains("deg"));
+    }
+
+    /**
+     * <b>A unit's name and plural are not ids.</b> PROJ resolves {@code +units} against the
+     * {@code id} column of {@code pj_list_linear_units()} only, so {@code +units=feet} is an
+     * error upstream while {@code +units=ft} is fine — verified, because the intuition runs
+     * the other way and an earlier report had {@code feet} on its "correct, do not fix" list:
+     *
+     * <pre>
+     * $ echo "-75 40" | cs2cs -f '%.4f' +proj=longlat +datum=WGS84 \
+     *       +to +proj=utm +zone=18 +datum=WGS84 +units=feet
+     * proj_create: Error 1027 (Invalid value for an argument): utm: Invalid value for units
+     * $ ... +units=ft
+     * 1640419.9475    14526762.5287 0.0000
+     * </pre>
+     *
+     * <p>This part was <b>permissiveness rather than a wrong answer</b> — {@code +units=feet}
+     * did get you feet — but it is still not parity, and every one of these used to resolve.
+     *
+     * <p>Enumerated from {@link Units#units} rather than hard-coded, so a unit added later
+     * cannot quietly reintroduce a name spelling. The 18 spellings containing a space go
+     * through the argument-array entry point, since a proj string cannot express one.
+     */
+    @Test
+    public void unitNamesAndPluralsAreRefusedWhileTheIdIsAccepted() {
+        // The single most likely one to be got wrong, called out by name.
+        assertEquals("Unknown unit: feet", rejected(MERC + " +units=feet").getMessage());
+        assertSame(Units.FEET, crs(MERC + " +units=ft").getProjection().getUnits());
+
+        List<String> wronglyAccepted = new ArrayList<String>();
+        List<String> wronglyRefused = new ArrayList<String>();
+        int spaced = 0;
+        int singleToken = 0;
+        for (Unit unit : Units.units) {
+            for (String spelling : new String[]{unit.name, unit.plural, unit.abbreviation}) {
+                boolean shouldResolve = Units.linearUnitIds().contains(spelling);
+                boolean resolved;
+                try {
+                    // Always the array entry point, so a spaced name is expressible.
+                    parseArgs("+proj=merc", "+ellps=GRS80", "+units=" + spelling);
+                    resolved = true;
+                } catch (InvalidValueException e) {
+                    resolved = false;
+                }
+                if (resolved && !shouldResolve) {
+                    wronglyAccepted.add(spelling);
+                } else if (!resolved && shouldResolve) {
+                    wronglyRefused.add(spelling);
+                }
+                if (!shouldResolve) {
+                    if (spelling.indexOf(' ') >= 0) {
+                        spaced++;
+                    } else {
+                        singleToken++;
+                    }
+                }
+            }
+        }
+        assertTrue("spellings PROJ refuses that we still accept: " + wronglyAccepted,
+                wronglyAccepted.isEmpty());
+        assertTrue("ids we must accept but refused: " + wronglyRefused,
+                wronglyRefused.isEmpty());
+        // Non-vacuity: the sweep must actually have had non-id spellings to refuse, in both
+        // shapes. Counts are not pinned exactly, because adding a unit legitimately moves
+        // them; a floor is enough to prove the loop is not walking an empty set.
+        assertTrue("the sweep must cover single-token non-id spellings, got " + singleToken,
+                singleToken >= 23);
+        assertTrue("the sweep must cover spaced non-id spellings, got " + spaced, spaced >= 18);
+    }
+
+    /**
+     * <b>The lookup is case-sensitive, and must stay that way.</b> PROJ is case-sensitive on
+     * this key: {@code us-ft} resolves and {@code US-FT} does not. Proj4J's comparison missed
+     * and fell through to metres, so {@code US-FT} — a genuine id in the wrong case — was a
+     * <b>wrong answer</b>, not mere permissiveness.
+     *
+     * <p><b>Do not "fix" this by lower-casing the key.</b> That would resolve {@code US-FT}
+     * but would also start accepting {@code M} and {@code Ft}, which PROJ refuses. All three
+     * were measured against 9.8.1 and all three are
+     * {@code Error 1027 ... utm: Invalid value for units}. Matching PROJ means refusing all
+     * three, which is what a case-sensitive comparison does.
+     */
+    @Test
+    public void theUnitsLookupIsCaseSensitiveExactlyAsProjIs() {
+        for (String wrongCase : new String[]{"US-FT", "M", "Ft", "KM", "Us-Ft", "IND-YD"}) {
+            assertEquals("Unknown unit: " + wrongCase,
+                    rejected(MERC + " +units=" + wrongCase).getMessage());
+        }
+        // ...and the correctly-spelled ids are unaffected.
+        assertSame(Units.US_FEET, crs(MERC + " +units=us-ft").getProjection().getUnits());
+        assertSame(Units.METRES, crs(MERC + " +units=m").getProjection().getUnits());
+        assertSame(Units.FEET, crs(MERC + " +units=ft").getProjection().getUnits());
+        assertSame(Units.KILOMETRES, crs(MERC + " +units=km").getProjection().getUnits());
+    }
+
+    /**
+     * A {@code +units} key with no value at all. {@code createParameterMap} stores
+     * {@code null} for a token with no {@code '='}, which is <b>not</b> the same as the empty
+     * string, so a bare {@code +units} used to skip the units block entirely and come out as
+     * metres. PROJ refuses it:
+     *
+     * <pre>
+     * $ echo "-75 40" | cs2cs -f '%.4f' +proj=longlat +datum=WGS84 \
+     *       +to +proj=utm +zone=18 +datum=WGS84 +units
+     * proj_create: Error 1027 (Invalid value for an argument): utm: Invalid value for units
+     * </pre>
+     *
+     * <p>A present-but-valueless {@code +units} is distinct from an <i>absent</i> one, and
+     * the difference is load-bearing: an absent {@code +units} is what lets {@code +to_meter}
+     * apply, so this must not break that.
+     */
+    @Test
+    public void aValuelessUnitsKeyIsRefusedButAnAbsentOneStillLetsToMeterApply() {
+        rejected(MERC + " +units");
+        rejected(MERC + " +units=");
+        // The regression this guards: no +units at all must still hand over to +to_meter.
+        expect(MERC + " +to_meter=0.3048", INTL_FOOT_X, INTL_FOOT_Y);
+        expect(MERC, METRE_X, METRE_Y);
+        // And a valueless +units must not be rescued by a +to_meter alongside it.
+        rejected(MERC + " +units +to_meter=0.3048");
+    }
+
+    /**
+     * {@link Units#linearUnitIds()} is the supported way to discover what {@code +units}
+     * accepts, and it must not be able to drift from what the parser does — so every id it
+     * reports is parsed here, through {@code +units=}, rather than merely compared against a
+     * second hard-coded list.
+     *
+     * <p>The accessor exists because once the parser refuses everything outside these 21
+     * ids, a caller has no other supported way to ask. {@code Units.LINEAR_UNITS} is not that
+     * way: it is a fork-only public field absent from upstream 1.4.3, and a consumer who read
+     * it from a static initialiser got {@code NoSuchFieldError} out of {@code <clinit>} on a
+     * 1.4.3 classpath — an {@code Error}, so it escaped every {@code catch (Exception)} they
+     * had.
+     */
+    @Test
+    public void linearUnitIdsIsTheAcceptedSetAndCannotDriftFromTheParser() {
+        assertEquals("PROJ's pj_units has 21 linear ids", 21, Units.linearUnitIds().size());
+
+        // Every advertised id must actually parse, and yield the unit whose id it is.
+        for (String id : Units.linearUnitIds()) {
+            Unit resolved = crs(MERC + " +units=" + id).getProjection().getUnits();
+            assertEquals("+units=" + id + " must resolve to the unit whose id it is",
+                    id, resolved.abbreviation);
+        }
+
+        // Unmodifiable, so a caller cannot widen what the parser accepts by mutating it.
+        try {
+            Units.linearUnitIds().add("bananas");
+            fail("linearUnitIds() must be unmodifiable");
+        } catch (UnsupportedOperationException expected) {
+            // as documented
+        }
+        assertEquals(21, Units.linearUnitIds().size());
+
+        // It is the ids, not the names: the discriminating pair from PROJ's own table.
+        assertTrue(Units.linearUnitIds().contains("ft"));
+        assertFalse(Units.linearUnitIds().contains("feet"));
+        assertFalse("deg is an angular id and is not a +units name",
+                Units.linearUnitIds().contains("deg"));
+    }
+
+    /**
+     * The refusal is not about {@code STRICT} any more — it fires in both modes — so this
+     * now says what it checks: STRICT does not <i>additionally</i> refuse any id, and does
+     * not stop refusing anything either. It was
+     * {@code strictModeStillRejectsWhatProjRejects}, from when STRICT was the only mode that
+     * refused an unresolvable unit.
+     */
+    @Test
+    public void strictModeAcceptsAndRefusesExactlyWhatTheDefaultModeDoes() {
+        org.locationtech.proj4j.Registry registry = new org.locationtech.proj4j.Registry();
+        Proj4Parser strict = new Proj4Parser(registry, Proj4Parser.ParseMode.STRICT);
+        Proj4Parser lax = new Proj4Parser(registry, Proj4Parser.ParseMode.PROJ_COMPATIBLE);
+
+        // An A/B against one frozen input list: both modes must refuse the same values with
+        // the same message, so nothing here is gated on the mode any more.
+        for (String bad : new String[]{"rad", "grad", "furlong", "point", "min", "deg", "feet"}) {
+            String definition = MERC + " +units=" + bad;
+            String strictMessage = null;
+            String laxMessage = null;
+            try {
+                strict.parse("t", definition.split(" "));
+                fail("STRICT must reject +units=" + bad);
+            } catch (InvalidValueException expected) {
+                strictMessage = expected.getMessage();
+            }
+            try {
+                lax.parse("t", definition.split(" "));
+                fail("PROJ_COMPATIBLE must reject +units=" + bad + " too - PROJ does");
+            } catch (InvalidValueException expected) {
+                laxMessage = expected.getMessage();
+            }
+            assertTrue(strictMessage, strictMessage.contains(bad));
+            assertEquals("both modes must give the same refusal", strictMessage, laxMessage);
+        }
+
         for (String good : new String[]{"fath", "ch", "link", "us-ch", "ind-yd", "ind-ft", "ind-ch"}) {
+            String definition = MERC + " +units=" + good;
             assertSame(good, Units.findUnits(good),
-                    strict.parse("t", (MERC + " +units=" + good).split(" "))
-                            .getProjection().getUnits());
+                    strict.parse("t", definition.split(" ")).getProjection().getUnits());
+            assertSame(good, Units.findUnits(good),
+                    lax.parse("t", definition.split(" ")).getProjection().getUnits());
         }
     }
 }

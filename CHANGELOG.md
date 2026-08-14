@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`+units=` is now resolved the way PROJ resolves it: against the unit *id* only, case-sensitively,
+  in both parse modes.** It used to go through `Units.findUnits`, which matches a unit's abbreviation,
+  name *and* plural and returns `METRES` for anything it does not recognise. One lookup caused three
+  separate wrong answers, all measured against `cs2cs` 9.8.1 on
+  `+proj=utm +zone=18 +datum=WGS84 +units=<U>` at (−75, 40), where the correct result is
+  `500000.0000 4427757.2187`:
+  - **An unresolvable name became metres silently.** `+units=ftUS` — a common misspelling of US survey
+    feet — returned easting `500000.0000`, about 1.14 million units away from the answer the caller
+    asked for, with nothing to signal it. PROJ gives `Error 1027 … utm: Invalid value for units`. Same
+    for `usft`, `ft-us`, `survey-ft`, `parsec`, `BOGUS` and an empty value.
+  - **`+units=deg`, `degree` and `degrees` returned `(0.0000, 39.7752)`** — a plausible lon/lat-looking
+    pair, wrong in both components. `Units.units` holds `DEGREES` for `LongLatProjection` and
+    `proj4j-geoapi`; `+units=` was reaching it. PROJ resolves `+units` against
+    `pj_list_linear_units()` and never against `pj_angular_units`.
+  - **The lookup was case-insensitive-by-accident in effect and accepted 41 spellings PROJ refuses.**
+    `+units=US-FT` returned `500000.0000` rather than the US-survey-feet value; `feet`, `metre`,
+    `inches`, `kilometres` and 37 others were accepted. Note PROJ accepts `ft` and refuses `feet`.
+  The refusal message is `InvalidValueException: Unknown unit: <value>`. **It is deliberately
+  case-sensitive and must stay so** — lower-casing the key would accept `M` and `Ft`, which PROJ also
+  refuses. `Units.findUnits`, `Units.isKnownUnit` and `Units.units` are **unchanged**, because
+  `io.wkt.WktNames` and `proj4j-geoapi` legitimately look units up by name and symbol;
+  `Units.isKnownUnit("deg")` is still `true`, which is why the refusal had to be built at parse level.
+- **New: `Units.linearUnitIds()`**, an unmodifiable `Set<String>` of the 21 ids `+units=` accepts. The
+  parser reads the same set, so the two cannot drift. Prefer it to the `Units.LINEAR_UNITS` array,
+  which is a fork-only public field absent from upstream 1.4.3 — a consumer that read it from a static
+  initialiser got `NoSuchFieldError` out of `<clinit>`, an `Error` that escaped every
+  `catch (Exception)` on its path.
+
 ### Pending — in flight, not yet released
 
 - **⏳ Relaxing `ClasspathResourceResolver.isSafeName`** to permit interior path segments while still
@@ -127,11 +157,14 @@ These change the answer, or the reported error, for existing callers.
 - **`ProjContext.parseMode` / `withParseMode` / `Builder.parseMode`**, exposing
   `Proj4Parser.ParseMode.STRICT` through the `Proj` facade. **The default is unchanged
   (`PROJ_COMPATIBLE`)** and must stay so — PROJ has no allow-list, and `builtins.gie` feeds a literal
-  `unknown_keyword`. `STRICT` changes exactly two things, enumerated from source: a key outside
-  `Proj4Keyword.supportedParameters()` raises `UnsupportedParameterException` naming the key, and an
-  unresolvable `+units` raises `InvalidValueException` (by default `Units.findUnits` substitutes
-  metres for anything unknown and never returns null, so `+units=bananas` is otherwise a working CRS
-  in metres). **Duplicate-key precedence is *not* gated** — `+lon_0=11 +lon_0=22` yields 11.0 in both
+  `unknown_keyword`. `STRICT` changes exactly one thing: a key outside
+  `Proj4Keyword.supportedParameters()` raises `UnsupportedParameterException` naming the key.
+  (It used to change two. The second was that an unresolvable `+units` raised
+  `InvalidValueException`, because by default the parser went through `Units.findUnits`, which
+  substitutes metres for anything unknown and never returns null. That is now refused in **both**
+  modes — it is parity with PROJ, not a stricter-than-PROJ policy — so it is no longer something
+  `STRICT` adds. See the `+units` entry under [Unreleased].) **Duplicate-key precedence is *not*
+  gated** — `+lon_0=11 +lon_0=22` yields 11.0 in both
   modes, and neither reports the duplicate. Across the full shipped dictionary, 9,013 definitions:
   8,969 parse in both modes, 43 are refused in both, **exactly one parses by default and is refused
   under `STRICT` — `world:malay`, for `rot_conv`** (dropped by PROJ in 4.8.0), and none goes the other
