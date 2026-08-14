@@ -53,7 +53,7 @@ import org.locationtech.proj4j.util.ProjectionMath;
  * {@code merc} inverse rows at {@code builtins.gie:4285-4297} are pinned at {@code tolerance
  * 50 nm}; the old path missed them by 202 nm.
  *
- * <p><b>{@code +lat_ts} (Mercator variant B).</b> {@code merc.cpp:47-67} derives the scale factor
+ * <p><b>{@code +lat_ts} (Mercator variant B).</b> {@code merc.cpp:47-68} derives the scale factor
  * from the latitude of true scale, {@code k0 = msfn(sin(lat_ts), cos(lat_ts), es)} on an ellipsoid
  * and {@code k0 = cos(lat_ts)} on a sphere, and it does so <em>after</em> the generic {@code +k_0}
  * handling — so {@code +lat_ts} wins when both are given. proj4j read the parameter into
@@ -72,18 +72,50 @@ public class MercatorProjection extends CylindricalProjection {
 	}
 
 	/**
-	 * Applies {@code +lat_ts} to the scale factor, per {@code 9.8.1:merc.cpp:47-67}.
+	 * Applies {@code +lat_ts} to the scale factor, per {@code 9.8.1:merc.cpp:47-68}.
 	 *
-	 * <p>A {@code lat_ts} of exactly zero is indistinguishable from the parameter's absence in
-	 * proj4j's parameter model, and it does not matter: both branches give {@code k0 = 1} there
-	 * ({@code msfn(0, 1, es) = 1} and {@code cos(0) = 1}), so treating zero as "absent"
-	 * differs from upstream only for the pathological {@code +lat_ts=0 +k_0=<something else>},
-	 * where upstream would discard the {@code k_0}.
+	 * <p>The test is on whether {@code +lat_ts} was given, not on its value, because upstream's
+	 * is: {@code merc.cpp:47-68} keeps the answer of
+	 * {@code pj_param(P->ctx, P->params, "tlat_ts").i} in {@code is_phits} and guards both the
+	 * ellipsoidal and the spherical assignment with it, and {@code pj_param}'s leading {@code t}
+	 * sigil asks whether the key is present, not what it holds. Zero is a real latitude of true
+	 * scale, and PROJ answers it with {@code k0 = msfn(0, 1, es) = 1} on an ellipsoid and
+	 * {@code k0 = cos(0) = 1} on a sphere, discarding whatever {@code +k_0} the definition also
+	 * carried.
+	 *
+	 * <p>A value test cannot do that, and the difference is not academic. Three shipped ESRI
+	 * definitions are {@code +proj=merc +lat_ts=0 +lon_0=216.8077194444444 +k=0.997000
+	 * +x_0=3900000 +y_0=900000 +ellps=bessel +pm=jakarta +units=m}: {@code esri:2934} and
+	 * {@code esri:21100} are byte-identical, and {@code esri:25700} is the same again with a
+	 * {@code +towgs84}. PROJ scales all three by 1; a {@code trueScaleLatitude != 0.0} guard left
+	 * them on the {@code +k=0.997}, which is 0.3 percent short in the SCALE FACTOR. That is not
+	 * 0.3 percent short in the easting, because {@code +x_0=3900000} is added after the scale and
+	 * is not multiplied by it. At longitude 110 east, where PROJ 9.8.1 gives an easting of
+	 * 20193564.578396, the guard gave 20144683.884660: short by <b>48,880.69 m</b>, which is
+	 * 0.3 percent of the 16,293,564.58 m that {@code k} multiplies and 0.242 percent of the
+	 * easting. The golden probes on these keys sit at other longitudes and lose 33,993.26 m to
+	 * 37,334.80 m of easting; the enumeration is in {@code golden/rules.yaml} under
+	 * {@code PROJ-MERC-LAT-TS-PRESENCE-DISCARDS-K}.
+	 *
+	 * <p>Presence is known to {@link org.locationtech.proj4j.parser.Proj4Parser} alone -- it calls
+	 * the setter only when the key is in the definition -- so it is carried on
+	 * {@link Projection#trueScaleLatitudeSpecified}, which the setters set.
+	 *
+	 * <p>That is NOT the arrangement the parser uses for {@code sconics}' {@code +lat_1} and
+	 * {@code +lat_2}, and its own comment two blocks above the {@code +lat_ts} one states the
+	 * premise this reverses: "presence is information this parser has and a Projection does not".
+	 * That was true of every projection until this field existed, and it is still true of the raw
+	 * params map, which is why sconics is handled where it is: the parser sees the absent key and
+	 * throws in place, carrying nothing onto the projection. A refusal needs no state to survive
+	 * the parser returning. A scale factor does -- it is computed in {@link #initialize()}, which
+	 * runs on the projection -- so for {@code +lat_ts} the fact has to travel, and this field is
+	 * the whole of that channel; it is the only such flag in core or geoapi. What the two cases
+	 * share is only the shape of the test: presence, not value.
 	 */
 	@Override
 	public void initialize() {
 		super.initialize();
-		if (trueScaleLatitude != 0.0) {
+		if (trueScaleLatitudeSpecified) {
 			double phits = Math.abs(trueScaleLatitude);
 			if (phits >= ProjectionMath.HALFPI) {
 				throw new InvalidValueException(

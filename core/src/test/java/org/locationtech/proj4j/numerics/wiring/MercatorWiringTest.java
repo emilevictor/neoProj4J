@@ -297,6 +297,103 @@ public class MercatorWiringTest {
         }
     }
 
+    /**
+     * {@code +lat_ts=0} is a parameter that was given, not a parameter that was omitted, and it
+     * discards {@code +k} exactly as any other {@code +lat_ts} does.
+     *
+     * <p>{@code merc.cpp} keeps {@code pj_param(..., "tlat_ts").i} in {@code is_phits} and guards
+     * both scale-factor assignments with it, so presence is the test and zero is a real answer:
+     * {@code msfn(0, 1, es)} and {@code cos(0)} are both 1. A {@code trueScaleLatitude != 0.0}
+     * guard cannot see the difference, and three shipped ESRI definitions depend on it —
+     * {@code esri:2934}, {@code esri:21100} and {@code esri:25700}, all carrying
+     * {@code +lat_ts=0} together with {@code +k=0.997000}. The first two are byte-identical; the
+     * third adds a {@code +towgs84}, which is why enumerating byte-identical definitions found only
+     * two of them. See {@link #theShippedEsriDefinitionsGetProjsScaleFactor()}.
+     *
+     * <p>All four expectations below are PROJ 9.8.1's own output for this definition,
+     * {@code proj -f "%.6f"} and {@code proj -I -f "%.10f"}. The forward gap the old guard left is
+     * <b>48,880.69 m</b> of easting at longitude 110 east, measured here rather than described.
+     * That is 0.3 percent of the {@code 20193564.578396 - 3900000} that {@code +k} multiplies, not
+     * 0.3 percent of the easting: {@code +x_0} is added after the scale.
+     */
+    @Test
+    public void explicitLatTsZeroDiscardsK() {
+        GieCase b = GieCase.ellipsoid(ESRI_2934, "bessel", BESSEL_A, BESSEL_RF);
+        b.expectForward(110, 0, 20193564.578396, 900000.0, MM);
+        b.expectForward(110, -6, 20193564.578396, 235385.936338, MM);
+        b.expectInverse(20193564.578396, 235385.936338, 110, -6, MM);
+
+        assertEquals("+lat_ts=0 must reset the scale factor to 1, discarding +k=0.997",
+                1.0, scaleFactorOf(ESRI_2934), 0.0);
+
+        // The size of what the old value-based guard gave away, in metres of easting.
+        GieCase old = GieCase.ellipsoid(ESRI_2934_WITHOUT_LAT_TS, "bessel", BESSEL_A, BESSEL_RF);
+        assertEquals("keeping +k=0.997 here costs this much easting", 48880.69,
+                Math.abs(old.forward(110, -6).x - 20193564.578396), 0.01);
+    }
+
+    /**
+     * The shipped definitions, reached the way a caller reaches them. Three entries in
+     * {@code proj4/nad/esri} pair {@code +lat_ts=0} with a {@code +k} that is not 1, all three
+     * {@code +k=0.997000}: {@code esri:2934}, {@code esri:21100} and {@code esri:25700}. The
+     * third differs from the other two only by a {@code +towgs84}, which is why a search for
+     * byte-identical definitions finds only two of them. All three must now scale by 1.
+     *
+     * <p>Two more entries in the same file carry {@code +lat_ts=0} beside a {@code +k},
+     * {@code esri:53004} and {@code esri:54004}, but their {@code +k} is {@code 1.000000}, so they
+     * scale by 1 either way and are here as the control. {@code epsg:3857} and {@code epsg:3785}
+     * pair {@code +lat_ts=0} with a {@code +k=1.0} as well, so the count across every shipped
+     * dictionary is four such definitions, not two.
+     */
+    @Test
+    public void theShippedEsriDefinitionsGetProjsScaleFactor() {
+        CRSFactory factory = new CRSFactory();
+        for (String key : new String[] {"esri:2934", "esri:21100", "esri:25700",
+                                        "esri:53004", "esri:54004"}) {
+            assertEquals(key, 1.0,
+                    factory.createFromName(key).getProjection().getScaleFactor(), 0.0);
+        }
+    }
+
+    /**
+     * The other side of the same rule, and the reason presence has to be carried rather than
+     * inferred: with no {@code +lat_ts} at all, {@code +k} stands. Both expectations are PROJ
+     * 9.8.1's output for this string, which is {@code esri:2934} minus its {@code +lat_ts=0}.
+     */
+    @Test
+    public void absentLatTsLeavesKAlone() {
+        assertEquals("no +lat_ts means +k is the scale factor",
+                0.997, scaleFactorOf(ESRI_2934_WITHOUT_LAT_TS), 0.0);
+        GieCase b = GieCase.ellipsoid(ESRI_2934_WITHOUT_LAT_TS, "bessel", BESSEL_A, BESSEL_RF);
+        b.expectForward(110, 0, 20144683.884660, 900000.0, MM);
+        b.expectForward(110, -6, 20144683.884660, 237379.778529, MM);
+
+        // And on a plain ellipsoid, away from the ESRI definition's other parameters.
+        assertEquals(0.997, scaleFactorOf("+proj=merc +k=0.997 +ellps=GRS80"), 0.0);
+        assertEquals(1.0, scaleFactorOf("+proj=merc +lat_ts=0 +k=0.997 +ellps=GRS80"), 0.0);
+    }
+
+    /**
+     * {@code esri:2934} and {@code esri:21100}, {@code epsg/src/main/resources/proj4/nad/esri}.
+     * The two are byte-identical to each other.
+     */
+    private static final String ESRI_2934 = "+proj=merc +lat_ts=0 +lon_0=216.8077194444444 "
+            + "+k=0.997000 +x_0=3900000 +y_0=900000 +ellps=bessel +pm=jakarta +units=m";
+
+    /** The same definition with {@code +lat_ts} omitted, which is a different projection. */
+    private static final String ESRI_2934_WITHOUT_LAT_TS = "+proj=merc +lon_0=216.8077194444444 "
+            + "+k=0.997000 +x_0=3900000 +y_0=900000 +ellps=bessel +pm=jakarta +units=m";
+
+    /** Bessel 1841, as PROJ's ellipsoid table gives it. */
+    private static final double BESSEL_A = 6377397.155;
+    private static final double BESSEL_RF = 299.1528128;
+
+    /** The scale factor a definition ends up with, after {@code initialize()}. */
+    private static double scaleFactorOf(String definition) {
+        return new CRSFactory().createFromParameters("scale", definition + " +no_defs")
+                .getProjection().getScaleFactor();
+    }
+
     /** Krassovsky 1940 squared eccentricity, from {@code a} and {@code rf} as PROJ derives it. */
     private static double krassEs() {
         double f = 1.0 / 298.3;

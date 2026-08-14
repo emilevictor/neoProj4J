@@ -48,11 +48,15 @@ import org.locationtech.proj4j.util.ProjectionMath;
  * projection.</li>
  * </ul>
  * Where proj4j's projection would <em>silently ignore</em> a parameter the method defines, this
- * class converts it or refuses. Mercator variant B is the clearest case: proj4j's
- * {@code MercatorProjection} never reads {@code +lat_ts}, so passing it through would return
- * plausible coordinates at the wrong scale; it is converted to the equivalent {@code +k_0}
- * instead. Equidistant Cylindrical with a non-zero standard parallel has no such equivalent and is
- * refused.
+ * class converts it or refuses. Mercator variant B is the clearest case: its standard parallel
+ * becomes the equivalent {@code +k_0}, which is what PROJ's own
+ * {@code Conversion::convertToOtherMethod} emits, and the value is the one
+ * {@code MercatorProjection} would derive from {@code +lat_ts} itself — that projection does read
+ * the parameter, so this is a spelling choice rather than a rescue. Equidistant Cylindrical with a
+ * non-zero standard parallel or latitude of natural origin is refused as well, and that refusal is
+ * not an instance of the rule above either: {@code PlateCarreeProjection} reads both. The refusal
+ * itself is left as it stands rather than re-argued here; only its message changed, because it used
+ * to tell the caller the projection ignores the parameter.
  */
 final class WktMethods {
 
@@ -848,13 +852,24 @@ final class WktMethods {
                 && !WktNames.equalsRelaxed(name, "Rectified_Skew_Orthomorphic_Center");
     }
 
+    /**
+     * Drops {@code key}, and refuses the document if it held anything but zero.
+     * <p>
+     * The message names THIS METHOD as what ignores the parameter -- it is removed from
+     * {@code values} here and so never reaches the projection -- rather than the projection. Saying
+     * the projection ignores it would be false: the only caller is the {@code FLAG_EQC} branch,
+     * which maps to {@code +proj=eqc} and hence to {@code PlateCarreeProjection}, whose
+     * {@code initialize()} reads both refused parameters -- {@code +lat_ts} through
+     * {@code rc = nu1 * cosPhi1} and {@code +lat_0} through
+     * {@code m0 = meridian.mlfn(projectionLatitude)}.
+     */
     private static void refuseNonZero(Map<String, String> values, String key,
                                       ConversionDefinition conv, String what) {
         String v = values.remove(key);
         if (v != null && Double.parseDouble(v) != 0.0) {
             throw new WktParseException("method \"" + conv.getMethodName() + "\" has " + what + " "
-                    + v + ", which proj4j's implementation ignores; refusing rather than "
-                    + "returning coordinates at the wrong scale or offset");
+                    + v + ", which this reader ignores rather than carrying onto the projection; "
+                    + "refusing rather than returning coordinates at the wrong scale or offset");
         }
     }
 
@@ -884,9 +899,12 @@ final class WktMethods {
      * Guidance Note 7-2 and PROJ's {@code Conversion::convertToOtherMethod}:
      * {@code k0 = cos(phi1) / sqrt(1 - e^2 sin^2(phi1))}.
      * <p>
-     * Necessary because proj4j's {@code MercatorProjection} never reads {@code +lat_ts}: passing
-     * the standard parallel through would leave the scale silently at 1, which is a coordinate
-     * error growing with latitude — 20 km at 60 degrees.
+     * The formula is the same one {@code MercatorProjection.initialize()} applies to
+     * {@code +lat_ts}, {@code ProjectionMath.msfn(sin(phi1), cos(phi1), es)}, so emitting the
+     * derived {@code +k_0} and emitting {@code +lat_ts} give the same coordinates. Converting is
+     * kept because it is what PROJ's own export of variant B produces, and because the resulting
+     * string names one scale in one place: {@code +lat_ts} and a conflicting {@code +k_0} together
+     * are refused below rather than silently resolved.
      */
     private static void mercatorVariantB(Map<String, String> values, CrsDefinition crs,
                                          ConversionDefinition conv) {

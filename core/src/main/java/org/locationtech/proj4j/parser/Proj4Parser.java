@@ -257,6 +257,15 @@ public class Proj4Parser {
             }
         }
 
+        /*
+         * The setter runs only when the key is present, and it records that fact in
+         * Projection.trueScaleLatitudeSpecified. MercatorProjection.initialize() needs presence
+         * rather than value, because merc.cpp tests presence and an explicit +lat_ts=0 has to
+         * discard a +k the way any other +lat_ts does. Nothing here has to run before or after
+         * the +k handling below: initialize() is called at the end of this method, so a projection
+         * that derives its scale factor from +lat_ts overwrites +k whatever order the setters ran
+         * in.
+         */
         s = params.get(Proj4Keyword.lat_ts);
         if (s != null)
             projection.setTrueScaleLatitudeDegrees(parseAngle(Proj4Keyword.lat_ts, s));

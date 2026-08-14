@@ -341,7 +341,14 @@ public class Wkt2ReaderTest {
         }
     }
 
-    /** An Equidistant Cylindrical with a real standard parallel is refused, not mis-projected. */
+    /**
+     * An Equidistant Cylindrical with a real standard parallel is refused, not mis-projected.
+     * <p>
+     * The reason is that <b>this reader</b> drops the parameter rather than translating it, not that
+     * {@code eqc} cannot use one: {@code PlateCarreeProjection.initialize()} reads {@code +lat_ts}
+     * through {@code rc = nu1 * cosPhi1}. Refusing is therefore the right call, but the thing that
+     * would otherwise lose the parallel is the translation, not the projection.
+     */
     @Test
     public void equidistantCylindricalWithStandardParallelIsRefused() {
         String wkt = "PROJCRS[\"x\",BASEGEOGCRS[\"WGS 84\","
@@ -358,7 +365,7 @@ public class Wkt2ReaderTest {
                 + "LENGTHUNIT[\"metre\",1]]";
         try {
             proj(wkt);
-            fail("expected a refusal: proj4j's eqc ignores the standard parallel");
+            fail("expected a refusal: this reader drops the standard parallel");
         } catch (WktParseException expected) {
             assertTrue(expected.getMessage(), expected.getMessage().contains("ignores"));
         }

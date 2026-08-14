@@ -126,6 +126,53 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
     protected double trueScaleLatitude = 0.0;
 
     /**
+     * Whether {@link #trueScaleLatitude} was set through one of its setters, i.e. whether
+     * {@code +lat_ts} was actually given.
+     * <p>
+     * PROJ tests presence rather than value for this parameter: {@code merc.cpp:47-68} takes the
+     * {@code +lat_ts} branch whenever {@code pj_param}'s {@code t} sigil says the key is in the
+     * definition, and that branch discards any {@code +k_0} the definition also carries. The value
+     * alone cannot say that, because zero is a real latitude of true scale and not a marker for
+     * absence: {@code msfn(0, 1, es)} and {@code cos(0)} are both exactly 1, which is the answer
+     * PROJ gives for {@code +lat_ts=0}, {@code +k_0} or no {@code +k_0}. Three shipped
+     * definitions need it -- {@code esri:2934}, {@code esri:21100} and {@code esri:25700}, all
+     * {@code +proj=merc +lat_ts=0 ... +k=0.997000}.
+     * <p>
+     * Set by {@link #setTrueScaleLatitude} and {@link #setTrueScaleLatitudeDegrees}. Three classes
+     * assign {@link #trueScaleLatitude} directly instead and so leave this flag false.
+     * {@code StereographicAzimuthalProjection} and {@code UniversalPolarStereographicProjection}
+     * seed their own absent-value default of 90 degrees ({@code stere.cpp:302-304} for
+     * {@code stere}, {@code stere.cpp:327} for {@code ups}), which is not a user parameter. The
+     * third is {@code CylindricalEqualAreaProjection}, at its own line 51, and that one IS a
+     * caller-supplied latitude: its public three-argument constructor takes a
+     * {@code trueScaleLatitude} and stores it in the field. A {@code cea} built that way therefore
+     * holds the same {@code trueScaleLatitude} and {@code scaleFactor} as one parsed from
+     * {@code +proj=cea +lat_ts=...} and projects identically, but compares unequal to it, on this
+     * flag alone. {@code cea}'s {@code initialize()} reads the latitude by value and never this
+     * flag, so nothing it computes depends on the difference.
+     * <p>
+     * It takes part in {@link #equals} and {@link #hashCode}, because on a merc it is what decides
+     * the scale factor and two projections that scale differently are not equal. That has one
+     * consequence across versions, and it was measured rather than reasoned about. A projection
+     * serialized by a build that predates this field deserializes cleanly here -- the
+     * {@code serialVersionUID} is unchanged and the absent boolean reads as false -- but it is then
+     * NOT equal to the same definition parsed freshly here, and the two hash codes differ, even
+     * though both project the same coordinates. On {@code +proj=merc +lat_ts=30 +ellps=GRS80}: both
+     * instances hold a {@code scaleFactor} of 0.866751002575754 and both return
+     * 0.15127658789908757, 0.30690638379719765 from {@code project} at 10 and 20 degrees, and
+     * {@code equals} is false in both directions. (The hash values themselves are not comparable
+     * across JVM runs, because {@code hashCode} starts from {@code getClass().hashCode()}.)
+     * {@code scaleFactor} is computed in {@link #initialize()} and is not transient, so it arrives
+     * with the stream and {@code initialize()} is never re-run; calling it by hand on the
+     * deserialized instance changes nothing. An old stream of {@code +lat_ts=0 +k=0.997} therefore
+     * keeps its old {@code scaleFactor} of 0.997 where a fresh parse now gives 1.0, and re-running
+     * {@code initialize()} does not repair it -- an old stream carries the old answer with it. The
+     * other direction is unaffected: a stream written here and read by an older build loses the
+     * extra field, and equality and hash codes match there.
+     */
+    protected boolean trueScaleLatitudeSpecified = false;
+
+    /**
      * The equator radius
      */
     protected double a = 0;
@@ -1011,9 +1058,11 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
 
     /**
      * Set the latitude of true scale in radians. This is only used by certain projections.
+     * Also records that the parameter was given, see {@link #trueScaleLatitudeSpecified}.
      */
     public void setTrueScaleLatitude( double trueScaleLatitude ) {
         this.trueScaleLatitude = trueScaleLatitude;
+        this.trueScaleLatitudeSpecified = true;
     }
 
     public double getTrueScaleLatitude() {
@@ -1022,13 +1071,30 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
 
     /**
      * Set the latitude of true scale in degrees. This is only used by certain projections.
+     * Also records that the parameter was given, see {@link #trueScaleLatitudeSpecified}.
      */
     public void setTrueScaleLatitudeDegrees( double trueScaleLatitude ) {
         this.trueScaleLatitude = DTR*trueScaleLatitude;
+        this.trueScaleLatitudeSpecified = true;
     }
 
     public double getTrueScaleLatitudeDegrees() {
         return trueScaleLatitude*RTD;
+    }
+
+    /**
+     * Puts the latitude of true scale back to a state where it counts as never having been given.
+     * This is what a caller wants when it is resetting parameters to their defaults, because
+     * {@link #setTrueScaleLatitude} cannot express it: passing zero to that setter records
+     * {@code +lat_ts=0}, which is a parameter that was given and which
+     * {@link MercatorProjection#initialize()} answers by replacing {@code +k} with 1.
+     *
+     * @see #trueScaleLatitudeSpecified
+     * @since 2.1.0
+     */
+    public void clearTrueScaleLatitude() {
+        this.trueScaleLatitude = 0.0;
+        this.trueScaleLatitudeSpecified = false;
     }
 
     /**
@@ -1509,6 +1575,22 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
                 scaleFactor == p.scaleFactor &&
                 fromMetres == p.fromMetres &&
                 trueScaleLatitude == p.trueScaleLatitude &&
+                // Whether +lat_ts was given is part of the state that decides what initialize()
+                // computes, so two projections that disagree about it are not interchangeable
+                // even when the latitude itself matches. For merc, "+lat_ts=0 +k=0.997" and
+                // "+k=0.997" end on scale factors of 1 and 0.997 and were already unequal on
+                // that; what this line adds is pairs that behave identically today, such as
+                // "+proj=merc +lat_ts=0" against "+proj=merc", or a stere with an explicit
+                // "+lat_ts=90" against one that took stere's own 90-degree default, or a cea built
+                // through CylindricalEqualAreaProjection's three-argument constructor -- which
+                // writes trueScaleLatitude without going through a setter -- against the same
+                // definition parsed from "+proj=cea +lat_ts=...". Those now compare unequal, which
+                // costs a cache miss and never a wrong answer -- the safe direction to err in for a
+                // value used as a cache key. The cea pair is the one where the unequal side was
+                // reached with a caller-supplied latitude rather than a library default; measured
+                // on +lat_ts=30 with GRS80, both hold scaleFactor 0.866751002575754 and both
+                // project 10E 20N to 0.15127658789908757, 0.3921633954323098.
+                trueScaleLatitudeSpecified == p.trueScaleLatitudeSpecified &&
                 projectionLatitude == p.projectionLatitude &&
                 projectionLongitude == p.projectionLongitude &&
                 projectionLatitude1 == p.projectionLatitude1 &&
@@ -1553,6 +1635,7 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
         h = 31 * h + hash(scaleFactor);
         h = 31 * h + hash(fromMetres);
         h = 31 * h + hash(trueScaleLatitude);
+        h = 31 * h + (trueScaleLatitudeSpecified ? 1231 : 1237);
         h = 31 * h + hash(projectionLatitude);
         h = 31 * h + hash(projectionLongitude);
         h = 31 * h + hash(projectionLatitude1);

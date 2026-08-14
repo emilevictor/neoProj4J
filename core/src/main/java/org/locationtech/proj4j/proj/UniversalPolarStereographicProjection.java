@@ -22,7 +22,7 @@ import org.locationtech.proj4j.util.ProjectionMath;
 
 /**
  * Universal Polar Stereographic, {@code +proj=ups} —
- * {@code PJ_PROJECTION(ups)}, {@code 9.8.1:src/projections/stere.cpp:308-330}.
+ * {@code PJ_PROJECTION(ups)}, {@code 9.8.1:src/projections/stere.cpp:309-331}.
  *
  * <p>A fixed parameterisation of polar {@code stere}, and nothing else:
  *
@@ -40,7 +40,7 @@ import org.locationtech.proj4j.util.ProjectionMath;
  *
  * <h2>The rejection is the ninth assertion</h2>
  *
- * <p>{@code stere.cpp:317-322} refuses a sphere outright:
+ * <p>{@code stere.cpp:318-323} refuses a sphere outright:
  *
  * <pre>
  *   if (P-&gt;es == 0.0) {
