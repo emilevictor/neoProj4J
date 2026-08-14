@@ -65,4 +65,23 @@
 # and NUM-KARNEY-LATITUDE-CORE 19310 -> 19308 (two geos rows, same reason). 10 claimed by new rules
 # minus 5 minus 2 lost by old ones is +3, which is the INTENDED move. Measured in this worktree with
 # `mvn -B -Dmaven.javadoc.skip=true -Pgolden -pl golden -am verify`.
+#
+# NOT RE-PINNED 2026-08-14 by the merc `+lat_ts` presence fix - the second change on this date, after
+# the block above - and the data line below is deliberately untouched. The run prints it back
+# byte-identical: all six figures hold at 12002, 41428, 0, 0, 39141 and 2287. That is the fact worth
+# recording, because 15 rows did move underneath them, and a block saying so is cheaper than the next
+# reader wondering why a PR that moved rows left this file alone.
+#
+# The 15 rows are `REG esri:2934`, `REG esri:21100` and `REG esri:25700`, probes 0..4 each. All 15
+# were CHANGED and INTENDED before this change and are CHANGED and INTENDED after it, which is why
+# nothing here moves - no row changes sides against the baseline and none joins or leaves the
+# backlog. What changed is WHICH rule claims them, and the three moves cancel exactly:
+# PROJ-FORWARD-WRAP-CANONICALISES-RECOVERED-LONGITUDE went DEAD and is replaced, -10;
+# NUM-KARNEY-LATITUDE-CORE is re-pinned 19308 -> 19303, -5, losing esri:25700's five probes because
+# their `fx` now moves about 3.4e4 m and leaves its 1e-6 band; and the new rule
+# PROJ-MERC-LAT-TS-PRESENCE-DISCARDS-K is pinned at 15. -10 -5 +15 is 0, so INTENDED stays at 39141,
+# and the 48 pins still sum to exactly 39141. Both figures re-measured in this worktree after the
+# edit. The 19303 is read from the run's own
+# `COUNT_MISMATCH NUM-KARNEY-LATITUDE-CORE expected_rows=19308 but matched 19303` line, not computed.
+# Measured with `./docker/run.sh ci conformance golden determinism`.
 golden diff: 12002 UNCHANGED, 41428 CHANGED, 0 ADDED, 0 REMOVED; 39141 INTENDED, 2287 UNEXPLAINED (baseline 53430 rows, current 53430 rows)

@@ -142,8 +142,10 @@ public class Wkt1ReaderTest {
 
     /**
      * CASE 20's sibling, GDAL ticket #3026: a Mercator_1SP with a non-zero latitude of origin is
-     * really variant B, and its standard parallel becomes an equivalent scale factor because
-     * proj4j's Mercator ignores {@code +lat_ts} entirely.
+     * really variant B, and its standard parallel becomes an equivalent scale factor, which is
+     * what PROJ's own export of the method emits. The two spellings agree numerically —
+     * {@code MercatorProjection} derives the same {@code k0} from {@code +lat_ts} — so what is
+     * pinned here is the spelling, not the coordinates.
      */
     @Test
     public void mercator1SpWithNonZeroLatitudeOfOriginBecomesVariantB() {
@@ -160,7 +162,8 @@ public class Wkt1ReaderTest {
         double expected = Math.cos(Math.toRadians(30))
                 / Math.sqrt(1 - es * Math.pow(Math.sin(Math.toRadians(30)), 2));
         assertTrue(p, p.contains("+k_0=" + WktFormatTestAccess.number(expected)));
-        assertTrue("no +lat_ts may survive, proj4j's Mercator ignores it", !p.contains("+lat_ts"));
+        assertTrue("no +lat_ts may survive: the scale is named once, as +k_0",
+                !p.contains("+lat_ts"));
     }
 
     /** CASE 22: Krovak with south/west axes is EPSG 9819 and needs {@code +axis=swu}. */

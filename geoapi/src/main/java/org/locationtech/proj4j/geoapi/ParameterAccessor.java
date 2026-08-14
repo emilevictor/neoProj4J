@@ -135,11 +135,20 @@ final class ParameterAccessor extends Wrapper implements ParameterDescriptor<Dou
 
     /**
      * Resets all parameters to their default value.
+     *
+     * <p>The {@code true_scale_latitude} accessor needs one extra step. Its setter is
+     * {@link Projection#setTrueScaleLatitude}, which records that {@code +lat_ts} was given, so
+     * calling it with the default of zero would leave the projection claiming a parameter it does
+     * not have. {@code MercatorProjection.initialize()} reads that claim and answers it by
+     * replacing {@code +k} with 1, so the projection would come out of a reset with a scale factor
+     * it was never given. {@link Projection#clearTrueScaleLatitude()} is the one call that puts
+     * both the value and the claim back to their initial state.
      */
     static void reset(final Projection proj) {
         for (ParameterAccessor c : ACCESSORS) {
             c.setter.accept(proj, c.defaultValue());
         }
+        proj.clearTrueScaleLatitude();
     }
 
     /**

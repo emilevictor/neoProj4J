@@ -71,7 +71,7 @@ public class StereographicAzimuthalProjection extends AzimuthalProjection {
 	 * <li><b>{@code lat_0} was 90&deg;</b>, so {@code +proj=stere +ellps=GRS80} ran the polar
 	 *     aspect where PROJ runs the equatorial one. PROJ's {@code pj_init} reads {@code "rlat_0"}
 	 *     and gets 0.</li>
-	 * <li><b>{@code lat_ts} was 0</b>, but {@code 9.8.1:stere.cpp:305-309} reads it as
+	 * <li><b>{@code lat_ts} was 0</b>, but {@code 9.8.1:stere.cpp:302-304} reads it as
 	 *     {@code pj_param(...,"tlat_ts").i ? |lat_ts| : M_HALFPI} &mdash; <em>&pi;/2 when the
 	 *     keyword is absent</em>. With 0 the two polar branches take their
 	 *     {@code cos(phits)/tsfn(phits)} arm instead of {@code 2*k_0/sqrt((1+e)^(1+e)(1-e)^(1-e))},
@@ -87,7 +87,7 @@ public class StereographicAzimuthalProjection extends AzimuthalProjection {
 
 	public StereographicAzimuthalProjection(double projectionLatitude, double projectionLongitude) {
 		super(projectionLatitude, projectionLongitude);
-		// stere.cpp:305-309 -- phits defaults to pi/2, not to 0, and it is read for every aspect.
+		// stere.cpp:302-304 -- phits defaults to pi/2, not to 0, and it is read for every aspect.
 		trueScaleLatitude = ProjectionMath.HALFPI;
 		initialize();
 	}

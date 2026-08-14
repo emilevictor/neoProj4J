@@ -256,6 +256,53 @@ public class ProjectionIdentityTest {
         }
     }
 
+    /**
+     * Whether {@code +lat_ts} was given is part of equality, deliberately, and this is a visible
+     * change to the {@code equals}/{@code hashCode} contract.
+     *
+     * <p>The reason is that presence decides what {@code MercatorProjection.initialize()}
+     * computes: {@code +lat_ts=0 +k=0.997} ends on a scale factor of 1 and {@code +k=0.997} alone
+     * on 0.997. Those two already differ in {@code scaleFactor}, so they were already unequal —
+     * what the flag adds is the pair below, {@code +lat_ts=0} against no {@code +lat_ts} with no
+     * {@code +k} at all. Those two project identically today, and they now compare unequal. That
+     * costs a cache miss and never a wrong answer, which is the direction to err in for a value
+     * used as a cache key: a coarser equals would hand back a transform built for the other
+     * definition.
+     */
+    @Test
+    public void whetherLatTsWasGivenIsPartOfEquality() {
+        // The pair that behaves differently, and that differs in scaleFactor as well.
+        Projection latTsZero = proj("+proj=merc +lat_ts=0 +k=0.997 +ellps=GRS80 +units=m +no_defs");
+        Projection kOnly = proj("+proj=merc +k=0.997 +ellps=GRS80 +units=m +no_defs");
+        assertEquals("fixture must reset the scale factor", 1.0, latTsZero.getScaleFactor(), 0.0);
+        assertEquals("fixture must keep +k", 0.997, kOnly.getScaleFactor(), 0.0);
+        assertNotEquals(latTsZero, kOnly);
+        assertNotEquals(kOnly, latTsZero);
+
+        // The pair that behaves the same and is now distinguished anyway.
+        Projection plainWithLatTs = proj("+proj=merc +lat_ts=0 +ellps=GRS80 +units=m +no_defs");
+        Projection plain = proj("+proj=merc +ellps=GRS80 +units=m +no_defs");
+        assertEquals("both fixtures must end on a scale factor of 1",
+                plain.getScaleFactor(), plainWithLatTs.getScaleFactor(), 0.0);
+        assertNotEquals(plainWithLatTs, plain);
+        assertNotEquals(plain, plainWithLatTs);
+
+        // Still reflexive and still stable across two parses of the same string, both ways.
+        assertEquals(plainWithLatTs,
+                proj("+proj=merc +lat_ts=0 +ellps=GRS80 +units=m +no_defs"));
+        assertEquals(plainWithLatTs.hashCode(),
+                proj("+proj=merc +lat_ts=0 +ellps=GRS80 +units=m +no_defs").hashCode());
+        assertEquals(plain, proj("+proj=merc +ellps=GRS80 +units=m +no_defs"));
+        assertEquals(plain.hashCode(), proj("+proj=merc +ellps=GRS80 +units=m +no_defs").hashCode());
+
+        // A projection that seeds trueScaleLatitude itself rather than from a parameter must not
+        // be caught by the flag: stere's constructor assigns 90 degrees directly.
+        Projection stereNoLatTs = proj("+proj=stere +lat_0=90 +lon_0=0 +ellps=WGS84 +units=m +no_defs");
+        assertEquals(stereNoLatTs, proj("+proj=stere +lat_0=90 +lon_0=0 +ellps=WGS84 +units=m +no_defs"));
+        assertNotEquals("an explicit +lat_ts is still a different stere", stereNoLatTs,
+                proj("+proj=stere +lat_0=90 +lat_ts=70 +lon_0=0 +ellps=WGS84 +units=m +no_defs"));
+    }
+
     /** Reads the private {@code unit} field, to prove a fixture really leaves it null. */
     private static Object unitField(Projection p) {
         try {

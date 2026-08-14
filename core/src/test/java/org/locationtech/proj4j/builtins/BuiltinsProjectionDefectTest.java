@@ -86,7 +86,7 @@ public class BuiltinsProjectionDefectTest {
 
     /**
      * {@code builtins.gie:6779-6783} — {@code +lat_ts} absent on a polar aspect means
-     * <b>&pi;/2</b>, not 0 ({@code 9.8.1:stere.cpp:305-309}). With 0 the polar branch takes its
+     * <b>&pi;/2</b>, not 0 ({@code 9.8.1:stere.cpp:302-304}). With 0 the polar branch takes its
      * {@code cos(phits)/tsfn(phits)} arm and the whole map comes out scaled by 1.9335.
      */
     @Test
