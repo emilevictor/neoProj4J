@@ -69,12 +69,25 @@ public class McBrydeThomasFlatPolarSine2Projection extends Projection {
 		return out;
 	}
 
+	/**
+	 * Inverse projection. Port of PROJ 9.8.1 {@code mbt_fps.cpp}'s
+	 * {@code mbt_fps_s_inverse}, lines 38-46.
+	 * <p>
+	 * Both inverse sines use {@link ProjectionMath#asinChecked(double)}, which is upstream's
+	 * {@code aasin} — the same wrapper {@code mbt_fps.cpp:41} and {@code :44} use. They used to
+	 * call the deprecated {@link ProjectionMath#asin(double)}, which clamps at any magnitude
+	 * whatsoever. {@code xyy} is the caller's northing, scaled but not validated, so
+	 * {@code xyy / C_y} leaves {@code [-1, 1]} for every northing past {@code C_y = 1.44492}
+	 * sphere radii and the old wrapper answered {@code pi/2} for all of them — a plausible
+	 * latitude for a question with no answer. Past {@link ProjectionMath#ONE_TOL} the
+	 * projection now refuses instead.
+	 */
 	public ProjCoordinate projectInverse(double xyx, double xyy, ProjCoordinate out) {
 		double t, s;
 
-		out.y = C2 * (t = ProjectionMath.asin(xyy / C_y));
+		out.y = C2 * (t = ProjectionMath.asinChecked(xyy / C_y));
 		out.x = xyx / (C_x * (1. + 3. * Math.cos(out.y)/Math.cos(t)));
-		out.y = ProjectionMath.asin((C1 * Math.sin(t) + Math.sin(out.y)) / C3);
+		out.y = ProjectionMath.asinChecked((C1 * Math.sin(t) + Math.sin(out.y)) / C3);
 		return out;
 	}
 

@@ -112,9 +112,22 @@ public class PutninsP4Projection extends Projection {
 	 * {@code putp4p_s_forward}, {@code putp4p.cpp:18-29}. The literals are upstream's exactly
 	 * as written; {@code 0.883883476} is <em>not</em> {@code 0.625 * sqrt(2)} and correcting it
 	 * here would break parity. See the class comment.
+	 * <p>
+	 * The inverse sine is {@link ProjectionMath#asinChecked(double)}, which is upstream's
+	 * {@code aasin} — the wrapper {@code putp4p.cpp:22} uses. Its clamp cannot fire here: the
+	 * argument is {@code 0.883883476 * sin(lpphi)}, so its magnitude cannot exceed
+	 * {@code 0.883883476}. The one input on which it differs from the deprecated
+	 * {@link ProjectionMath#asin(double)} this used to call is a {@code NaN} latitude, which now
+	 * raises {@link org.locationtech.proj4j.ErrorCause#NUMERICAL_FAILURE} instead of being
+	 * returned as a coordinate. {@code Projection.projectRadians} does return early on a
+	 * {@code NaN}, so the funnel cannot deliver one — but this method is public and is called
+	 * directly, including from {@code errors/NonConvergenceTest}, and measured before this change
+	 * {@code project(0.1, NaN, out)} wrote {@code (NaN, NaN)} and returned normally. The
+	 * inverse's two sites, three lines below, are a different matter again — their arguments come
+	 * from the caller's northing and really are unbounded.
 	 */
 	public ProjCoordinate project(double lplam, double lpphi, ProjCoordinate xy) {
-		lpphi = ProjectionMath.asin(0.883883476 * Math.sin(lpphi));
+		lpphi = ProjectionMath.asinChecked(0.883883476 * Math.sin(lpphi));
 		xy.x = C_x * lplam * Math.cos(lpphi);
 		xy.x /= Math.cos(lpphi *= 0.333333333333333);
 		xy.y = C_y * Math.sin(lpphi);
@@ -126,13 +139,21 @@ public class PutninsP4Projection extends Projection {
 	 * that does not quite undo the forward's {@code 0.883883476}: their product is
 	 * {@code 1 - 4.56925e-10}, which is why latitude 90 comes back as 89.99826794912813 here
 	 * and in PROJ 9.8.1 alike. See the class comment.
+	 * <p>
+	 * Both inverse sines are {@link ProjectionMath#asinChecked(double)}, which is upstream's
+	 * {@code aasin} — the wrapper {@code putp4p.cpp:35} and {@code :39} use. They used to be the
+	 * deprecated {@link ProjectionMath#asin(double)}, and neither argument is bounded:
+	 * {@code xyy / C_y} is the caller's northing over {@code 3.883251825}, and
+	 * {@code 1.13137085 * sin(lp.y)} has a factor bigger than 1 in front of it. The old wrapper
+	 * clamped both silently, so a northing well off the map came back as a latitude near the
+	 * pole. Past {@link ProjectionMath#ONE_TOL} the projection now refuses.
 	 */
 	public ProjCoordinate projectInverse(double xyx, double xyy, ProjCoordinate lp) {
-		lp.y = ProjectionMath.asin(xyy / C_y);
+		lp.y = ProjectionMath.asinChecked(xyy / C_y);
 		lp.x = xyx * Math.cos(lp.y) / C_x;
 		lp.y *= 3.;
 		lp.x /= Math.cos(lp.y);
-		lp.y = ProjectionMath.asin(1.13137085 * Math.sin(lp.y));
+		lp.y = ProjectionMath.asinChecked(1.13137085 * Math.sin(lp.y));
 		return lp;
 	}
 

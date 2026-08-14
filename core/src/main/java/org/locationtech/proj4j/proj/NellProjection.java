@@ -72,11 +72,22 @@ public class NellProjection extends Projection {
 		return out;
 	}
 
+	/**
+	 * Inverse projection. Port of PROJ 9.8.1 {@code nell.cpp}'s {@code nell_s_inverse}.
+	 * <p>
+	 * The inverse sine is {@link ProjectionMath#asinChecked(double)}, which is upstream's
+	 * {@code aasin} — the wrapper {@code nell.cpp} uses on the same line. It used to be the
+	 * deprecated {@link ProjectionMath#asin(double)}, which clamps at any magnitude at all.
+	 * {@code 0.5 * (xyy + sin(xyy))} is built from the caller's northing with nothing bounding
+	 * it — it grows without limit as the northing does — so a northing far outside the map used
+	 * to come back as a latitude of exactly {@code pi/2}. Past {@link ProjectionMath#ONE_TOL}
+	 * it now refuses.
+	 */
 	public ProjCoordinate projectInverse(double xyx, double xyy, ProjCoordinate out) {
 		double th, s;
 
 		out.x = 2. * xyx / (1. + Math.cos(xyy));
-		out.y = ProjectionMath.asin(0.5 * (xyy + Math.sin(xyy)));
+		out.y = ProjectionMath.asinChecked(0.5 * (xyy + Math.sin(xyy)));
 		return out;
 	}
 

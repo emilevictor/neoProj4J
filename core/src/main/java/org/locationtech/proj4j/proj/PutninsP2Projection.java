@@ -77,12 +77,23 @@ public class PutninsP2Projection extends Projection {
 		return out;
 	}
 
+	/**
+	 * Inverse projection. Port of PROJ 9.8.1 {@code putp2.cpp}'s {@code putp2_s_inverse},
+	 * lines 42-50.
+	 * <p>
+	 * Both inverse sines are {@link ProjectionMath#asinChecked(double)}, which is upstream's
+	 * {@code aasin} — the wrapper {@code putp2.cpp:45} and {@code :48} use. They used to be the
+	 * deprecated {@link ProjectionMath#asin(double)}, which clamps at any magnitude at all, so
+	 * any northing past {@code C_y} sphere radii answered with a latitude of exactly
+	 * {@code pi/2} rather than saying the point is off the map. Past
+	 * {@link ProjectionMath#ONE_TOL} it now refuses.
+	 */
 	public ProjCoordinate projectInverse(double xyx, double xyy, ProjCoordinate out) {
 		double c;
 
-		out.y = ProjectionMath.asin(xyy / C_y);
+		out.y = ProjectionMath.asinChecked(xyy / C_y);
 		out.x = xyx / (C_x * ((c = Math.cos(out.y)) - 0.5));
-		out.y = ProjectionMath.asin((out.y + Math.sin(out.y) * (c - 1.)) / C_p);
+		out.y = ProjectionMath.asinChecked((out.y + Math.sin(out.y) * (c - 1.)) / C_p);
 		return out;
 	}
 

@@ -29,11 +29,13 @@ import org.locationtech.proj4j.util.ProjectionMath;
 /**
  * Azimuthal equidistant, {@code 9.8.1:src/projections/aeqd.cpp}.
  *
- * <p>Only the two polar aspects are meridian-arc arithmetic — the equatorial and oblique ellipsoidal
- * aspects go through the geodesic solver — so {@link MeridianArc} replaces
- * {@code ProjectionMath.enfn}/{@code mlfn}/{@code inv_mlfn} at exactly three sites:
- * {@code Mp} at initialisation ({@code aeqd.cpp:98} and the {@code S_POLE} twin), the polar forward
- * ({@code aeqd.cpp:99}) and the polar inverse ({@code aeqd.cpp:322}).
+ * <p>The two polar aspects and the Guam aspect are meridian-arc arithmetic — only the equatorial and
+ * oblique ellipsoidal aspects go through the geodesic solver — so {@link MeridianArc} replaces
+ * {@code ProjectionMath.enfn}/{@code mlfn}/{@code inv_mlfn} at six sites, three per aspect.
+ * Polar: {@code Mp} at initialisation ({@code aeqd.cpp:308} and the {@code S_POLE} twin at
+ * {@code :311}), the forward ({@code aeqd.cpp:99}) and the inverse ({@code aeqd.cpp:224}).
+ * Guam: {@code M1} at initialisation ({@code aeqd.cpp:302}), the forward ({@code aeqd.cpp:78}) and
+ * the inverse ({@code aeqd.cpp:200}).
  *
  * <p>The polar rows the corpus sets, {@code builtins.gie:216-253}, are at {@code tolerance 0.1 m}
  * and Snyder's table 31 is quoted only to 0.1 m, so they cannot resolve this change; the improvement
@@ -46,7 +48,7 @@ public class EquidistantAzimuthalProjection extends AzimuthalProjection {
 	private static final long serialVersionUID = 675511536424237220L;
 
 	/**
-	 * {@code aeqd.cpp:57}, {@code #define TOL 1.e-14}.
+	 * {@code aeqd.cpp:56}, {@code #define TOL 1.e-14}.
 	 * <p>
 	 * <b>Was {@code 1.e-8}</b>, six orders of magnitude too loose, which put a dead zone of
 	 * radius {@code acos(1 - 1e-8) = 1.41e-4} rad &mdash; about <b>900 m</b> on the Earth
@@ -176,7 +178,7 @@ public class EquidistantAzimuthalProjection extends AzimuthalProjection {
 				break;
 			}
 		} else {
-			// aeqd.cpp:276, geod_init(&Q->g, 1, P->f), is called UNCONDITIONALLY, before the
+			// aeqd.cpp:280, geod_init(&Q->g, 1, P->f), is called UNCONDITIONALLY, before the
 			// aspect dispatch and before the `P->es == 0` fork -- so a declared sphere has a
 			// geodesic too, and aeqd_s_forward's degenerate branch relies on it: see
 			// projectGeodesic. Flattening zero, radius `a` rather than the ellipsoid's, because
@@ -320,12 +322,44 @@ public class EquidistantAzimuthalProjection extends AzimuthalProjection {
 			if (mode == OBLIQUE || mode == EQUATOR) {
 				sinc = Math.sin(c_rh);
 				cosc = Math.cos(c_rh);
+				// Both arms use asinChecked, which is upstream's aasin -- the wrapper
+				// aeqd.cpp:252 and :256 use.
+				//
+				// The clamp cannot change the answer on either argument -- it can fire, and on the
+				// EQUATOR arm it does. c_rh is ProjectionMath.distance, i.e.
+				// Math.sqrt(dx*dx + dy*dy) and not Math.hypot, so |y| <= c_rh and |y / c_rh| <= 1
+				// up to rounding. The EQUATOR argument is then (y/c_rh) * sinc, a product of two
+				// factors of magnitude at most 1; the OBLIQUE one is a dot product of the unit
+				// vector (sinphi0, cosphi0) with (cosc, sinc * y/c_rh), whose norm is at most 1.
+				// Neither can leave [-1, 1] by more than rounding -- and because the quotient comes
+				// from a sqrt-then-divide rather than a correctly rounded hypot, rounding is exactly
+				// as far as the bound goes. At the boundary asin and asinChecked agree bit for bit:
+				// asinChecked's |v| >= 1 branch returns +/-HALFPI, which is what Math.asin(+/-1.0)
+				// returns anyway. Measured over a 6M-sample sweep the EQUATOR argument reaches
+				// exactly 1.0, at 1,082,815 samples, and never exceeds it; OBLIQUE tops out at
+				// 0.9999999665954116. At x = 0, y = pi/2 the EQUATOR argument is exactly 1.0 and
+				// this method returns (0.0, 1.5707963267948966) both before and after the change.
+				// The three edge cases are
+				// already closed above: a radius past pi + EPS10 threw, a radius between pi and
+				// pi + EPS10 was snapped to exactly pi -- and Math.sin(Math.PI) is 1.2e-16, so the
+				// snap cannot inflate the quotient -- and a radius below EPS10 returned early, so
+				// nothing divides by a near-zero either.
+				//
+				// What the wrapper does change is a NaN argument: it raises instead of returning a
+				// NaN coordinate. The deprecated ProjectionMath.asin guarded only
+				// Math.abs(v) > 1., which is false for a NaN, so it fell through to Math.asin(NaN)
+				// and this method returned (NaN, NaN) normally -- measured against a pre-change
+				// class tree at lat_0 = 45 and lat_0 = 0. Projection's inverse funnel
+				// returns early on a NaN input, so the funnel cannot deliver one -- but this method
+				// is public and is called directly, including by
+				// errors/NonConvergenceTest, so "no caller can get a NaN in here" is not true and
+				// the old comment here said it was.
 				if (mode == EQUATOR) {
-					lp.y = ProjectionMath.asin(y * sinc / c_rh);
+					lp.y = ProjectionMath.asinChecked(y * sinc / c_rh);
 					x *= sinc;
 					y = cosc * c_rh;
 				} else {
-					lp.y = ProjectionMath.asin(cosc * sinphi0 + y * sinc * cosphi0 /
+					lp.y = ProjectionMath.asinChecked(cosc * sinphi0 + y * sinc * cosphi0 /
 						c_rh);
 					y = (cosc - sinphi0 * Math.sin(lp.y)) * c_rh;
 					x *= sinc * cosphi0;
