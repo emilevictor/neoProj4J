@@ -52,7 +52,12 @@ import org.locationtech.proj4j.units.Units;
  * {@code Proj4Keyword} allow-list runs only in {@code ParseMode.STRICT}, which
  * {@link org.locationtech.proj4j.CRSFactory} never selects and the facade could not select at all.
  * A consumer parsing untrusted PROJ.4 strings therefore got {@code PROJ_COMPATIBLE}
- * unconditionally: unrecognised keys retained and ignored, unknown {@code +units} silently metres.
+ * unconditionally: unrecognised keys retained and ignored.
+ *
+ * <p>The same sentence used to end "...and unknown {@code +units} silently metres". That is no
+ * longer a difference between the modes: refusing a {@code +units} value outside PROJ's 21 linear
+ * unit ids is what PROJ does, so it happens in both modes now, and the key allow-list is the only
+ * thing {@code STRICT} adds.
  *
  * <h2>What is measured here</h2>
  *
@@ -175,29 +180,38 @@ public class StrictParseModeTest {
     }
 
     /**
-     * {@code Units.findUnits} substitutes {@code METRES} for any name it does not know and never
-     * returns null, so by default {@code +units=bananas} is a working CRS in metres. That is a
-     * plausible wrong answer, which is the failure mode this library exists to remove.
+     * <b>An unresolvable {@code +units} value is refused in both modes, so this is no longer
+     * something {@code STRICT} gates.</b>
+     *
+     * <p>This test used to be {@code strictAlsoGatesAnUnresolvableUnitsName} and asserted that
+     * the default mode returned metres for {@code +units=bananas}, on the reasoning that
+     * {@code Units.findUnits} substitutes {@code METRES} for any name it does not know. It does,
+     * but that made the default a plausible wrong answer - which is the failure mode this
+     * library exists to remove, not one to gate behind an opt-in. PROJ resolves {@code +units}
+     * against the ids of {@code pj_list_linear_units()} and refuses everything else
+     * ({@code init.cpp:679}), so refusing it is parity, and parity belongs in the default.
      */
     @Test
-    public void strictAlsoGatesAnUnresolvableUnitsName() {
+    public void anUnresolvableUnitsNameIsRefusedInBothModes() {
         String definition = "+proj=merc +ellps=GRS80 +units=bananas";
 
-        assertSame("by default an unknown +units silently falls back to metres", Units.METRES,
-                Proj.createCrs(definition).asLegacy().getProjection().getUnits());
-
-        try {
-            Proj.createCrs(definition, STRICT);
-            fail("STRICT must refuse a +units name this library cannot resolve");
-        } catch (InvalidValueException expected) {
-            assertTrue(expected.getMessage(), expected.getMessage().contains("bananas"));
-            assertTrue("must be in-family", expected instanceof Proj4jException);
+        for (ParseMode mode : new ParseMode[]{ParseMode.PROJ_COMPATIBLE, ParseMode.STRICT}) {
+            ProjContext ctx = ProjContext.DEFAULT.withParseMode(mode);
+            try {
+                Proj.createCrs(definition, ctx);
+                fail(mode + " must refuse a +units value PROJ refuses");
+            } catch (InvalidValueException expected) {
+                assertTrue(expected.getMessage(), expected.getMessage().contains("bananas"));
+                assertTrue("must be in-family", expected instanceof Proj4jException);
+            }
         }
 
         // ...and must still resolve the ones it does know, including a non-metre one.
         assertSame(Units.US_FEET, Proj.createCrs("+proj=merc +ellps=GRS80 +units=us-ft", STRICT)
                 .asLegacy().getProjection().getUnits());
         assertSame(Units.METRES, Proj.createCrs("+proj=merc +ellps=GRS80 +units=m", STRICT)
+                .asLegacy().getProjection().getUnits());
+        assertSame(Units.US_FEET, Proj.createCrs("+proj=merc +ellps=GRS80 +units=us-ft")
                 .asLegacy().getProjection().getUnits());
     }
 
@@ -346,6 +360,12 @@ public class StrictParseModeTest {
      * two statements {@code CRSFactory.createFromParameters} runs, so this compares the two paths
      * bit for bit: the retained parameter list, and a forward transform of a probe point with
      * {@code assertEquals(.., 0.0)} rather than a tolerance.
+     *
+     * <p><b>The two paths must agree on refusals as well as on successes.</b>
+     * {@code +units=bananas} is in the list below and used to be one of the definitions that
+     * parsed; both paths now refuse it, so the comparison for that row is between the two
+     * exceptions rather than between two coordinates. Dropping the row instead would have lost
+     * the only case here that exercises the agreement on the failing path.
      */
     @Test
     public void theDefaultPathIsBitIdenticalToCrsFactory() {
@@ -364,7 +384,27 @@ public class StrictParseModeTest {
         CoordinateReferenceSystem wgs84 =
                 factory.createFromParameters(null, "+proj=longlat +ellps=WGS84 +datum=WGS84");
 
+        int refusedByBoth = 0;
         for (String definition : definitions) {
+            Proj4jException legacyRefusal = null;
+            try {
+                factory.createFromParameters(null, definition);
+            } catch (Proj4jException e) {
+                legacyRefusal = e;
+            }
+            if (legacyRefusal != null) {
+                // Same refusal, same class, same text, through the facade.
+                try {
+                    Proj.createCrs(definition);
+                    fail("the facade must refuse what CRSFactory refuses: " + definition);
+                } catch (Proj4jException viaFacade) {
+                    assertSame(definition, legacyRefusal.getClass(), viaFacade.getClass());
+                    assertEquals(definition, legacyRefusal.getMessage(), viaFacade.getMessage());
+                }
+                refusedByBoth++;
+                continue;
+            }
+
             CoordinateReferenceSystem legacy = factory.createFromParameters(null, definition);
             CoordinateReferenceSystem facade = Proj.createCrs(definition).asLegacy();
 
@@ -379,6 +419,9 @@ public class StrictParseModeTest {
             assertEquals(definition + " easting", viaLegacy.x, viaFacade.x, 0.0);
             assertEquals(definition + " northing", viaLegacy.y, viaFacade.y, 0.0);
         }
+        // Non-vacuity for the refusal branch: if this drops to 0 the agreement on the
+        // failing path has stopped being tested, and the loop would still pass.
+        assertEquals("+units=bananas must be refused by both paths", 1, refusedByBoth);
     }
 
     // ------------------------------------------------------------------------- the census

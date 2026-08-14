@@ -221,10 +221,19 @@ final class WktNames {
 
     /**
      * The linear unit denoting a PROJ {@code +units=} code, or {@code null}.
+     * <p>
+     * Skips {@link Units#DEGREES} the way {@link #projUnitsCode} does. Reaching it was
+     * already impossible from a PROJ.4 string — {@code Proj4Parser} refuses
+     * {@code +units=deg} outright — but this method takes a bare code from any caller, and
+     * {@code DEGREES} is an angular unit sitting in a linear lookup, so returning it as a
+     * {@code UnitDefinition.LINEAR} would be wrong on its own terms.
      */
     static UnitDefinition unitFromProjCode(String code) {
         Unit[] candidates = Units.units;
         for (int i = 0; i < candidates.length; i++) {
+            if (candidates[i] == Units.DEGREES) {
+                continue;
+            }
             if (candidates[i].abbreviation.equals(code)) {
                 Unit u = candidates[i];
                 return new UnitDefinition(wktNameOfProjUnit(u), u.value, UnitDefinition.LINEAR,

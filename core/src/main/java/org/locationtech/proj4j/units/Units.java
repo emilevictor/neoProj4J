@@ -16,6 +16,10 @@
 
 package org.locationtech.proj4j.units;
 
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.Set;
+
 import org.locationtech.proj4j.util.ProjectionMath;
 
 /**
@@ -43,13 +47,40 @@ import org.locationtech.proj4j.util.ProjectionMath;
  * declared but deliberately kept out of it: they are not {@code +units} names in PROJ,
  * and putting them there would make Proj4J accept definitions PROJ rejects.
  *
- * <h2>The metres fallback</h2>
+ * <p><b>{@link #DEGREES} is in {@link #units} for those callers only, and is not
+ * reachable through {@code +units=}.</b> It carries name {@code degree}, plural
+ * {@code degrees} and abbreviation {@code deg}, so while it sits in the table that
+ * {@link #findUnits(String)} searches, {@code +units=deg} used to resolve to it and
+ * produce a wrong coordinate rather than an error. {@code Proj4Parser} therefore does
+ * <b>not</b> call {@link #findUnits(String)} for {@code +units=} any more: it scans
+ * {@link #LINEAR_UNITS} and compares the {@code abbreviation} alone, so the three
+ * degree spellings are refused there while staying available here.
+ *
+ * <h2>The metres fallback, and who relies on it</h2>
  *
  * <p>{@link #findUnits(String)} returns {@link #METRES} for a name it does not know
- * rather than {@code null}, which is why {@code +units=<garbage>} has always been
- * silently metres. That behaviour is preserved for compatibility; detection of the
- * fallback belongs to the caller, and
- * {@code Proj4Parser.ParseMode#STRICT} does exactly that.
+ * rather than {@code null}, which is why {@code +units=<garbage>} was silently metres
+ * for as long as the parser used this method. It no longer does, so the fallback is
+ * not on the {@code +units=} path at all — but it is deliberately kept here, because
+ * three callers depend on being able to look a unit up by <i>name</i> rather than by id
+ * and are not parsing a PROJ.4 string:
+ *
+ * <ul>
+ * <li>{@code io.wkt.WktNames.projUnitsCode} and {@code unitFromProjCode}, reading
+ *     {@code UNIT["metre",1]} out of a WKT string, where {@code metre} is the spelling
+ *     WKT uses and {@code m} is not.</li>
+ * <li>{@code proj4j-geoapi}'s {@code Units.getUnit(String symbol)}, a symbol lookup.</li>
+ * </ul>
+ *
+ * <p>Detection of the fallback therefore still belongs to those callers.
+ * {@link #isKnownUnit(String)} is how they do it, and it is intentionally still true
+ * for {@code deg}, {@code degree} and {@code degrees} — which is why the refusal of
+ * those three had to be built at the parse level and not here.
+ *
+ * <h2>Discovering what {@code +units=} accepts</h2>
+ *
+ * <p>{@link #linearUnitIds()} is the supported way to ask. See its own comment for why
+ * reading {@link #LINEAR_UNITS} directly is a hazard on a mixed classpath.
  */
 public class Units {
 
@@ -127,6 +158,50 @@ public class Units {
      * {@link #LINEAR_UNITS}.
      */
     public static Unit[] units = concat(new Unit[]{DEGREES}, LINEAR_UNITS);
+
+    /**
+     * Built once from {@link #LINEAR_UNITS}, so {@link #linearUnitIds()} and the
+     * {@code +units=} lookup in {@code Proj4Parser} cannot disagree about which ids
+     * are accepted: both read that one array.
+     */
+    private static final Set<String> LINEAR_UNIT_IDS = linearIdSet();
+
+    private static Set<String> linearIdSet() {
+        Set<String> ids = new LinkedHashSet<String>();
+        for (int i = 0; i < LINEAR_UNITS.length; i++) {
+            ids.add(LINEAR_UNITS[i].abbreviation);
+        }
+        return Collections.unmodifiableSet(ids);
+    }
+
+    /**
+     * The unit ids {@code +units=} accepts: PROJ's 21 linear ids from
+     * {@code pj_units} in {@code src/units.cpp}, in that file's order.
+     *
+     * <p>{@code +units=} is resolved against these ids and nothing else,
+     * case-sensitively, exactly as {@code init.cpp:679} resolves it against
+     * {@code pj_list_linear_units()}. A name or plural is not an id, so
+     * {@code +units=feet} and {@code +units=metre} are errors even though
+     * {@link #findUnits(String)} resolves both; and the comparison is case-sensitive,
+     * so {@code +units=US-FT} is an error while {@code +units=us-ft} is not. This
+     * method is the only supported way to discover the accepted set.
+     *
+     * <p><b>Use this rather than reading {@link #LINEAR_UNITS}.</b> That field is a
+     * fork-only public field which does not exist in upstream Proj4J 1.4.3, so code
+     * that reads it from a static initialiser fails with {@link NoSuchFieldError} out
+     * of {@code <clinit>} when it lands on a 1.4.3 classpath. That is an
+     * {@link Error} rather than an {@link Exception}, so it escapes a
+     * {@code catch (Exception)} and surfaces as a
+     * {@link ExceptionInInitializerError} or {@link NoClassDefFoundError} somewhere
+     * unrelated. A consumer hit exactly that. This accessor exists so there is a
+     * stable entry point to depend on.
+     *
+     * @return the 21 accepted ids, unmodifiable; never null and never empty
+     * @since 1.5.0
+     */
+    public static Set<String> linearUnitIds() {
+        return LINEAR_UNIT_IDS;
+    }
 
     private static Unit[] concat(Unit[] head, Unit[] tail) {
         Unit[] all = new Unit[head.length + tail.length];

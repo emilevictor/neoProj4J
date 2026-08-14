@@ -539,8 +539,11 @@ public final class Proj4jGieOperationFactory implements GieOperationFactory {
             if ("units".equals(key) && !ProjTables.proj4jResolvesUnit(t.value())) {
                 return GieFailures.notImplemented(
                         "+units=" + t.value() + " is a PROJ unit id that proj4j's Units table "
-                                + "does not carry; Units.findUnits silently returns METRES for "
-                                + "it, which would scale the result wrongly");
+                                + "does not carry, so the row cannot be executed here. The parser "
+                                + "no longer answers in metres for an id it cannot resolve - it "
+                                + "throws InvalidValueException - so this branch turns what would "
+                                + "be a refusal into a reported gap, which is the more useful "
+                                + "outcome for a conformance run");
             }
         }
         return null;

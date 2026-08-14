@@ -61,16 +61,26 @@ public class Proj4Parser {
     public enum ParseMode {
         /**
          * Behave like PROJ: unrecognised keys are retained and ignored rather
-         * than being errors, and an unknown {@code +units} name falls back to
-         * metres as it always has in PROJ4J. Only <i>values</i> of recognised
-         * keys are validated.
+         * than being errors. Only <i>values</i> of recognised keys are validated.
+         *
+         * <p>This used to say that an unknown {@code +units} name "falls back to
+         * metres as it always has in PROJ4J". That was true of PROJ4J and false of
+         * PROJ, which refuses an unknown {@code +units} value outright — so the mode
+         * named for PROJ compatibility was, on that one key, the mode that broke it.
+         * {@code +units=} is now resolved against PROJ's 21 linear unit ids in both
+         * modes, and an id outside that set is an
+         * {@link org.locationtech.proj4j.InvalidValueException} here as it is upstream.
          */
         PROJ_COMPATIBLE,
 
         /**
-         * Additionally rejects things PROJ tolerates: keys outside
-         * {@link Proj4Keyword#supportedParameters()} and {@code +units} names
-         * this library cannot resolve.
+         * Additionally rejects something PROJ tolerates: a key outside
+         * {@link Proj4Keyword#supportedParameters()}.
+         *
+         * <p>That is now the only difference between the two modes. It used to be two
+         * things — unknown keys and unresolvable {@code +units} names — but refusing an
+         * unresolvable {@code +units} name is PROJ's own behaviour, not a stricter-than-PROJ
+         * check, so it belongs in {@link #PROJ_COMPATIBLE} and is done there.
          */
         STRICT
     }
@@ -286,13 +296,32 @@ public class Proj4Parser {
          * totalScale/totalFalseEasting already compute - so nothing here scales
          * a false easting on the way in.
          */
-        String unitsName = params.get(Proj4Keyword.units);
-        if (unitsName != null) {
+        /*
+         * containsKey, not get() != null: createParameterMap stores null for a token
+         * with no '=' at all, so a bare "+units" used to take the else branch and end
+         * up as metres. PROJ refuses it - measured against 9.8.1:
+         *
+         *   $ echo "-75 40" | cs2cs +proj=longlat +datum=WGS84 \
+         *         +to +proj=utm +zone=18 +datum=WGS84 +units
+         *   proj_create: Error 1027 (Invalid value for an argument):
+         *         utm: Invalid value for units
+         *
+         * so it is normalised to the empty string here and refused by the same throw,
+         * which is where "+units=" with an empty value already went. Note this is a
+         * present-but-valueless key, which is not the same thing as an absent one:
+         * an absent +units is what lets +to_meter apply.
+         */
+        if (params.containsKey(Proj4Keyword.units)) {
+            String unitsName = params.get(Proj4Keyword.units);
+            if (unitsName == null)
+                unitsName = "";
             Unit unit = findUnits(unitsName);
             if (unit == null) {
-                // Units.findUnits() never returns null - it falls back to
-                // metres for any unknown name - so this is only reachable
-                // through findUnits() below, and only in STRICT mode.
+                // Reachable in BOTH parse modes, and unconditionally: findUnits()
+                // below resolves the 21 linear ids and returns null for everything
+                // else, which is what init.cpp:679 does. The message text is part of
+                // the contract - it names the value, because a caller who wrote
+                // "+units=ftUS" cannot fix it from "invalid units" alone.
                 throw new InvalidValueException("Unknown unit: " + unitsName);
             }
             projection.setFromMetres(1.0 / unit.value);
@@ -987,18 +1016,65 @@ public class Proj4Parser {
     }
 
     /**
-     * Resolves a {@code +units} name, returning null when this library cannot
-     * resolve it and the parse mode says that should be an error.
-     * <p>
-     * {@link Units#findUnits(String)} falls back to metres for any unknown
-     * name and never returns null, so the unknown case has to be detected by
-     * checking whether metres was actually asked for.
+     * Resolves a {@code +units} value the way {@code init.cpp:679} does: against the
+     * <b>ids</b> of {@code pj_list_linear_units()} and nothing else, case-sensitively.
+     * Returns null for anything outside that set, in <b>both</b> parse modes.
+     *
+     * <h4>Why this cannot be {@link Units#findUnits(String)}</h4>
+     *
+     * <p>{@code Units.findUnits} matches a unit's name and plural as well as its
+     * abbreviation, and falls back to {@link Units#METRES} rather than returning null.
+     * Between them those two properties gave {@code +units=} three wrong behaviours,
+     * all measured against {@code cs2cs} 9.8.1 on
+     * {@code +proj=utm +zone=18 +datum=WGS84 +units=<U>} at (-75, 40):
+     *
+     * <ol>
+     * <li><b>An unresolvable name became metres.</b> {@code +units=ftUS} — an ordinary
+     *     misspelling of the US survey foot — gave easting {@code 500000.0000}, where
+     *     PROJ refuses with {@code Error 1027 ... utm: Invalid value for units}. The
+     *     caller got a number 1.14 million units away from what they asked for, with
+     *     nothing to signal it.</li>
+     * <li><b>{@code deg}, {@code degree} and {@code degrees} resolved.</b>
+     *     {@link Units#DEGREES} sits in {@link Units#units} for {@code LongLatProjection}
+     *     and the {@code geoapi} module, and carries all three of those spellings, so
+     *     {@code +units=deg} gave {@code (0.0000, 39.7752)} where the answer in metres
+     *     is {@code (500000.0000, 4427757.2187)}. That reads like a longitude/latitude
+     *     pair and is wrong in both ordinates — longitude 0 for a point at -75. It was
+     *     not caught by {@link ParseMode#STRICT} either, because
+     *     {@code Units.isKnownUnit("deg")} is true.</li>
+     * <li><b>Names and plurals were accepted.</b> 41 of the 62 spellings that used to
+     *     resolve are refused by PROJ, {@code feet} among them — PROJ takes {@code ft}
+     *     and refuses {@code feet}. Those returned the right unit, so this part was
+     *     permissiveness rather than a wrong answer, but it is still not parity.</li>
+     * </ol>
+     *
+     * <h4>Case-sensitivity is deliberate, and must stay</h4>
+     *
+     * <p>The comparison is case-sensitive because PROJ's is. Making it lenient would
+     * fix {@code +units=US-FT} — a real id in the wrong case, which used to fall
+     * through to metres and so was a wrong answer — but it would also start accepting
+     * {@code +units=M} and {@code +units=Ft}, which PROJ refuses. Measured: PROJ
+     * refuses all three, and so does this.
+     *
+     * <h4>Reading the ids from one place</h4>
+     *
+     * <p>This scans {@link Units#LINEAR_UNITS}, which is the same array
+     * {@link Units#linearUnitIds()} is built from, so the set a caller can discover
+     * cannot drift from the set this accepts. {@code PipelineUnits} holds a second copy
+     * of the same 21 ids for the pipeline layer; the two were diffed and agree on every
+     * id and factor, but it is package-private to {@code pipeline} and reaching it from
+     * here would mean widening its visibility, so it is left alone.
+     *
+     * @param name the raw {@code +units} value; may be empty, never null here
+     * @return the unit, or null if {@code name} is not one of PROJ's 21 linear ids
      */
     private Unit findUnits(String name) {
-        Unit unit = Units.findUnits(name);
-        if (mode != ParseMode.STRICT)
-            return unit;
-        return Units.isKnownUnit(name) ? unit : null;
+        Unit[] linear = Units.LINEAR_UNITS;
+        for (int i = 0; i < linear.length; i++) {
+            if (name.equals(linear[i].abbreviation))
+                return linear[i];
+        }
+        return null;
     }
 
     /**

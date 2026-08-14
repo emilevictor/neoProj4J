@@ -102,16 +102,22 @@ class ProjTablesTest {
     }
 
     @Test
-    @DisplayName("Units.findUnits' metres fallback is detected, not trusted")
-    void unitResolutionDetectsTheMetresFallback() {
+    @DisplayName("+units resolution is by id, and only by id")
+    void unitResolutionIsByIdAlone() {
         assertTrue(ProjTables.proj4jResolvesUnit("m"));
         assertTrue(ProjTables.proj4jResolvesUnit("km"));
         assertTrue(ProjTables.proj4jResolvesUnit("us-ft"));
-        // findUnits returns METRES rather than null for anything it does not know,
-        // so absence has to be detected by asking whether the unit it handed back
-        // actually answers to the name requested.
         assertFalse(ProjTables.proj4jResolvesUnit("furlong"));
         assertFalse(ProjTables.proj4jResolvesUnit(null));
+        // A name or plural is not an id. This used to answer true for both, because it
+        // went through Units.findUnits, which matches all three spellings - but PROJ
+        // refuses +units=feet while accepting +units=ft, and so does proj4j's parser now.
+        assertFalse(ProjTables.proj4jResolvesUnit("feet"), "PROJ refuses +units=feet");
+        assertFalse(ProjTables.proj4jResolvesUnit("metre"), "PROJ refuses +units=metre");
+        assertFalse(ProjTables.proj4jResolvesUnit("deg"), "deg is an angular id");
+        // Case-sensitive, as PROJ is: US-FT is a real id in the wrong case, and upstream
+        // refuses it rather than repairing it.
+        assertFalse(ProjTables.proj4jResolvesUnit("US-FT"), "PROJ is case-sensitive here");
         // Was: assertFalse(..."ind-yd"..., "proj4j has no Indian units"). It has them now -
         // fath, ch, link, us-ch, ind-yd, ind-ft and ind-ch were all added to core's Units
         // table, where every one of them had previously resolved silently to METRES.
@@ -126,10 +132,13 @@ class ProjTablesTest {
         //
         // The gap check is retained deliberately rather than deleted, because UNITS is a
         // fact about PROJ and could grow: PROJ adding a unit must show up as a classified
-        // gap, not as a silent metres fallback. Units.findUnits() returns METRES for ANY
-        // unrecognised name, so the fallback is still live and still dangerous - which is
-        // why proj4jResolvesUnit asks whether the returned unit answers to the requested
-        // name rather than trusting a non-null result.
+        // gap rather than as a bare refusal in the middle of a conformance run.
+        //
+        // The reason for the check has changed, though. It used to be that
+        // Units.findUnits() returned METRES for any unrecognised name, so an unresolvable
+        // +units produced a plausible wrong answer. The parser now throws instead, so the
+        // danger is gone; what is left is that a refusal mid-run is less informative than
+        // a classified NOT_IMPLEMENTED, which is what this branch still buys.
         List<String> unresolvable = new ArrayList<String>();
         for (String id : ProjTables.UNITS) {
             if (!ProjTables.proj4jResolvesUnit(id)) {
