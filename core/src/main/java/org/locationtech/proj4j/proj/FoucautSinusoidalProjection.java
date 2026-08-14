@@ -47,6 +47,13 @@ public class FoucautSinusoidalProjection extends Projection {
 	 * <p>
 	 * <b>Fail-closed.</b> PROJ's {@code fouc_s.cpp} clamps to {@code ±M_HALFPI} — the pole —
 	 * when the Newton iteration exhausts {@code MAX_ITER}. Proj4J throws instead.
+	 * <p>
+	 * The {@code n == 0} arm's inverse sine is {@link ProjectionMath#asinChecked(double)}, which
+	 * is upstream's {@code aasin} — the wrapper {@code fouc_s.cpp:48} uses. It used to be the
+	 * deprecated {@link ProjectionMath#asin(double)}, which clamps at any magnitude at all;
+	 * {@code xyy} here is the caller's northing with nothing bounding it, so a northing of any
+	 * size answered with a latitude of exactly {@code pi/2}. Past
+	 * {@link ProjectionMath#ONE_TOL} it now refuses.
 	 */
 	public ProjCoordinate projectInverse(double xyx, double xyy, ProjCoordinate out) {
 		double V = Double.NaN;
@@ -67,7 +74,7 @@ public class FoucautSinusoidalProjection extends Projection {
 								+ " (last correction " + V + ")");
 			}
 		} else
-			out.y = ProjectionMath.asin(xyy);
+			out.y = ProjectionMath.asinChecked(xyy);
 		V = Math.cos(out.y);
 		out.x = xyx * (n + n1 * V) / V;
 		return out;

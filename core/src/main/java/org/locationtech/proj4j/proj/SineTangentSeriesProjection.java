@@ -59,11 +59,25 @@ class SineTangentSeriesProjection extends ConicProjection {
 		return xy;
 	}
 
+	/**
+	 * Inverse projection. Port of PROJ 9.8.1 {@code sts.cpp}'s {@code sts_s_inverse}, lines
+	 * 39-52. The base of {@code fouc} ({@code sts.cpp:66}), {@code kav5} ({@code :75}),
+	 * {@code qua_aut} ({@code :85}) and {@code mbt_s} ({@code :94}) — one kernel, four
+	 * {@code p}/{@code q}/{@code tan_mode} settings.
+	 * <p>
+	 * The sine branch uses {@link ProjectionMath#asinChecked(double)}, which is upstream's
+	 * {@code aasin} — the wrapper {@code sts.cpp:44} uses. It used to be the deprecated
+	 * {@link ProjectionMath#asin(double)}, which clamps at any magnitude at all, so any northing
+	 * past {@code C_y} came back as a latitude of exactly {@code pi/2 / C_p} instead of being
+	 * refused. Past {@link ProjectionMath#ONE_TOL} it now refuses. The tangent branch needs no
+	 * such wrapper: {@code Math.atan} is defined on the whole real line, which is why upstream
+	 * leaves it bare too.
+	 */
 	public ProjCoordinate projectInverse(double xyx, double xyy, ProjCoordinate lp) {
 		double c;
 
 		xyy /= C_y;
-		c = Math.cos(lp.y = tan_mode ? Math.atan(xyy) : ProjectionMath.asin(xyy));
+		c = Math.cos(lp.y = tan_mode ? Math.atan(xyy) : ProjectionMath.asinChecked(xyy));
 		lp.y /= C_p;
     lp.x = xyx / (C_x * Math.cos(lp.y));
 		if (tan_mode)

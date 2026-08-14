@@ -171,7 +171,21 @@ public class LandsatProjection extends Projection {
 		}
 		if (l != 0) {
 			sp = FastStrictTrig.sin(lpphi);
-			phidp = ProjectionMath.asin((one_es * ca * sp - sa * FastStrictTrig.cos(lpphi) *
+			// asinChecked, which is upstream's aasin -- the wrapper som.cpp:137 uses, as it does at
+			// :200 for the sibling call at the end of projectInverse.
+			//
+			// The clamp cannot fire: this argument cannot exceed 1. Writing u = sin^2(phi), the
+			// squared numerator is at most one_es^2 * u + (1 - u) because ca^2 + sa^2 = 1, and
+			//     (one_es^2 * u + 1 - u) / (1 - es * u) = (1 - u * es * (2 - es)) / (1 - es * u)
+			// which is at most 1 because 2 - es >= 1.
+			//
+			// Nor can a NaN reach it, and the reason is above rather than in the funnel: with a NaN
+			// latitude every convergence test in the inner loop is false, so l counts down to 0 and
+			// the `if (l != 0)` guard skips this whole block. Measured: project(0.1, NaN, out)
+			// leaves (Infinity, Infinity), which is upstream's som.cpp:151 `xy.x = xy.y = HUGE_VAL`,
+			// unchanged by this wrapper. What is NOT true, and what the note here used to say, is
+			// that the funnel makes it unreachable -- this method is public and is called directly.
+			phidp = ProjectionMath.asinChecked((one_es * ca * sp - sa * FastStrictTrig.cos(lpphi) *
 				FastStrictTrig.sin(lamt)) / Math.sqrt(1. - es * sp * sp));
 			tanph = StrictMath.log(FastStrictTrig.tan(ProjectionMath.QUARTERPI + .5 * phidp));
 			sd = FastStrictTrig.sin(lamdp);
