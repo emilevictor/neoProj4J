@@ -176,7 +176,7 @@ public class CassiniProjection extends Projection {
 	 * nothing {@code initialize()} computes depends on it, and it is read per coordinate.
 	 *
 	 * @param hyperbolic whether to apply the cubic northing correction
-	 * @since 1.5.0
+	 * @since 2.0.0
 	 */
 	public void setHyperbolic(boolean hyperbolic) {
 		this.hyperbolic = hyperbolic;
@@ -184,7 +184,7 @@ public class CassiniProjection extends Projection {
 
 	/**
 	 * @return whether the {@code +hyperbolic} variant is in force
-	 * @since 1.5.0
+	 * @since 2.0.0
 	 */
 	public boolean isHyperbolic() {
 		return hyperbolic;

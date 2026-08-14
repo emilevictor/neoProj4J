@@ -90,7 +90,7 @@ import java.util.Map;
  * <p>Immutable after construction; the evaluator keeps all state in locals, so one
  * instance may be shared.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 final class Triangulation {
 

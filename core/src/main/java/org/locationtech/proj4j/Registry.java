@@ -328,7 +328,7 @@ public class Registry {
      *         with no description. As with {@link #getProjection(String)}, {@code null} means
      *         exactly "nothing registered under that name"; it never means "registered but not
      *         implemented", which {@link #getProjectionDescriptions()} will still list.
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public String getProjectionDescription(String name) {
         return name == null ? null : projDescriptions.get(name);
@@ -344,7 +344,7 @@ public class Registry {
      * {@link #getProjection(String)} to find out whether a given name can actually be used.
      *
      * @return an unmodifiable, name-sorted view; never null
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public SortedMap<String, String> getProjectionDescriptions() {
         return Collections.unmodifiableSortedMap(

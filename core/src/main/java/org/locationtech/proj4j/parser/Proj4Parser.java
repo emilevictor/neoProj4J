@@ -116,7 +116,7 @@ public class Proj4Parser {
      * @param name     a name for the CRS, or null for an anonymous one
      * @param paramStr the parameter string, or null
      * @return the CRS, or null if {@code paramStr} is null
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public CoordinateReferenceSystem parse(String name, String paramStr) {
         if (paramStr == null)

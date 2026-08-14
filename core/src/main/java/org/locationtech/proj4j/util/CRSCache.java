@@ -117,7 +117,7 @@ public class CRSCache {
     /**
      * @param maxEntries the ceiling for <em>each</em> of the three internal maps; a value below 1
      *                   is replaced by the default
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public CRSCache(int maxEntries) {
         int n = maxEntries > 0 ? maxEntries : DEFAULT_MAX_ENTRIES;

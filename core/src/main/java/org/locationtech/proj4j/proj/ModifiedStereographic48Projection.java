@@ -28,7 +28,7 @@ import org.locationtech.proj4j.util.Complex;
  * 6&thinsp;370&thinsp;997 m — with {@code e} surviving into the conformal-latitude expression, as
  * described in {@link ModifiedStereographicProjection}.
  *
- * @since 1.5.0
+ * @since 2.0.0
  */
 public class ModifiedStereographic48Projection extends ModifiedStereographicProjection {
 

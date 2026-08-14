@@ -68,7 +68,7 @@ import org.locationtech.proj4j.resource.Resources;
  *
  * <p>Immutable after construction; safe to share.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 final class TinShiftOperator implements PipelineOperator {
 

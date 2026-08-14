@@ -32,7 +32,7 @@ package org.locationtech.proj4j;
  *
  * @see ErrorCause#UNKNOWN_CRS
  * @see ErrorCause#BALLPARK_REJECTED
- * @since 1.5.0
+ * @since 2.0.0
  */
 public class CrsCreationException extends CrsTransformException {
 

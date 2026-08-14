@@ -49,7 +49,7 @@ package org.locationtech.proj4j.pipeline;
  * that its steps wrap mutable state and that one instance belongs to one thread.
  * Upstream has exactly the same property for exactly the same reason.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 final class CoordinateStack {
 

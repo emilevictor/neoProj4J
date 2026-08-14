@@ -73,7 +73,7 @@ import org.locationtech.proj4j.datum.Datum;
  * @see Proj#createCrsToCrs(String, String)
  * @see BulkCoordinateTransform
  * @see BallparkPolicy
- * @since 1.5.0
+ * @since 2.0.0
  */
 public final class CrsOperation {
 

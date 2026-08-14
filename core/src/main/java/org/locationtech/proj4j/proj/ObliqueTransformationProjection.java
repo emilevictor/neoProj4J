@@ -75,10 +75,11 @@ import org.locationtech.proj4j.util.ProjectionMath;
  * <li><b>{@code P->fwd}/{@code P->inv} are set only if the child has that direction</b>
  *     ({@code ob_tran.cpp:286-293}, {@code Q->link->fwd ? o_forward : nullptr}). So
  *     {@code +proj=ob_tran +o_proj=guyou} legitimately has a forward and <em>no</em> inverse, and
- *     asking for one must fail rather than fall back to anything. {@link #hasInverse()} answers
- *     the child's capability, so {@link Projection#projectInverse} raises
- *     {@link ErrorCause#NO_INVERSE_AVAILABLE} for exactly the child projections upstream leaves
- *     {@code nullptr}.</li>
+ *     asking for one must fail rather than fall back to anything. <b>Both</b> inverse predicates
+ *     answer the child's capability here — {@link #hasInverse()} and
+ *     {@link #hasInverseImplementation()} — so the engines refuse before they start and
+ *     {@link Projection#projectInverse} raises {@link ErrorCause#NO_INVERSE_AVAILABLE} for exactly
+ *     the child projections upstream leaves {@code nullptr}.</li>
  * <li><b>If the child outputs radians, the wrapper's output units become
  *     {@code PJ_IO_UNITS_WHATEVER}</b> ({@code ob_tran.cpp:296-298}), and {@code fwd_finalize}'s
  *     {@code WHATEVER} case is a bare {@code break} — no {@code a}, no {@code x_0}, no
@@ -99,7 +100,7 @@ import org.locationtech.proj4j.util.ProjectionMath;
  * are both refused with {@link ErrorCause#MISSING_PARAM}, which is upstream's
  * {@code "Missing parameter: o_proj"}.
  *
- * @since 1.5.0
+ * @since 2.0.0
  */
 public class ObliqueTransformationProjection extends Projection {
 
@@ -351,7 +352,41 @@ public class ObliqueTransformationProjection extends Projection {
      */
     @Override
     public boolean hasInverse() {
-        return link != null && (link.hasInverse() || Boolean.TRUE.equals(link.isGeographic()));
+        return childIsInvertible();
+    }
+
+    /**
+     * Also {@code Q->link->inv ? o_inverse : nullptr}, because for a wrapper the two questions have
+     * the same answer and it is the child's.
+     *
+     * <p>{@link Projection#hasInverseImplementation()} walks the class hierarchy looking for a
+     * {@code projectInverse} override. This class declares one, so the walk finds it and says
+     * "yes" for every child, including the ones that have no inverse at all. That is a lie the
+     * caller cannot see through: {@code Cs2csOperator} and {@code BasicCoordinateTransform} both
+     * ask this question and both believed it, so {@code Pipeline.isInvertible()} reported
+     * {@code true} for {@code +proj=ob_tran +o_proj=august}, and asking for the inverse then got
+     * past the engine's own refusal and into {@link #projectInverse}'s, changing a
+     * {@code PipelineDefinitionException} into a {@code ProjectionException}. No wrong coordinate
+     * was ever produced — but a public predicate that answers "yes, invertible" about something
+     * that is not is worth no more than no predicate at all.
+     *
+     * <p>Both predicates ask the child the same question — {@code hasInverseImplementation()}, not
+     * {@code hasInverse()} — so that the wrapper inherits the child's real capability rather than
+     * the child's declaration of it. Asking {@code link.hasInverse()} would move the lie instead of
+     * removing it: {@code krovak} and {@code nzmg} implement {@code projectInverse} without
+     * declaring {@code hasInverse()}, so {@code +o_proj=krovak} would be refused an inverse it has.
+     *
+     * <p>No recursion: {@link #setChild(Projection)} refuses an {@code ob_tran} child, as upstream
+     * does textually, so the child's answer comes from the ordinary hierarchy walk.
+     */
+    @Override
+    public boolean hasInverseImplementation() {
+        return childIsInvertible();
+    }
+
+    /** {@code Q->link->inv != nullptr}, the one question both predicates above are asking. */
+    private boolean childIsInvertible() {
+        return link != null && link.hasInverseImplementation();
     }
 
     @Override

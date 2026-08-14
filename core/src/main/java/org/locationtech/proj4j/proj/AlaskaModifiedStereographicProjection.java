@@ -31,7 +31,7 @@ import org.locationtech.proj4j.util.Complex;
  * previous {@code "Unknown projection: alsk"}, which lied about a name that was in the registry.
  * The 16 {@code builtins.gie} assertions were unreachable rather than wrong.
  *
- * @since 1.5.0
+ * @since 2.0.0
  */
 public class AlaskaModifiedStereographicProjection extends ModifiedStereographicProjection {
 

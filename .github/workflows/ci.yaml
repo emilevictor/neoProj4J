@@ -364,19 +364,28 @@ jobs:
             encoding: UTF-8
             advisory: false
 
-          # EXPECTED TO FAIL TODAY. Defect: core/src/main/java/org/locationtech/proj4j/io/
-          # Proj4FileReader.java:41 calls authorityCode.toLowerCase() with no Locale. Under
-          # tr_TR the Turkish casing rule maps 'I' to dotless 'i', so "ESRI" lowercases to
-          # "esrı" and the lookup for the resource proj4/nad/esri never resolves -
-          # all 2,954 ESRI codes become unreachable. Advisory on purpose: this is a
-          # green-when-fixed signal, not a permanent red. Delete continue-on-error from
-          # this leg the moment the toLowerCase(Locale.ROOT) fix lands.
+          # The defect this leg was added for is FIXED. core/src/main/java/org/locationtech/
+          # proj4j/io/Proj4FileReader.java:76 now reads authorityCode.toLowerCase(Locale.ROOT).
+          # It was a bare toLowerCase() at :41 until 6d5e9af (2026-08-05).
+          #
+          # Why the Locale.ROOT argument is written that way, and why it must stay: the string
+          # is a classpath resource name, not text for a reader, so it has to fold the same way
+          # in every locale. Under tr_TR the Turkish casing rule maps 'I' to the dotless 'ı'
+          # (U+0131), so "ESRI" lowercases to "esrı", the lookup for the resource
+          # proj4/nad/esri never resolves, and all 2,954 ESRI codes become unreachable. This
+          # leg is what would catch that being undone. NoAmbientLocaleInCoreTest scans core for
+          # the same class of defect and pins this site.
           - label: tr_TR / UTF-8 / Europe-Istanbul / x64
             os: ubuntu-latest
             language: tr
             country: TR
             timezone: Europe/Istanbul
             encoding: UTF-8
+            # Kept advisory on purpose, even though the defect above is fixed: no run has
+            # confirmed this leg green. It has never executed on a runner, and it cannot be
+            # checked here - there is no x86-64 JVM on the machine this was written on.
+            # Removing the marker now would assert a pass nobody has observed. One green run
+            # of this leg is what justifies removing it.
             advisory: true
 
           # Decimal comma, non-Latin-1-safe round trips, half-hour UTC offset. Cheap, and

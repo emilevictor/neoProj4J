@@ -28,7 +28,7 @@ import org.locationtech.proj4j.InvalidValueException;
  * distinction that decides whether a conformance assertion has been demonstrated
  * or merely dodged.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 public class PipelineDefinitionException extends InvalidValueException {
 

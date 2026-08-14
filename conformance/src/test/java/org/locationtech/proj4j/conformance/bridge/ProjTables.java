@@ -50,7 +50,11 @@ public final class ProjTables {
     /**
      * All 186 operator names {@code +proj=} accepts, from
      * {@code src/pj_list.h}'s {@code PROJ_HEAD(...)} entries. proj4j's
-     * {@code Registry} maps 93 of them.
+     * {@code Registry} maps 151 of them, measured 2026-08-14 by
+     * {@code ProjTablesTest.registryCoverage}, which prints the count and the
+     * shortfall on every run rather than leaving this comment to be trusted.
+     * It read 93 before the projection porting streams landed; re-read the
+     * test's output, not this sentence.
      */
     public static final Set<String> OPERATORS = set(
             "adams_hemi", "adams_ws1", "adams_ws2", "aea", "aeqd", "affine", "airocean", "airy",

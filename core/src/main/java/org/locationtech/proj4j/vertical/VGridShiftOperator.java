@@ -78,7 +78,7 @@ import org.locationtech.proj4j.pipeline.PipelineOperator;
  * array handed to them; the operator itself is immutable and the grids are immutable after
  * parsing, so one instance may be shared.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 public final class VGridShiftOperator implements PipelineOperator {
 

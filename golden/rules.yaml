@@ -154,7 +154,7 @@ rules:
       `lam = (lam - from_greenwich) - lam0` followed by adjlon (fwd.cpp:105-112), and
       inv_finalize's PJ_IO_UNITS_RADIANS branch adds lam0 back and adjlons again
       (inv.cpp:110-118). proj4j's own pipeline engine already ports exactly that -- see
-      pipeline/Cs2csOperator.java:449-462 and :510-518, where the lam0 term is applied for every
+      pipeline/Cs2csOperator.java:753-766 and :819-828, where the lam0 term is applied for every
       kernel EXCEPT Kernel.PROJECTION, precisely because for a projection it is
       Projection.projectRadians that does it. GeocentProjection is the one place where neither
       side did.
@@ -246,8 +246,8 @@ rules:
     expected_rows: 100
     reason: |
       The generalisation of PARSE-VUNITS-ACCEPTED, which is above and claims the +vunits subset
-      first. parser/Proj4Parser.java:79 now consults Proj4Keyword's allow-list only in
-      ParseMode.STRICT, and :62 makes ParseMode.PROJ_COMPATIBLE the default, so an unrecognised
+      first. parser/Proj4Parser.java:132-133 now consults Proj4Keyword's allow-list only in
+      ParseMode.STRICT, and :92 makes ParseMode.PROJ_COMPATIBLE the default, so an unrecognised
       token no longer rejects the whole definition.
 
       That is upstream's behaviour and not a relaxation: PROJ has no parameter allow-list at all.
@@ -338,7 +338,7 @@ rules:
       `alpha=-36d52'11.6315`, DMS with the seconds mark omitted. The baseline message is the raw
       `For input string: "-36d52'11.6315"`.
 
-      parser/Proj4Parser.java:574-587 now routes angular values through Angle.parse plus PROJ's
+      parser/Proj4Parser.java:1377-1389 now routes angular values through Angle.parse plus PROJ's
       r/R radian suffix and wraps any NumberFormatException in an InvalidValueException, which is
       both what upstream accepts (dmstor, 9.8.1:src/dmstor.cpp, is applied to every angular
       parameter) and what the error taxonomy requires. These two defs consequently parse and
@@ -425,19 +425,22 @@ rules:
     # Europe or Africa and now report COORDINATE_OUTSIDE_GRID. Claimed by GRIDS-EPSG-CONUS-SYN-REFUSED.
     expected_rows: 154
     reason: |
-      AlbersProjection.java:95-106 computes the authalic quantity into `out.y` as a scratch temporary
-      and then takes asin(lpphi) where lpphi is still rho/dd -- the RADIUS, not sin(phi). PROJ names
-      that intermediate qs_div_2 as a local. The :106 sign test is also on lpphi, which is >= 0 by
-      construction, so the pole fallback can only ever return +90 degrees. For
-      +proj=aea +R=6400000 +lat_1=0 +lat_2=2, the inverse of (200, 100) m gives latitude
+      AlbersProjection.java:97-108 is the spherical inverse branch, and it is now right: the quantity
+      PROJ names qs_div_2 is a local, `qsDiv2` (:103), asin is taken of that local (:104-105), and the
+      pole fallback at :107 tests the sign of `qsDiv2`. The comment at :98-102 records what the
+      BASELINE does, which is what these rows measure: it computed the same quantity into `out.y` as a
+      scratch temporary and then took asin(lpphi) where lpphi is still rho/dd -- the RADIUS, not
+      sin(phi) -- and its sign test was on lpphi too, which is >= 0 by construction, so the pole
+      fallback could only ever return +90 degrees. For
+      +proj=aea +R=6400000 +lat_1=0 +lat_2=2, the baseline inverse of (200, 100) m gives latitude
       89.957690088 where PROJ gives 0.000895246 -- an 89.9568 degree error -- and NaN wherever
       rho/dd > 1.
 
-      This is ordered BEFORE the +R rule on purpose. The two are one release: the defect is dormant
-      today only because the +R defect leaves `spherical == false`, so fixing +R alone turns a
-      6e-06 degree source-side error into 89.96 degrees. Keeping them as separate rules, with this
-      one first, means the aea rows are attributed to the projection fix and the remaining +R rows to
-      the parser fix, instead of one rule silently absorbing both.
+      This is ordered BEFORE the +R rule on purpose. The two are one release: in the baseline the aea
+      defect is dormant only because the +R defect leaves `spherical == false`, so fixing +R alone
+      turns a 6e-06 degree source-side error into 89.96 degrees. Keeping them as separate rules, with
+      this one first, means the aea rows are attributed to the projection fix and the remaining +R rows
+      to the parser fix, instead of one rule silently absorbing both.
     match:
       classifications: [CHANGED]
       sections: [SYN]
@@ -459,12 +462,13 @@ rules:
     # rules. If this number moves, a host gained or lost the parameter, or that split broke.
     expected_rows: 40
     reason: |
-      parser/DatumParameters.java:119-133 has the two ellipsoid-shape setters exactly transposed:
-      proj4j's setRF(rf) computes es = rf*(2-rf) (treating rf as if it were f) and setF(f) computes
-      rf = 1/f then es = rf*(2-rf) (treating f as if it were rf), where PROJ's ell_set.cpp
-      ellps_shape cases 0 and 1 are rf -> f = 1/rf; es = 2f - f^2 and f -> es = 2f - f^2. So proj4j's
-      +f IS PROJ's +rf, and +rf is unusable: +ellps=GRS80 +rf=300 derives es = 300*(2-300) = -89400,
-      b = a*sqrt(1-es) ~ 1.9 million km.
+      The two ellipsoid-shape setters used to be exactly transposed. They no longer are:
+      parser/DatumParameters.java:264 setRF(rf) computes f = 1/rf then es = 2f - f*f, and :275 setF(f)
+      computes es = 2f - f*f, which is PROJ's ell_set.cpp ellps_shape cases 0 and 1. In the BASELINE,
+      which is what these rows measure, setRF(rf) computed es = rf*(2-rf) (treating rf as if it were f)
+      and setF(f) computed rf = 1/f then es = rf*(2-rf) (treating f as if it were rf). So the
+      baseline's +f IS PROJ's +rf, and its +rf is unusable: +ellps=GRS80 +rf=300 derives
+      es = 300*(2-300) = -89400, b = a*sqrt(1-es) ~ 1.9 million km.
 
       There are two distinct downstream fates in the baseline depending on whether the projection
       reads `e` or `es`, and both appear in these rows: reading `e` gives e = sqrt(negative) = NaN so
@@ -506,12 +510,16 @@ rules:
     # any future R-prefixed slug and this count would stop meaning anything.
     expected_rows: 250
     reason: |
-      parser/Proj4Parser.java:162-165 routes +R through Projection.setRadius, which sets `a` ONLY --
-      es, e and ellipsoid are untouched -- and +R never reaches DatumParameters at all
-      (Proj4Parser.java:247-250 is the dead handler). So the ELLIPSOIDAL formula runs on a declared
-      sphere: the easting is exact and the northing is wrong by ~1,495 m at latitude 2 and ~35,000 m
-      at 55. PROJ's +R short-circuits the entire ellipsoid pipeline (size only, es = f = e = rf = 0,
-      b = a) and ignores every shape and spherification parameter.
+      +R now goes to DatumParameters. parser/Proj4Parser.java:1184-1188 reads it first in
+      parseEllipsoid and calls datumParam.setR, which sets `a`, es = 0, f = 0 and sphere = true
+      (DatumParameters.java:213-220), then returns -- so +R overrules every shape and spherification
+      parameter, as ell_set.cpp:92-100 does. The comment at Proj4Parser.java:403-410 records what the
+      BASELINE does, which is what these rows measure: it routed +R through Projection.setRadius,
+      which sets `a` ONLY -- es, e and ellipsoid untouched -- and +R never reached DatumParameters at
+      all. So in the baseline the ELLIPSOIDAL formula runs on a declared sphere: the easting is exact
+      and the northing is wrong by ~1,495 m at latitude 2 and ~35,000 m at 55. PROJ's +R
+      short-circuits the entire ellipsoid pipeline (size only, es = f = e = rf = 0, b = a) and ignores
+      every shape and spherification parameter.
 
       Magnitude is unbounded because the affected rows span metres to tens of kilometres, and because
       the same tokens reach both projected targets (metres) and the longlat host (degrees). See the
@@ -592,7 +600,7 @@ rules:
     # rises and that one falls; fix the ORDER, never the predicates.
     expected_rows: 71
     reason: |
-      parser/Proj4Parser.java:560-562 now keeps the FIRST occurrence of a duplicated parameter --
+      parser/Proj4Parser.java:1363-1365 now keeps the FIRST occurrence of a duplicated parameter --
       `if (!params.containsKey(key)) params.put(key, value)`. 1.4.3 put every token into a HashMap
       unconditionally and so kept the LAST. PROJ keeps the first: 9.8.1:src/init.cpp appends tokens
       to a paralist in order and pj_param's lookup returns the first match, which is why upstream
@@ -669,7 +677,7 @@ rules:
       throw, so it escaped every `catch (Proj4jException)` in the library and in every caller --
       the failure mode the fail-closed work exists to remove.
 
-      GeocentricConverter.java:131-134 now raises CrsTransformException(INVALID_COORDINATE) at the
+      GeocentricConverter.java:190-193 now raises CrsTransformException(INVALID_COORDINATE) at the
       same site and with a message that states the rounding allowance it exceeded. The other two
       current statuses are the SAME mechanism observed one stage earlier, because the fail-closed
       guards now catch the bad value before it reaches the geocentric converter at all: 46 rows
@@ -949,10 +957,12 @@ rules:
     # report, both 253. 2^-29 is just a natural binary value.
     expected_rows: 253
     reason: |
-      BasicCoordinateTransform.java:198-205 nests the TYPE_UNKNOWN early-return INSIDE an
-      ellipsoid-equality guard, so it is only consulted when the ellipsoids already match. The file
-      itself cites PROJ 5.2.0:src/pj_transform.c, which checks it unconditionally and BEFORE the
-      identical-datums short cut:
+      The TYPE_UNKNOWN early-return is now hoisted: BasicCoordinateTransform.java:557-559 checks it
+      unconditionally and BEFORE the identical-datums short cut at :565-566. The comment at :547-556
+      records what the BASELINE does, which is what these rows measure: it nested that check INSIDE an
+      ellipsoid-equality guard and put it AFTER the short cut, so it was only consulted when the
+      ellipsoids already matched. The comment cites PROJ 5.2.0:src/pj_transform.c, which is where the
+      hoisted order comes from:
 
           if (src->datum_type == PJD_UNKNOWN || dst->datum_type == PJD_UNKNOWN) return 0;
 
@@ -994,12 +1004,16 @@ rules:
     # numeric movement for this rule to describe again.
     expected_rows: 296
     reason: |
-      datum/Datum.java:189 compares the equator radius TO ITSELF, so the eccentricity guard is dead
-      code and unequal ellipsoids can be declared equal -- which short-circuits the datum transform
-      at BasicCoordinateTransform.java:194 and decides whether a datum shift happens at all. There is
-      a second, residual divergence in the same method: upstream pj_compare_datums is an OR
-      (`if (a != a || fabs(es_a - es_b) > 5e-11) return 0;`) where proj4j nests the eccentricity check
-      inside the radius check, so "radius differs, eccentricity within 5e-11" still compares equal.
+      datum/Datum.java:437 isEqual now compares the two datums' equator radii, :454 reading
+      `ellipsoid.getEquatorRadius() != datum.ellipsoid.getEquatorRadius()`. The comment at :450-453
+      records what the BASELINE does, which is what these rows measure: the right-hand side named the
+      SAME ellipsoid, so the condition was always false, the eccentricity guard below it was dead code,
+      and unequal ellipsoids were declared equal -- which short-circuits the datum transform at
+      BasicCoordinateTransform.java:565-566 and decides whether a datum shift happens at all. A second,
+      residual divergence in the same method is STILL PRESENT in the working tree, unfixed:
+      upstream pj_compare_datums is an OR (`if (a != a || fabs(es_a - es_b) > 5e-11) return 0;`) where
+      Datum.java:454-458 nests the eccentricity check inside the radius check, so "radius differs,
+      eccentricity within 5e-11" still compares equal.
 
       Scoped to the PAIR section, which exists precisely to exercise the 25 combinations of source and
       target Datum.TYPE_*. Two constraints keep this from being a blanket licence over 1,000 rows:
@@ -2316,9 +2330,14 @@ rules:
     #
     # Measured 2026-08-01 (late triage) on a frozen /tmp snapshot with one live stream
     # (`BasicCoordinateTransform` plus three test files) excluded by the freeze. That stream's
-    # open `InventedHeightTest` work keys on `Double.isNaN(src.z)`, and `GoldenGenerator.java:273`
-    # sets `in.z = 0.0` unconditionally, so it cannot reach these rows -- checked, because a pin
-    # this large deserves to know what can invalidate it.
+    # open `InventedHeightTest` work keys on `Double.isNaN(src.z)`, and no golden row can carry a
+    # NaN z, so it cannot reach these rows -- checked, because a pin this large deserves to know
+    # what can invalidate it. `GoldenGenerator.java:287` sets `in.z` from the case's third
+    # component when it has one and 0.0 otherwise, which is conditional but cannot yield NaN: the
+    # REG and SYN rows this rule claims take their coordinates from the probe table, which is
+    # widened to three components with z = 0.0 at `GoldenGenerator.java:239-244`, and the only
+    # cases carrying their own z are the CSV section, where `MetaCrsCsv.java:151-152` replaces a
+    # NaN z with 0.0.
     # RE-PINNED 2026-08-01 by the FAILCLOSED-NAD27-OUTSIDE-GRID-REPORTED stream, which is
     # ordered first in this file. 686 of this rule's rows are +datum=NAD27 CRS whose transform
     # now raises COORDINATE_OUTSIDE_GRID instead of returning a coordinate, so they have no
@@ -2454,7 +2473,7 @@ rules:
     #   proj4-epsg.csv:01495 probe 0   EPSG:4326 -> EPSG:3409   moved iy      mag 0x1.ccp-47
     expected_rows: 2
     reason: |
-      Math.hypot replaced by MathHelpers.norm2 at LambertAzimuthalEqualAreaProjection:274 and :314,
+      Math.hypot replaced by MathHelpers.norm2 at LambertAzimuthalEqualAreaProjection:346 and :391,
       the two sites in laea's INVERSE. Both compute sqrt(a*a + b*b); hypot adds fdlibm's overflow
       scaling, costs roughly ten times a sqrt, and is what MathHelpers' own javadoc says not to use
       when the operands are bounded -- which these are, being the projected coordinate already
@@ -2492,6 +2511,89 @@ rules:
       allow_inside_change: false
       allow_nonfinite: false
       magnitude: {min: 0.0, max: 1.0e-13}
+
+  # ---------------------------------------------------------------------------------------------
+  # ORDERED IMMEDIATELY BEFORE NUM-KARNEY-LATITUDE-CORE, for the reason given on
+  # NUM-LAEA-HYPOT-TO-NORM2 above: without it these two rows are absorbed by the big provisional
+  # rule, which then reads 19,311 against its pin of 19,309 -- and that COUNT_MISMATCH is exactly
+  # how they were found. This change owns its own rows, by name, and Karney keeps its count.
+  - id: NUM-SOMERC-FDLIBM-TRANSCENDENTALS
+    status: active
+    expires: 2027-06-30
+    # PINNED at 2, keys and probes ENUMERATED rather than globbed. Measured 2026-08-14 on a frozen
+    # A/B: two full golden runs from one tree differing in exactly one file,
+    # proj/SwissObliqueMercatorProjection.java, and within that file in nothing but the choice of
+    # transcendental library -- the javadoc and every expression were byte-identical between the
+    # legs, the two runs differing only by `Math.{sin,cos,tan}` -> `FastStrictTrig.{sin,cos,tan}`
+    # and `Math.{log,exp,atan}` -> `StrictMath.{log,exp,atan}`. Both legs run in-reactor with `-am`,
+    # because `-pl golden` alone resolves core from the local repository and silently compares the
+    # wrong tree; the first attempt at this A/B did exactly that and reported no movement at all.
+    #
+    # WITHOUT the change: 11,996 UNCHANGED / 41,434 CHANGED / 39,147 INTENDED / 2,287 UNEXPLAINED
+    # and no COUNT_MISMATCH -- i.e. exactly the figures pinned in
+    # golden/baseline/1.4.3/golden-expect.txt. WITH it: 11,994 / 41,436 / 39,149 / 2,287. The delta
+    # is +2 CHANGED, +2 INTENDED, -2 UNCHANGED and ZERO UNEXPLAINED, so these two rows are the
+    # entire blast radius across all 53,430 and both were UNCHANGED before. A full-line diff of the
+    # two golden-report.tsv files adds these two lines and removes none.
+    #
+    # The two rows, with their measured movement:
+    #   SYN proj/somerc probe 3   fy 0x1.c49625dfd2d7bp20 -> 0x1.c49625dfd2d71p20  (-10 ulp)
+    #                             ix -0x1.66d29002e901ep3 -> -0x1.66d29002e9017p3  (+7 ulp)
+    #                             iy 0x1.dffffffffffffp5  -> 0x1.dfffffffffffcp5   (-3 ulp)
+    #   SYN proj/somerc probe 4   the same three dimensions, the same magnitudes; fx does not move
+    #                             on either row.
+    #
+    # NOT probe 1, which also shows CHANGED in the report. It was already CHANGED before this
+    # change, moves `ix` alone by 0x1.0p-48, and is claimed by NUM-KARNEY-LATITUDE-CORE. It is
+    # byte-identical between the two legs. Probes 0 and 2 do not move at all. Enumerating the
+    # probes rather than globbing the key is what keeps this rule from quietly adopting probe 1.
+    expected_rows: 2
+    reason: |
+      SwissObliqueMercatorProjection's 33 transcendental call sites moved off java.lang.Math and
+      onto FastStrictTrig (sin, cos, tan) and StrictMath (log, exp, atan). Math.sqrt and Math.abs
+      are unchanged, being exactly specified by IEEE 754. This is a DETERMINISM fix, not an accuracy
+      one: all seven of Math's sin/cos/tan/log/log10/exp/pow are @IntrinsicCandidate, so HotSpot
+      substitutes a per-architecture routine and their last bit depends on the CPU. The symptom was
+      a red `Build (JDK 21)` job -- eastings pinned on aarch64 came out as different doubles on
+      x86-64, one of them by 0.51 m, because somerc's turning locus feeds an asin whose argument is
+      1 to within a few ulp and whose derivative is unbounded there.
+
+      WHY ONLY TWO ROWS OUT OF A LARGE SOMERC POPULATION -- population is not blast radius. The
+      corpus holds twelve somerc index entries (five CSV, six REG including epsg:2056 and 21781, and
+      the SYN family), and eleven of the twelve do not move a printed column. fdlibm and Apple's
+      libm agree to the last bit on almost every ordinary argument; they part company only where a
+      result is ill conditioned, and away from the turning locus somerc is not. The two rows that do
+      move are the two SYN probes at 60 degrees north whose northing happens to sit ten ulp away.
+
+      THE BAND IS AN ULP ARGUMENT, not a round number. The largest move is 0x1.4p-29 =
+      2.328e-9, on `fy`, a projected northing of 0x1.c49625dfd2d7bp20 = 1,854,250.9 m whose ulp is
+      2^-32 = 2.328e-10 -- so ten ulp, i.e. 2.3 nanometres on a 1,854 km ordinate. The inverse
+      columns move 1.2e-14 and 2.1e-14 degrees, which against ulp(11.2) = 1.78e-15 and ulp(60) =
+      7.11e-15 is seven and three ulp. The ceiling of 1.0e-8 is about forty ulp of that northing;
+      anything larger is not a last-bit library difference and must stay UNEXPLAINED rather than be
+      dignified by this rule. It is also two orders of magnitude below the 1e-6 that
+      NUM-KARNEY-LATITUDE-CORE would have allowed it.
+
+      NOT AN ACCURACY CLAIM IN EITHER DIRECTION, and the reason is measured. somerc.cpp's forward
+      was transcribed to C with PROJ's own DEG_TO_RAD and built from one source as
+      `clang -O2 -arch arm64` and `-arch x86_64`; fed identical input bits, the two slices of one
+      libSystem disagree with each other by 0.0947 m and 0.1340 m at two of fourteen latitudes on
+      the turning locus. PROJ 9.8.1 has no architecture-independent answer there, so bit parity with
+      the oracle is not an available goal and determinism is. Against the arm64 `proj` binary the
+      change moves somerc from 9 of 14 bit-identical eastings with two hard refusals to 12 of 14
+      with none. Pinned by proj/SwissObliqueMercatorClampTest, whose static guard fails if any of
+      the seven variant Math functions returns to this class.
+    match:
+      classifications: [CHANGED]
+      sections: [SYN]
+      keys: ["proj/somerc"]
+      probes: [3, 4]
+    expect:
+      dimensions: [fy, ix, iy]
+      allow_status_change: false
+      allow_inside_change: false
+      allow_nonfinite: false
+      magnitude: {min: 0.0, max: 1.0e-8}
 
   # ---------------------------------------------------------------------------------------------
   - id: NUM-KARNEY-LATITUDE-CORE
@@ -2563,7 +2665,38 @@ rules:
     # rather than computed. Nothing else in the run moves: UNCHANGED, CHANGED, ADDED, REMOVED,
     # INTENDED and UNEXPLAINED all print exactly the figures pinned in
     # golden/baseline/1.4.3/golden-expect.txt.
-    expected_rows: 19303
+    #
+    # RE-PINNED 2026-08-14 by the +over prime-meridian ordering fix, +6, and it is the first block
+    # here that GAINS rows rather than losing them. They are `CSV proj4-epsg.csv:03408` probe 0,
+    # `CSV proj4-epsg.csv:03409` probe 0, and `SYN mod/longlat/pm_numeric` probes 1..4. All six
+    # matched golden/baseline/1.4.3/golden.tsv exactly before this change -- they were UNCHANGED,
+    # which is why no rule held them -- and now differ in `ix` and nothing else, by one or two ULP:
+    # 0x1.0p-53 on the two CSV rows, 0x1.0p-49 on pm_numeric probes 1 and 3, 0x1.0p-48 on probes 2
+    # and 4. That is 1.1e-16 to 3.6e-15 degrees, far inside this rule's 1e-6 band, with no status
+    # change and no second moved dimension, so this rule is where they belong.
+    # THE CAUSE IS ASSOCIATION, NOT MAGNITUDE. The inverse now computes `adjlon(lam + lam0) + pm`
+    # where it computed `adjlon((lam + pm) + lam0)`; on a definition whose `+pm` is a plain number
+    # the two agree to every bit but the last few of the sum. `pm_numeric` probe 0 is not among the
+    # six because it was CHANGED already.
+    # Measured by set-differencing this worktree's golden-report.tsv against the same report from a
+    # tree carrying no core change, both from `mvn -B -Pgolden -pl golden -am verify`: six rows
+    # appear, none disappears, and this rule's claimed count moves 19308 -> 19314 to match.
+    #
+    # RECOMPUTED 2026-08-14 FOR THE 2.1.0 COMBINED BRANCH, AND THIS NUMBER IS ARITHMETIC, NOT
+    # MEASURED. The +over block immediately above measured 19308 -> 19314 on the PRE-#23 base. This
+    # branch's base is #23, where the block above it re-pinned the same rule 19308 -> 19303 by
+    # dropping `REG esri:25700` probes 0..4. So 19314 does NOT carry over: the correct composition is
+    # 19303 + 6 = 19309. The +6 survives the -5 intact because the two sets are disjoint - the five
+    # rows #23 removed are all `REG esri:25700`, and the six #117 adds are `CSV
+    # proj4-epsg.csv:03408` probe 0, `CSV proj4-epsg.csv:03409` probe 0 and `SYN
+    # mod/longlat/pm_numeric` probes 1..4, none of which is an esri REG key.
+    # CONFIRMED BY MEASUREMENT 2026-08-14. When this block was written, 19309 had not been read from
+    # a COUNT_MISMATCH line, because the golden gate had not yet been run on this branch. It has now
+    # been run - `./docker/run.sh ci conformance golden determinism` - and it emitted NO
+    # COUNT_MISMATCH for this rule at all; instead it listed `NUM-KARNEY-LATITUDE-CORE: 19309` among
+    # its matched counts. A COUNT_MISMATCH is precisely what a wrong pin produces here, so its
+    # absence is the confirmation, and 19309 is now a measured figure rather than an arithmetic one.
+    expected_rows: 19309
     reason: |
       PROVISIONAL AND NOT OWNED BY THIS MODULE. Placeholder for the sub-microscopic movement caused by
       wiring in PROJ 9.4-9.6's Karney auxiliary-latitude core (9.8.1:src/latitudes.cpp, and the

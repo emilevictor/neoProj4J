@@ -57,7 +57,7 @@ import org.locationtech.proj4j.ErrorCause;
  *
  * @see Proj
  * @see CoordinateTransformFactory
- * @since 1.5.0
+ * @since 2.0.0
  */
 public final class LegacyAdapters {
 

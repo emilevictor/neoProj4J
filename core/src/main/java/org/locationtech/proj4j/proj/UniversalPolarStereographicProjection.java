@@ -69,7 +69,7 @@ import org.locationtech.proj4j.util.ProjectionMath;
  * eight-trip {@code pow} loop, worth about 4&thinsp;&micro;m, 25&thinsp;000&times; inside the
  * corpus's 0.1&thinsp;mm bar.
  *
- * @since 1.5.0
+ * @since 2.0.0
  */
 public class UniversalPolarStereographicProjection extends StereographicAzimuthalProjection {
 

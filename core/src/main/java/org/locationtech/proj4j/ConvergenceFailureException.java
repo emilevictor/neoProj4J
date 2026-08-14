@@ -64,7 +64,7 @@ public class ConvergenceFailureException extends CrsTransformException {
      *
      * @param message   the human-readable detail message
      * @param throwable the underlying throwable, or null
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public ConvergenceFailureException(String message, Throwable throwable) {
         super(DEFAULT_CAUSE, message, throwable);
@@ -75,7 +75,7 @@ public class ConvergenceFailureException extends CrsTransformException {
      *
      * @param proj    the projection whose iteration did not converge
      * @param message what did not converge, and after how many iterations
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public ConvergenceFailureException(Projection proj, String message) {
         super(DEFAULT_CAUSE, proj.toString() + ": " + message);

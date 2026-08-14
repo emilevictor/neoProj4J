@@ -343,11 +343,26 @@ public class Wkt2ReaderTest {
 
     /**
      * An Equidistant Cylindrical with a real standard parallel is refused, not mis-projected.
-     * <p>
-     * The reason is that <b>this reader</b> drops the parameter rather than translating it, not that
-     * {@code eqc} cannot use one: {@code PlateCarreeProjection.initialize()} reads {@code +lat_ts}
-     * through {@code rc = nu1 * cosPhi1}. Refusing is therefore the right call, but the thing that
-     * would otherwise lose the parallel is the translation, not the projection.
+     *
+     * <p><b>The refusal is now over-strict, and this test pins the over-strictness rather than
+     * endorsing it.</b> The reason recorded here was that proj4j's {@code eqc} ignored
+     * {@code +lat_ts}. It does not: {@code PlateCarreeProjection} is a port of 9.8.1's
+     * {@code eqc.cpp} implementing both EPSG:1029 and EPSG:1028, it derives {@code rc} from
+     * {@code cos(lat_ts)} (and {@code nu1 * cos(lat_ts)} on an ellipsoid) at
+     * {@code initialize()} and uses it in {@code project()}, and {@code Proj4Parser} wires
+     * {@code +lat_ts} through {@code setTrueScaleLatitudeDegrees}. So a WKT2 {@code eqc} with a
+     * standard parallel could be built correctly today, and this reader still throws.
+     *
+     * <p>What the refusal costs, measured with {@code proj} 9.8.1 at lon 10 / lat 20 /
+     * {@code +ellps=GRS80}: {@code +lat_ts=30} gives an easting of 964862.8025 against
+     * 1113194.9079 bare, so the refused standard parallel is worth 148,332 m; {@code +lat_0=45}
+     * is worth 4,984,944 m of northing. These are not rounding-level parameters.
+     *
+     * <p>The refusal lives in {@code WktMethods}' {@code FLAG_EQC} branch, which calls
+     * {@code refuseNonZero} on both {@code lat_ts} and {@code lat_0}. Relaxing it is task #126
+     * and is out of scope for 2.1.0 — it is a behaviour change with its own test evidence to
+     * gather — so it is left alone here and written down instead. <b>Do not delete this test to
+     * "fix" the reader — change {@code WktMethods} and change this test in the same commit.</b>
      */
     @Test
     public void equidistantCylindricalWithStandardParallelIsRefused() {
@@ -365,7 +380,7 @@ public class Wkt2ReaderTest {
                 + "LENGTHUNIT[\"metre\",1]]";
         try {
             proj(wkt);
-            fail("expected a refusal: this reader drops the standard parallel");
+            fail("expected a refusal: WktMethods' FLAG_EQC branch refuses a non-zero lat_ts");
         } catch (WktParseException expected) {
             assertTrue(expected.getMessage(), expected.getMessage().contains("ignores"));
         }

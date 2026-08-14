@@ -11,8 +11,11 @@ name: Conformance
 # outside CI on Temurin 21, against a scratch local Maven repository, with three controls:
 #
 #   1. unmodified              -> exit 0, genuine passes with diff.regressed 0. The current
-#                                 reading is 7,441 / 7,900; it was 7,378 / 7,895 earlier, so
-#                                 quote the pair, never one number of it.
+#                                 reading is 7,449 / 7,902, measured 2026-08-14 on the 2.1.0
+#                                 release branch with `./docker/run.sh conformance`; master at
+#                                 2fc5989 reads 7,448 / 7,902, and it was 7,441 / 7,900 on
+#                                 2026-08-02 and 7,378 / 7,895 on 2026-08-01, so quote the
+#                                 pair, never one number of it.
 #   2. one manifest row removed -> exit 1, naming the assertion key as REGRESSED
 #   3. baseline file absent    -> exit 1, naming the ABSENT BASELINE as the cause, not a
 #                                 regression count

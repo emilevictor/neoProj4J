@@ -47,7 +47,7 @@ import org.locationtech.proj4j.ErrorCause;
  *
  * @see Crs#missingGrids()
  * @see org.locationtech.proj4j.datum.Grid#describeNadGrids(String)
- * @since 1.5.0
+ * @since 2.0.0
  */
 public enum GridPolicy {
 

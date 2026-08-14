@@ -7,45 +7,391 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-08-14
+
+Twenty-two merged pull requests — #2 through #23 — plus three changes folded in at the end: #117,
+#122 and #123. 2.0.0 was the engine change. 2.1.0 is the pass that followed it: a static-analysis
+run, a line-by-line code review, and the defects both of them found. Most of the entries below are
+one of two shapes — a parameter that was read and then ignored, or a parameter whose absence could
+not be told apart from an explicit zero.
+
+**Every measured behaviour change, with its magnitude, is in
+[RELEASE-NOTES.md](RELEASE-NOTES.md)** — this file lists what changed, that file tells you how far
+your coordinates move. Read it before upgrading.
+
+### Breaking — read these first
+
+These change the answer, the reported error, or whether a definition is accepted at all.
+
+- **A `+units=` value outside PROJ's 21 linear ids now raises `InvalidValueException` naming the
+  value. It used to become metres in silence.** This is the entry to read if you have proj strings in
+  a database or a config file. The spellings that stop working include the plurals and full names
+  `feet`, `metre`, `metres`, `inches` and `kilometres`, the angular ids `deg`, `degree` and
+  `degrees`, and misspellings of a real id such as `ftUS`, `usft`, `ft-us` and `survey-ft`. The
+  lookup is case-sensitive, as PROJ's is, so `us-ft` is accepted and `US-FT` is refused. Measured on
+  `+proj=utm +zone=18 +datum=WGS84 +units=<U>` at (−75, 40) against `cs2cs` 9.8.1, where the right
+  answer is `500000.0000 4427757.2187`: an unresolvable name returned easting `500000.0000`, about
+  1.14 million units from what the caller asked for; `+units=deg`, `degree` and `degrees` returned
+  `(0.0000, 39.7752)`, a pair that reads like a lon/lat and is wrong in both components. 41 spellings
+  PROJ refuses were accepted in all — 23 single tokens and 18 containing a space. **No registry row,
+  no golden row and no conformance row moves**, because every `+units=` value in the shipped
+  dictionaries and both corpora is already an id: `m` (6,478), `us-ft` (762), `ft` (143), `link` (1),
+  and nothing else across 7,384 occurrences. **The cost falls entirely on stored definitions written
+  by hand.** If yours say `+units=metres` or `+units=degrees`, they will now throw where they used to
+  transform. On `+proj=longlat` the token was a no-op and can simply be deleted; anywhere else,
+  replace it with the id — `m`, `ft`, `us-ft` — and check the number that comes out.
+  `Units.findUnits`, `Units.isKnownUnit` and `Units.units` are unchanged, so `Units.isKnownUnit("deg")`
+  is still `true`; the refusal is built at parse level (#21, closes #116)
+- **`+lat_ts=0` is now told apart from no `+lat_ts` at all, and on `merc` it discards `+k`.**
+  Presence is what upstream tests; a value test cannot express "zero is a real latitude of true
+  scale". **48,880.69 m of easting** on the three shipped definitions that pair the two — `esri:1816
+  <2934>`, `esri:2668 <21100>` and `esri:3015 <25700>`, which are one definition under three keys —
+  measured against `proj` 9.8.1 at longitude 110 E, latitude 0. **`Projection.equals` and `hashCode`
+  now include whether `+lat_ts` was given**, so `+proj=merc +lat_ts=0` and bare `+proj=merc` compare
+  unequal where they used to compare equal. That costs a cache miss, never a wrong answer. A stream
+  serialised by an older build still deserialises — `serialVersionUID` is unchanged and an absent
+  boolean reads as `false` — but it will not be equal to the same definition parsed fresh here, and
+  its `scaleFactor` keeps the old value (#23, closes #112)
+- **`+south` is read for its value, not its presence.** `+proj=utm +zone=33 +south=f` — which PROJ
+  reads as northern — was projected into the southern hemisphere. **10,000 km, failing open.** It now
+  goes through the same rule as `pj_param`'s `b` sigil. Two deliberate divergences: `+south=` with an
+  empty value is `false`, matching what 9.8.1 does in practice, and **`+south=0` throws** rather than
+  guessing, because the sigil reads the first character only and so calls `+south=tomato` southern.
+  All 722 occurrences of `+south` in the shipped registries are bare (#15, closes #97)
+- **`tmerc` and `etmerc` no longer read `+zone`.** Upstream reads it in `PJ_PROJECTION(utm)` alone.
+  proj4j read it for all three because one class is bound to two names. **434 km** either way. And
+  `+zone=0` and `+zone=61` were accepted, computing a central meridian of ∓183°; anything outside
+  1..60 is now refused at parse time. `setUTMZone` survives as a public setter, just not reachable
+  from a proj string (#15, closes #96)
+- **Six operators stopped answering from parameters nobody supplied.** Two returned wrong numbers:
+  bare `+proj=leac` ran the conterminous-US parallels 45.5°/29.5° where upstream runs 0, **1,724 km**
+  at (12, 56) on WGS84; and `+proj=wag1 +n=0.5` honoured an `+n` PROJ never reads for that operator,
+  **525,401.03 m** in a straight line at (10, 55) on GRS80. Four now refuse where they used to answer:
+  bare `+proj=urmfps` (answered as `wag1`), bare `+proj=geos` (answered from the nominal
+  geostationary height of 35,785,831 m the caller never named), `+proj=gn_sinu +n=1` with no `+m`,
+  and `+proj=imw_p` with exactly one parallel. Every refusal is tested from both sides, because
+  refusing an explicit zero would trade upstream's defect for one of our own (#20, closes #114, #115)
+- **The seven `sconics` members read `+lat_1` and `+lat_2` for the first time.** `SimpleConicProjection`
+  used hard-coded 30° and 60° behind a `FIXME`, and six of the seven were registered and live,
+  returning plausible coordinates for the wrong standard parallels. **2,336 km** on `tissot`, whose
+  sixteen rows all failed on it, and 112 assertions in `builtins.gie` were failing on that one defect.
+  An absent `+lat_2` is now refused rather than treated as zero — **1,191 km** on
+  `+proj=murd2 +a=6400000` at (10, 20), where 9.8.1 exits with "Missing parameter: lat_2 should be
+  specified". An explicit `+lat_2=0` stays legal, because upstream accepts it (#16)
+- **The forward longitude wrap no longer depends on `+lon_0` being non-zero.** With no `+lon_0` every
+  forward projection behaved as though `+over` were set. **37,098 km** at longitude 180.1 on `vandg`,
+  worst case measured. Nothing inside ±180 moves, including ±180.0 exactly (#16, closes #99)
+- **`+ellps=NWL9D` and `+ellps=andrae` were computed on a near-flat disc.** `Registry` re-declared
+  both with the inverse flattening in the pole-radius slot, so the constructor took 298.25 literally
+  as a pole radius in metres and derived an eccentricity of 0.999999998906693 against GRS80's 0.0818.
+  Every transform through either name was wrong. Both now reference the already-correct `Ellipsoid`
+  constants (#6)
+- **ESRI-flavoured WKT is read the way PROJ reads it, and an oblique Mercator stops losing 181 km.**
+  PROJ sets a flag when a document says something only ESRI's exporter says, and under that flag the
+  two `Hotine_Oblique_Mercator_*` method names take the skew angle from the azimuth and discard any
+  skew parameter present. There are **two** triggers, not one — a `DATUM` named `D_something` and a
+  `GEOGCS` named `GCS_something` — and both comparisons are case-sensitive, as upstream's are.
+  Measured on the reporting team's own document: **181,695.126 m → 0.263 m** forward and
+  **181,984.105939 m → 0.263168 m** reverse, the residual being a separate NAD83-to-WGS84 gap. One
+  case is pinned as a divergence rather than fixed: a GDAL parameter name inside an ESRI method name,
+  a spelling no exporter writes (#17 and #18, closes #110)
+- **Eighteen inverse sines stopped inventing a latitude.** Each is now routed through
+  `ProjectionMath.asinChecked`, this project's port of upstream's `aasin`: `NaN` raises
+  `NUMERICAL_FAILURE`, an argument just past 1 clamps while it stays inside upstream's own tolerance,
+  and anything further out raises `COORDINATE_OUT_OF_DOMAIN`. Swiss oblique Mercator returned `NaN`
+  for **both** coordinates over a band containing 15,753,267 measured input points; those points now
+  clamp or raise. **One divergence is kept and recorded**: at latitudes of ±88° on the turning locus
+  this library refuses where PROJ 9.8.1 answers, because Java's quotient overshoots 1 by 6.4e-14 —
+  past upstream's tolerance — and closing it would mean inventing a tolerance PROJ does not have
+  (#19, closes #111, #113)
+- **`+proj=geos` behind the globe reports `COORDINATE_OUT_OF_DOMAIN`, not `NUMERICAL_FAILURE`.**
+  Nothing failed numerically; the point is outside the domain, which is what upstream reports. A cause
+  reclassification, not a new throw — the call already failed closed. If you match on `ErrorCause`,
+  update it. The message now names the longitude, the latitude and the orbit height (#8)
+- **`+proj=leac +south` is honoured instead of refused**, since `aea.cpp` reads it for that entry
+  point. This was an over-refusal: the transform raised where it should have answered. `+south` stays
+  refused on `aea` and `longlat` (#8)
+- **`+gamma`, `+no_uoff` and `+no_off` are dispatched only to the operators that read them.** On
+  anything else the value was parsed, dispatched into an empty base-class method and discarded. One
+  off-corpus behaviour change, toward PROJ: `+proj=merc +gamma=nonsense` used to be rejected and is
+  now accepted and ignored, because PROJ ignores unread parameters silently. The three base methods
+  are deprecated, not deleted (#8)
+- **Van der Grinten's inverse gained upstream's `r > PISQ` branch.** A point outside the map circle
+  came back as a plausible in-range coordinate rather than the reflected one — up to **32.678°** of
+  latitude at (10, 10), measured before the fix (#16, closes #100)
+- **`calcofi` keeps its `+over` turn.** `+proj=calcofi +R=6400000` → `+proj=longlat +R=6400000` at
+  (−200, 100) returned **152.4550931861857** where PROJ 9.8.1 returns **−207.544906814** — **a full
+  turn of longitude, 360.000000000°, silently wrong**. Two defects, and the second is why the first
+  looked fixed: the prime meridian was applied one stage after `adjlon` instead of inside the inverse
+  funnel with it, and then the target's own forward wrapped the turn away again. The prime meridian
+  now lives in the forward and inverse funnels, associated exactly as `fwd.cpp:108` and
+  `inv.cpp:113-117` associate it, and a plain Greenwich geographic target emits no step to wrap with —
+  which is what PROJ does, verified with `projinfo` and `cs2cs` rather than reasoned about. The
+  forward direction is bit-identical. Two deliberate approximations are recorded: `+lon_0` is tested
+  by value rather than presence, so a hand-written `+proj=longlat +lon_0=0` earns a step in PROJ and
+  not here; and an explicit `+over` on the source is not thrown away here as it is upstream. Six
+  golden rows move, by one or two ULP in the recovered longitude and nothing else, and
+  `NUM-KARNEY-LATITUDE-CORE` is re-pinned 19303 → 19309 (#117)
+
+### Added
+
+- **`Units.linearUnitIds()`** — an unmodifiable `Set<String>` of the 21 ids `+units=` accepts, in
+  `pj_units` order. The parser reads the same set, so the accepted set and the published set cannot
+  drift. Prefer it to the `Units.LINEAR_UNITS` array, which is a fork-only public field absent from
+  upstream 1.4.3: a consumer that read it from a static initialiser got `NoSuchFieldError` out of
+  `<clinit>`, an `Error` that escaped every `catch (Exception)` on its path (#21)
+- **`Projection.clearTrueScaleLatitude()`** — passing zero to the setter can no longer mean "never
+  given", so there has to be a way to say it. `proj4j-geoapi`'s `ParameterAccessor.reset` needs
+  exactly that (#23)
+- **`Projection.hasInverseImplementation()`**, public and overridable — upstream's
+  `pj_has_inverse(P)`, asked of a class hierarchy instead of a function pointer. The reflection walk
+  moves here out of `BasicCoordinateTransform`, where it was private and so unreachable from the
+  pipeline engine, and `inverseAvailable` delegates to it. It was `final` earlier in this release;
+  the javadoc at `Projection.java:1017-1032`, under the heading "When overriding is allowed", now
+  states who may override it. An ordinary projection
+  must not: the walk already knows whether the class implements `projectInverse` and that answer
+  cannot go stale, while a re-declared one drifts exactly as `hasInverse()` does. A wrapper whose
+  real inverse belongs to a child chosen at runtime has to, because the walk answers about the
+  wrapper's own unconditional `projectInverse` when the honest answer is the child's —
+  `ObliqueTransformationProjection` is the only one today, since `+proj=ob_tran +o_proj=guyou` has no
+  inverse and `+o_proj=merc` does and no reflection over the wrapper can tell them apart. Such an
+  override may forward the question to the child and do nothing else (#123)
+- **`reference/code-review-2026-08.md`** — the first static-analysis pass ever run over this tree,
+  recording each instrument, the exact command that produced its output, the nine defects worth
+  acting on, the two traps a future run needs, and the one instrument that could not be run (#3)
+- **205 tests across 14 new files** over paths nobody had looked at, plus the revival of the
+  repository's only skipped test. Writing them is what found `#94`, `#96`, `#97`, `#98`, `#99`,
+  `#100` and `#101`, all of which are fixed above (#10)
+- **`RegistryRoundTripAuditTest`** — round-trip is asserted for the first time. Golden pins values
+  and never asserts the identity, so an inverse wrong since 1.4.3 sits in that baseline reading
+  `UNCHANGED` forever. 7,992 assertions over the registry, and the failing set is pinned by equality,
+  so a new failure, a fixed projection and a doubled error are three distinct messages (#10)
+- **The golden gate's six headline figures are asserted rather than printed.** `UNCHANGED`,
+  `CHANGED`, `ADDED`, `REMOVED`, `INTENDED` and `UNEXPLAINED` were computed, formatted, printed and
+  discarded; they were pinned as prose in five files and checked by eye, so 41,425 `CHANGED` could
+  have become 44,000 and nothing automated would have noticed. They now read from
+  `golden/baseline/1.4.3/golden-expect.txt`, and a mismatch reports `FIGURES_MOVED` with expected,
+  actual and delta side by side. It is deliberately a pin and not "assert 0 UNEXPLAINED" (#12, #13,
+  closes #104)
+- **Ten new oracle rows and 42 new conformance oracle rows** covering the guards ported in #20 and
+  #22, deliberately five rejects and five near-misses per operator, so an over-refusal fails as
+  loudly as an under-refusal
+
 ### Fixed
 
-- **`+units=` is now resolved the way PROJ resolves it: against the unit *id* only, case-sensitively,
-  in both parse modes.** It used to go through `Units.findUnits`, which matches a unit's abbreviation,
-  name *and* plural and returns `METRES` for anything it does not recognise. One lookup caused three
-  separate wrong answers, all measured against `cs2cs` 9.8.1 on
-  `+proj=utm +zone=18 +datum=WGS84 +units=<U>` at (−75, 40), where the correct result is
-  `500000.0000 4427757.2187`:
-  - **An unresolvable name became metres silently.** `+units=ftUS` — a common misspelling of US survey
-    feet — returned easting `500000.0000`, about 1.14 million units away from the answer the caller
-    asked for, with nothing to signal it. PROJ gives `Error 1027 … utm: Invalid value for units`. Same
-    for `usft`, `ft-us`, `survey-ft`, `parsec`, `BOGUS` and an empty value.
-  - **`+units=deg`, `degree` and `degrees` returned `(0.0000, 39.7752)`** — a plausible lon/lat-looking
-    pair, wrong in both components. `Units.units` holds `DEGREES` for `LongLatProjection` and
-    `proj4j-geoapi`; `+units=` was reaching it. PROJ resolves `+units` against
-    `pj_list_linear_units()` and never against `pj_angular_units`.
-  - **The lookup was case-insensitive-by-accident in effect and accepted 41 spellings PROJ refuses.**
-    `+units=US-FT` returned `500000.0000` rather than the US-survey-feet value; `feet`, `metre`,
-    `inches`, `kilometres` and 37 others were accepted. Note PROJ accepts `ft` and refuses `feet`.
-  The refusal message is `InvalidValueException: Unknown unit: <value>`. **It is deliberately
-  case-sensitive and must stay so** — lower-casing the key would accept `M` and `Ft`, which PROJ also
-  refuses. `Units.findUnits`, `Units.isKnownUnit` and `Units.units` are **unchanged**, because
-  `io.wkt.WktNames` and `proj4j-geoapi` legitimately look units up by name and symbol;
-  `Units.isKnownUnit("deg")` is still `true`, which is why the refusal had to be built at parse level.
-- **New: `Units.linearUnitIds()`**, an unmodifiable `Set<String>` of the 21 ids `+units=` accepts. The
-  parser reads the same set, so the two cannot drift. Prefer it to the `Units.LINEAR_UNITS` array,
-  which is a fork-only public field absent from upstream 1.4.3 — a consumer that read it from a static
-  initialiser got `NoSuchFieldError` out of `<clinit>`, an `Error` that escaped every
-  `catch (Exception)` on its path.
+Silent wrong answers and refusals are under Breaking above. What follows moves no coordinate.
 
-### Pending — in flight, not yet released
+- **The release itself was blocked, and this is the fix that unblocked it.** `mvn clean verify` and
+  `mvn -Pcentral deploy` both failed in `maven-javadoc-plugin` on four `<h2>` tags inside field and
+  method Javadoc, where doclint's implicit preceding heading is `<h3>` and only `<h4>` passes. Every
+  CI job and container build passes `-Dmaven.javadoc.skip=true`; the deploy profile does not. 2.1.0
+  could not have been published without this (#14)
+- **40 exceptions that said nothing, across 20 files.** `new ProjectionException()` with no message
+  at all (13), `"I"` (13), `"F"` (8), `"I_ERROR"`, `"F_ERROR"`, and three bare legacy `pj_errno`
+  codes — `-21`, `-40`, `-43`. Each now names the projection, says which quantity left its range and
+  what the limit was, prints the offending value and cites the upstream file and function. The three
+  numeric ones were decoded against the last PROJ revision that still carried the table, and each
+  matches its Java guard exactly. Every one keeps its one-argument constructor, so no `cause()`
+  changes (#14)
+- **Two runtime messages named a parameter the caller could not have written.**
+  `HorizontalGrids.outsideGrid()` hardcoded `+grids=` although `+proj=deformation` writes
+  `+xy_grids=` and is separately refused `+grids=` outright; `VGridShiftOperator` had the same defect
+  for `+geoidgrids=` (#14)
+- **`+pm` on an otherwise invertible projection reported "pipeline is not invertible".** The one
+  genuine regression against 1.4.3 in the whole 7,923-assertion corpus, at `gie/builtins.gie:137:1`,
+  scored as a round-trip deviation of Infinity mm against an expected 11 mm. `+pm` was never the
+  cause: it decides *which engine runs*, and the two engines asked different questions —
+  `BasicCoordinateTransform` interrogated the class hierarchy, `Cs2csOperator` read the
+  hand-maintained `hasInverse()` declaration, which is wrong in both directions and was read nowhere
+  in `core/src/main` before this fork. `KrovakProjection` and `NewZealandMapGridProjection` are
+  exactly where the two diverge. There is now one predicate, so they cannot drift apart again by
+  construction rather than by discipline. **This cannot move a number**: the predicate gates a throw
+  and appears in no arithmetic (#123)
+- **The inverse grid-shift loop now moves to the grid its iterate landed in, instead of giving up.**
+  When interpolation cannot produce a value the iterate has stepped outside the grid the *input* was
+  found in, which is not the same event as the iteration having failed — PROJ says so in a comment
+  and then acts on it at `grids.cpp:3451-3476`. proj4j had only the `break`, so it fell to the
+  first-approximation escape hatch and returned the unconverged iterate, off by roughly one whole
+  grid shift, with every round trip restarting from the previous one's approximation. Measured on
+  `+nadgrids=@conus,@alaska,@ntv2_0.gsb,@ntv1_can.dat` at (−130.516041667, 50.0002461111), where
+  `conus` ends at 50° N and the iterate crosses into `alaska`: **12.94 mm at one round trip and
+  6,054.00 mm at 1,000**, against 0.000000 mm from PROJ 9.8.1 at every count, now 0.000001 mm. A
+  neighbouring point ran to 648.89 mm at 100 round trips and is now 0.000000 mm. The escape hatch is
+  intact where there is genuinely nowhere to move to, and a test pins that (#122)
+- **The golden gate had been reporting a rule-level failure since the rule set landed** —
+  `COUNT_MISMATCH DATUM-TYPE-UNKNOWN-HOISTED expected_rows=251 but matched 253`. The pin was stale on
+  arrival, dated to a snapshot taken four days before the file was committed, and `golden/README.md`
+  had carried the measured 253 all along. Re-derived on this tree and re-pinned from the measurement
+  (#4)
+- **The golden expectation file PR #12 asserted against was never staged**, so the golden run errored
+  out instead of checking anything. `mvn verify` was never affected — golden is not in the default
+  reactor (#13)
+- **A coverage build could not be run at all**, and each half failed while looking like something
+  else's fault. JaCoCo weaves a non-final synthetic field into every instrumented class, which failed
+  `ProjContextTest`'s all-fields-final assertion; and `conformance/pom.xml` and `golden/pom.xml` each
+  declared a literal `<argLine>` with no `@{argLine}`, so `prepare-agent` was silently replaced
+  rather than added to and those modules' coverage read zero with nothing failing to say so. That is
+  why the largest exercise of `core` in the repository contributed to no figure anyone had looked at.
+  Measured afterwards with the corpus on: core 86.2 % instruction / 73.7 % branch, against
+  84.5 % / 71.4 % at the branch point with the same plumbing and none of the new tests (#10)
+- **`db`'s index reproducibility proof never ran.** All three `-Pregen-db` executions bind to
+  `generate-resources`, and the documented command was `mvn -Pregen-db validate` — which runs first,
+  so the plugin never fired: `BUILD SUCCESS` in 0.541 s with no output, after which
+  `git diff --exit-code` passes because nothing was regenerated. Vacuous in the direction that
+  reports "reproducible" (#10, #12)
+- **`VerifyIndex` compared eleven fields fewer than it appeared to** — 486,491 field comparisons,
+  now 502,422, each added comparison carrying a comment saying what a wrong reader would have done to
+  pass without it. Two fields stay uncheckable because no reader path reaches them, and the class
+  Javadoc names them rather than leaving the count looking complete (#10)
+- **`RectangularPolyconicProjection` dropped `+lat_0`** — it read a private field the class declared
+  and never assigned, so both reads returned 0.0. Its `initialize()` body was also commented out
+  under a `FIXME`, taking `P->es = 0` with it (#6)
+- **`+ellps=australian` failed lookup** although `Ellipsoid.AUSTRALIAN` has always existed. It is a
+  proj4j extra, not a PROJ name, and is numerically identical to `aust_SA` (#6)
+- **Seven angle parsing and formatting defects** (#15, closes #96): a trailing seconds `s` read as
+  South, so `12d34m57s` lost its seconds; rounding and truncation disagreeing, so 12.99999 printed as
+  `12d60'00"`; the sign lost below one degree in both directions; `123d` parsing in one parser and
+  throwing in the other; minutes checked with `> 59` while seconds used `>= 60`; a "decimal" pattern
+  that appended unscaled arcseconds, so 12.5 formatted as `12.1800`; and a parse position set on
+  already-truncated text, so a resuming caller re-read the hemisphere letter. The sign rule follows
+  `dmstor`: a trailing cardinal *assigns* the sign and a leading minus is discarded, which corrects
+  two long-standing wrong readings — `-1d30E` was −1.5 against upstream's +1.5, and `-12d34S` was
+  +12.5667 against −12.5667. Of 323 distinct DMS values in the registries, 77 open with a minus and
+  56 close with a cardinal, and none does both, so nothing shipped depends on the choice
+- **A lookup at the end of `proj4/nad/epsg` cost 7.9 MB.** `Proj4FileReader`'s forward and reverse
+  lookups now share one scan and allocate the parameter array only in the branch that needs it (#9)
+- **`reference/code-review-2026-08.md` landed as a binary blob.** The document's own note about three
+  source files containing raw NUL bytes was written with a literal NUL instead of the escape
+  sequence, so the warning about NUL bytes breaking `grep` contained a NUL byte that broke `grep` on
+  itself. One byte, at offset 4538 (#5)
+- **Two vacuous conformance rows became genuine passes.** PROJ refuses the definition, proj4j also
+  refuses it, and gie would score that a pass — but the bridge classified our refusal
+  `NOT_IMPLEMENTED` rather than `INVALID_DEFINITION`, so the row demonstrated nothing. `lcc`'s two
+  secant-cone guards and `omerc`'s two two-point guards are ported verbatim, along with `msfn` and
+  `tsfn`. **The brief said three assertions; the honest figure is two** — `eqdc`'s is declined, with
+  the reasoning written into the Javadoc: the tempting argument that an exactly-zero numerator implies
+  a rejection is wrong, and wrong in the direction that manufactures false passes, because the
+  denominator runs `pj_mlfn` far outside its stated convergence domain (#22, closes #124)
 
-- **⏳ Relaxing `ClasspathResourceResolver.isSafeName`** to permit interior path segments while still
-  rejecting a leading `/` or `\`, spaces, and any `.` / `..` / empty segment. The corpus writes
-  `+file=tests/…` and `+grids=tests/…`, which PROJ resolves by appending the token to a search
-  directory; proj4j can currently reach **no** `tests/…` file, and roughly **100 assertions** sit
-  behind that one rule, concentrated in `gridshift`, `geotiff_grids`, `defmodel` and `tinshift`. **No
-  revised conformance figure is quoted for it here**, and none should be until it is measured on a
-  quiesced tree
+### Changed
+
+- **The build prints zero javadoc warnings and zero `[ERROR]` lines**, down from about 2,250 warnings
+  of which 2,117 were missing-comment notices — a figure that had to be measured with `-Xmaxwarns`,
+  because javadoc caps its own output at 100 per module. doclint moves to `all,-missing`, keeping
+  every check that catches a real defect. The two packages a caller actually touches,
+  `org.locationtech.proj4j` and `.api`, are documented by hand and pass at full `-Xdoclint:all`
+  strictness. 37 empty `<p>` tags were a real HTML defect and are deleted; the root package gained
+  the `package-info.java` it never had, and 85 documentation gaps across 19 files are written (#2)
+- **Three plugins were resolved from repository metadata, so their versions depended on the contents
+  of the local repository** — in one reactor, `maven-resources-plugin` 3.5.0 for three modules and
+  3.4.0 for two others. The project had no `pluginManagement` section at all; there is now one.
+  `project.build.sourceEncoding` moves to the root POM, where it covers all seven modules rather than
+  `core` alone (#2)
+- **Seven duplicated rules have one place to live, and a test each** — `Registry.ellipsoids` now
+  references `Ellipsoid`'s table rather than duplicating 27 objects by value; six pipeline operators
+  extend one package-private base; `TransformWrapper2D`/`3D` funnel through one method; one
+  parameter-matching rule replaces five copies; `db` loses 45 duplicated lines and regenerates
+  byte-identically. 800 lines in, 707 out, plus 1,292 lines of tests written to fail if a
+  consolidation is undone (#9)
+- **Dead code is deleted and the rest says why it has to stay** — `proj/ModStereoProjection.java`,
+  236 lines whose only live statement was the package declaration; two commented blocks in
+  `ProjectionMath`; a stale `TODO` in `LongLatProjection`. `ContradictoryParameterException`,
+  `Projection.geocentric` and `Ellipsoid.INTL` are deprecated rather than removed, because these are
+  exported packages and removal is a binary break (#7)
+- **Three verification floors had stopped being floors.** `CI_MIN_TESTS` 1,700 → 2,500 in #12,
+  against a measured 2,573, and 2,500 → 2,600 on the released tree, against a measured 2,667. The
+  figure is chosen, not rounded: the floor exists so that the gate still fails when the `db`
+  module's 75 tests drop out of the reactor, and on the released tree that db-less run reads 2,592,
+  which is under 2,600. **The margin that matters is 8, not 67.** 67 is the gap from the floor up
+  to the total, and it measures nothing — this floor is not there to catch a handful of missing
+  tests. 8 is the gap from the db-less reading up to the floor: add 8 tests anywhere outside `db`
+  and a db-less run reaches 2,600, at which point the floor stops catching a missing `db` module at
+  all. The remedy then is 2,650, which is the threshold and the remedy `docker/run.sh` and
+  `docker/README.md` carry. The golden module floor 40 → 55 against 64 tests, and the bench arm
+  floor 20 → 200 against 245 arms (#12, closes #103)
+- **41 citations pointed at four documents that have never existed in this repository.** Most were
+  repointed at something real, some restated as the project policy they had always been describing,
+  and five were deleted outright as unverifiable. A dangling citation was concealing a wrong figure at
+  least once: the pure-Java rewrite of `StrictMath.sin/cos/tan` was attributed to JDK 17 and reached
+  them in JDK 21, so the claim was inverted rather than imprecise, and no reader could have caught it
+  by following the link (#11)
+- **`golden.yaml` said the golden report "is gated".** It is not, and the claim had already been
+  copied into two other files. All four sites now say what the four genuinely automatic checks catch
+  and what they do not (#11, filed as #104, fixed in #12)
+- `Ellipsoid.ellipsoids` held `INTL` while `Registry.ellipsoids` held `INTERNATIONAL`, so `+ellps=intl`
+  and the WKT writer's reverse lookup returned different objects for the same ellipsoid. Bit-identical
+  either way (#7)
+- `Ellipsoid.AUSTRALIAN` was the only one of 50 declarations passing both a pole radius and a
+  reciprocal flattening as non-zero. The constructor discarded the pole radius, and it was rounded —
+  19.2 mm out. Normalised to 0.0; all derived values are bit-identical (#14)
+- `LambertAzimuthalEqualAreaProjection`'s boolean-south constructor never had any effect — its body
+  was commented out, and the two parameters it would have set belong to a different projection. Now
+  deprecated, with `+lat_0=-90` named as the replacement. No behaviour change (#6)
+
+### Conformance
+
+- **PROJ 9.8.1 gie corpus: 7,449 / 7,902 — 94.27 %**, from a gate run on the released tree.
+  Remainder: 451 failing, 2 skipped. For reference, master at `2fc5989` — before #117, #122 and
+  #123 — measured **7,448 / 7,902 — 94.25 %**, against 2.0.0's 7,441 / 7,900 — 94.19 %
+- **The denominator moved, and the reason is worth stating.** It was 7,900 in 2.0.0: 7,923 in-block
+  assertions less 23 vacuous rows, which are excluded from numerator and denominator alike because
+  "both engines failed" is evidence about neither. #22 converted two of those vacuous rows into
+  genuine passes, which adds to both sides at once — hence 7,902. The corpus itself is unchanged at
+  **7,923 assertions**; no assertion appeared or disappeared
+- **Two pinned-failure rows were deleted from `gie-expected-failures.tsv` by #22 and one by #123.**
+  Removing a row makes the gate stricter, because a key absent from that file is expected to pass.
+  #16 removed five more, all named in its own commit: `builtins.gie#343:5` and `#345` at `:5`, `:7`,
+  `:9` and `:11`
+- **GIGS: 1,170 / 1,170 — 100 %**, unchanged
+- **Two GIGS rows stay failing on purpose**, and this is the one place where making a test pass would
+  be a move away from correct. `gigs/5206.gie.failing:454` and `gigs/5207.2.gie.failing:386` ask for
+  5.6e-8 m over 1,000 round trips and get about **5.6 m** — but that 5.6 m is PROJ's own answer, not
+  ours: on the same grid bytes 9.8.1 gives 5,599.885471 mm to our 5,599.885472 mm, and both engines
+  produce the identical coordinate. Nothing fails to converge; the forward and inverse legs
+  legitimately land in different national grids, and the two disagree by that much along that
+  parallel. It does not accumulate — the same figure at 1 round trip and at 1,000, in both engines.
+  The fix belongs upstream (#122)
+
+### Gate status, stated honestly
+
+*Figures below are from a gate run on the released tree; where one is not yet measured it says so.
+The last measured point before the three in-flight changes is master at `2fc5989`, in the pinned
+container (Temurin 21.0.11 / aarch64).*
+
+- **ci** — **green**, **2,667 tests / 0 failures**. Master at `2fc5989` measured 2,640 tests and
+  0 failures, against 2.0.0's 2,320. Every PR in this release states its own delta and the count is
+  treated as a signal in its own right — it is what caught #17 merging four of the files it needed
+  as two (#18)
+- **conformance** — **green**, **7,449 / 7,902**, against a committed 7,923-key index. Master at
+  `2fc5989` measured 7,448 / 7,902
+- **golden** — on this branch, **live and RED on 2,287 UNEXPLAINED rows** of 53,430, with
+  **49 of 49** rules pinned. Master at `2fc5989` measured 12,002 UNCHANGED · 41,428 CHANGED ·
+  0 ADDED · 0 REMOVED · 39,141 INTENDED · 2,287 UNEXPLAINED, 48 of 48 rules pinned — those are
+  master's readings and are left as measured. **Red is the intended state**: the
+  gate fails on any changed row that no rule claims with a named mechanism and a pinned count, so
+  those are changes somebody must *explain*, not changes somebody must *undo*. It runs weekly and
+  on demand, not on every push
+- **determinism** — **green**, 22 tests and 0 failures; master at `2fc5989` measured the same 22 and
+  0 failures. The count is a floor, `DET_FLOOR_TESTS=22`, and upward drift is reported as a notice
+- **bench**, and the **allocation** figures inside it — **green**, **0 breaches**, **245 gated,
+  0 EXCLUDED**, 245 arms, **245 of 245** arms carrying an allocation measurement. Measured 2026-08-14
+  on this branch in the pinned container (Temurin 21.0.11 / aarch64) from `./docker/run.sh bench`, in
+  **21m16s**. `bench` is opt-in, so that was a second command on the same branch rather than part of
+  the four-gate run above; allocation is not a separate check, and its figures come from inside the
+  bench run. One advisory, and it is an improvement rather than a breach:
+  `TransformCacheBenchmark.createTransformUncached` at 96.000 B/op against a ratchet of 112
+- **No CI run backs any figure in this file.** The workflow files are committed; everything above was
+  measured locally
+
+### Corrections to the 2.0.0 documents
+
+- **The `[Unreleased]` entry describing a relaxation of the resource-name guard as "in flight" was
+  stale on the day it was written.** `ResourceNames` already permits interior path segments at tag
+  `v2.0.0` — the rule shipped with the fork commit, and no commit between `v2.0.0` and `2fc5989`
+  touches the file. The entry is dropped rather than carried forward. **No conformance figure is
+  quoted for it**, then or now: the roughly 100 assertions it was said to unlock have not been
+  measured on a quiesced tree, and the corresponding corpus files are a separate question from the
+  guard
 
 ## [2.0.0] - 2026-08-06
 
@@ -153,7 +499,7 @@ These change the answer, or the reported error, for existing callers.
   mechanism and pins an exact row count. **44 of 44 rules are pinned**, and a rule that matches the
   wrong number of rows fails the build rather than silently absorbing another rule's rows
 - **Allocation and operation-count gate** (`benchmark/`), **245 arms, 245 gated, 0 excluded**, with a
-  recorded baseline of 25 rules and 171 per-benchmark ratchets
+  recorded baseline of 25 rules and 170 per-benchmark ratchets
 - **`ProjContext.parseMode` / `withParseMode` / `Builder.parseMode`**, exposing
   `Proj4Parser.ParseMode.STRICT` through the `Proj` facade. **The default is unchanged
   (`PROJ_COMPATIBLE`)** and must stay so — PROJ has no allow-list, and `builtins.gie` feeds a literal
@@ -163,7 +509,7 @@ These change the answer, or the reported error, for existing callers.
   `InvalidValueException`, because by default the parser went through `Units.findUnits`, which
   substitutes metres for anything unknown and never returns null. That is now refused in **both**
   modes — it is parity with PROJ, not a stricter-than-PROJ policy — so it is no longer something
-  `STRICT` adds. See the `+units` entry under [Unreleased].) **Duplicate-key precedence is *not*
+  `STRICT` adds. See the `+units` entry under [2.1.0].) **Duplicate-key precedence is *not*
   gated** — `+lon_0=11 +lon_0=22` yields 11.0 in both
   modes, and neither reports the duplicate. Across the full shipped dictionary, 9,013 definitions:
   8,969 parse in both modes, 43 are refused in both, **exactly one parses by default and is refused
@@ -385,8 +731,8 @@ Other boundaries:
   at a hard 0 B/op across 56 arms
 - **determinism** — runs per leg, **22** tests, 0 failures, 0 skips (the workflow's exact-count guard
   became a floor, `DET_FLOOR_TESTS=22`, and reports upward drift as a notice)
-- **bench** — baseline re-captured 2026-08-02: **171 per-benchmark ratchets, all enforced**, 25 rules,
-  8 CRS pairs × 20 operations pinned
+- **bench** — baseline re-captured 2026-08-02: **170 per-benchmark ratchets, all enforced**, 25 rules,
+  8 CRS pairs × 19 operations pinned
 - **No CI run backs any figure in this file.** The workflow files are committed; everything above was
   measured locally
 
@@ -511,7 +857,8 @@ Other boundaries:
 - Fix possible `null` dereference [#16](https://github.com/locationtech/proj4j/pull/16)
 - Fix `cea` (Cylindrical Equal Area) projection [#10](https://github.com/locationtech/proj4j/pull/10)
 
-[Unreleased]: https://github.com/emilevictor/neoProj4J/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/emilevictor/neoProj4J/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/emilevictor/neoProj4J/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/emilevictor/neoProj4J/compare/v1.4.3...v2.0.0
 [1.4.3]: https://github.com/locationtech/proj4j/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/locationtech/proj4j/compare/v1.4.1...v1.4.2

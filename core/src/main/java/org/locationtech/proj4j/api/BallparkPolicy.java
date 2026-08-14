@@ -66,7 +66,7 @@ import org.locationtech.proj4j.ErrorCause;
  *
  * @see BestOperationPolicy
  * @see GridPolicy
- * @since 1.5.0
+ * @since 2.0.0
  */
 public enum BallparkPolicy {
 

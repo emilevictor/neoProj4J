@@ -45,7 +45,7 @@ package org.locationtech.proj4j;
  * @see CoordinateTransformFactory#CoordinateTransformFactory(DomainErrorPolicy)
  * @see BasicCoordinateTransform#BasicCoordinateTransform(CoordinateReferenceSystem,
  *      CoordinateReferenceSystem, DomainErrorPolicy)
- * @since 1.5.0
+ * @since 2.0.0
  */
 public enum DomainErrorPolicy {
 

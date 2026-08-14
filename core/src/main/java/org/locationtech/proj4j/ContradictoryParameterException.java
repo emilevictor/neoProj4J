@@ -38,7 +38,7 @@ package org.locationtech.proj4j;
  *
  * @see ErrorCause#CONTRADICTORY_PARAMS
  * @see org.locationtech.proj4j.pipeline.PipelineDefinitionException
- * @since 1.5.0
+ * @since 2.0.0
  * @deprecated Never thrown by this library. It is kept because
  *     {@code org.locationtech.proj4j} is an exported package and removing a public class is a
  *     binary break, and because out-of-tree code may throw it itself. Catch

@@ -59,7 +59,7 @@ import org.locationtech.proj4j.ProjCoordinate;
  * and {@code [-50°, -40°]} above 60&deg;N. Those are the deliberate overlaps that keep Greenland
  * and eastern Siberia whole. Dropping any of them turns real land into an interruption gap.
  *
- * @since 1.5.0
+ * @since 2.0.0
  */
 public class InterruptedGoodeHomolosineProjection extends InterruptedProjection {
 

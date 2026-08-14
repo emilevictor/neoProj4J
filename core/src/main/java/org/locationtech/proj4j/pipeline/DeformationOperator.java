@@ -101,7 +101,7 @@ import org.locationtech.proj4j.gie.GieIoUnits;
  *
  * <p>Immutable after construction; safe to share.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 final class DeformationOperator implements PipelineOperator {
 

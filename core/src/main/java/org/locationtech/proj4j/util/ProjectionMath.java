@@ -94,7 +94,7 @@ public class ProjectionMath {
      * @param deg an angle in degrees
      * @return the angle in radians, bit-identical to PROJ's {@code deg * DEG_TO_RAD}
      * @see #toDeg(double)
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public static double toRad(double deg) {
         return deg * DTR;
@@ -140,7 +140,7 @@ public class ProjectionMath {
      * @param rad an angle in radians
      * @return the angle in degrees, bit-identical to PROJ's {@code rad / DEG_TO_RAD}
      * @see #toRad(double)
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public static double toDeg(double rad) {
         return rad / DTR;
@@ -181,7 +181,7 @@ public class ProjectionMath {
      * PROJ's {@code ONE_TOL} ({@code 9.8.1:src/aasincos.cpp:8}): how far past 1 the argument of an
      * inverse trigonometric function may be before it stops being rounding noise.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public static final double ONE_TOL = 1.00000000000001;
 
@@ -255,7 +255,7 @@ public class ProjectionMath {
      * @throws ProjectionException {@link ErrorCause#COORDINATE_OUT_OF_DOMAIN} if
      *         {@code |v| > ONE_TOL}, {@link ErrorCause#NUMERICAL_FAILURE} if {@code v} is
      *         {@code NaN}
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public static double asinChecked(double v) {
         double av = Math.abs(v);
@@ -285,7 +285,7 @@ public class ProjectionMath {
      * @throws ProjectionException {@link ErrorCause#COORDINATE_OUT_OF_DOMAIN} if
      *         {@code |v| > ONE_TOL}, {@link ErrorCause#NUMERICAL_FAILURE} if {@code v} is
      *         {@code NaN}
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public static double acosChecked(double v) {
         double av = Math.abs(v);
@@ -318,7 +318,7 @@ public class ProjectionMath {
      * @return the root
      * @throws ProjectionException {@link ErrorCause#NUMERICAL_FAILURE} if {@code v} is negative
      *         or {@code NaN}
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public static double sqrtChecked(double v) {
         if (Double.isNaN(v) || v < 0.0) {
@@ -470,7 +470,7 @@ public class ProjectionMath {
      *
      * @param longitude the longitude, radians
      * @return the longitude reduced to &plusmn;&pi;
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public static double adjlon(double longitude) {
         /* Let longitude slightly overshoot, to avoid spurious sign switching at the date line */

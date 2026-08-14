@@ -131,7 +131,7 @@ public class LambertEqualAreaConicProjection extends AlbersProjection {
 
     /**
      * @param south whether the first standard parallel is the south pole
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public void setSouth(boolean south) {
         this.south = south;
@@ -139,7 +139,7 @@ public class LambertEqualAreaConicProjection extends AlbersProjection {
 
     /**
      * @return whether the first standard parallel is the south pole
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public boolean isSouth() {
         return south;

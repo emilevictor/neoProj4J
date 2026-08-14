@@ -82,7 +82,7 @@ import org.locationtech.proj4j.ErrorCause;
  * {@link #NOT_A_COORDINATE_ERROR} for everything else.
  *
  * @see org.locationtech.proj4j.BulkCoordinateTransform
- * @since 1.5.0
+ * @since 2.0.0
  */
 public final class TransformStatus {
 

@@ -18,8 +18,21 @@ affiliated with or endorsed by either, and upstream is not responsible for it. P
 this fork here, not to the upstream project.
 
 How it differs: neoProj4J targets parity with [PROJ](https://proj.org/) 9.8.1 — projections, parameter
-parsing, datum and grid handling, and a `+proj=pipeline` engine — validated against PROJ's own `gie` and the
-OGP GIGS conformance suites.
+parsing, datum and grid handling, and a `+proj=pipeline` engine — validated against two conformance
+corpora vendored from PROJ 9.8.1 and run on every push:
+
+- **PROJ's own `gie` suite**, 22 files, 6,753 assertions evaluated.
+- **The OGP GIGS suite** as PROJ vendors it, 20 files, **1,170 assertions, all passing**. Series 5100
+  is map projections: Transverse Mercator by the recommended JHS formula (5101, four parts, the
+  fourth through `etmerc`), Lambert Conic Conformal 1SP (5102) and 2SP (5103), Oblique Stereographic
+  (5104), Oblique Mercator variant B (5105), Hotine Oblique Mercator variant A (5106), American
+  Polyconic (5107), Cassini-Soldner (5108), Albers Equal Area (5109), Mercator variant A (5111) and
+  variant B (5112), and Transverse Mercator South Oriented (5113). Series 5200 is coordinate
+  operations: geographic↔geocentric conversion (5201) and longitude rotation (5208).
+
+Together that is **7,923 assertions, of which 7,902 are non-vacuous and 7,449 pass**. Measured
+2026-08-14 with `./docker/run.sh conformance`, which runs the workflow's exact command. The corpus is
+diffed against a checked-in expected-outcome manifest, so any pass→fail regression fails the build.
 
 ## User Guide
 
@@ -35,7 +48,7 @@ upstream's — depending on `org.locationtech.proj4j:proj4j` gets you upstream P
 | `neoproj4j-grids-us-legacy` | optional | PROJ's CTABLE V2 US grids (`conus`, `alaska`) |
 
 All five share the groupId `io.github.emilevictor.neoproj4j` and are versioned together. The current
-release is `2.0.0`.
+release is `2.1.0`.
 
 **!Important!** The core artifact contains no EPSG-licensed files. Add `neoproj4j-epsg` unless you
 supply CRS definitions yourself — without it, `createFromName("epsg:4326")` cannot resolve anything.
@@ -45,7 +58,7 @@ supply CRS definitions yourself — without it, `createFromName("epsg:4326")` ca
 To include neoProj4J in a Maven project, add a dependency block like the following:
 ```xml
 <properties>
-    <neoproj4j.version>2.0.0</neoproj4j.version>
+    <neoproj4j.version>2.1.0</neoproj4j.version>
 </properties>
 <dependency>
     <groupId>io.github.emilevictor.neoproj4j</groupId>
@@ -115,13 +128,13 @@ form; the other 5 are GeoTIFF-only. See [grids-us-legacy/README.md](grids-us-leg
 
 ```groovy
 dependencies {
-    implementation 'io.github.emilevictor.neoproj4j:neoproj4j:2.0.0'
-    implementation 'io.github.emilevictor.neoproj4j:neoproj4j-epsg:2.0.0'
+    implementation 'io.github.emilevictor.neoproj4j:neoproj4j:2.1.0'
+    implementation 'io.github.emilevictor.neoproj4j:neoproj4j-epsg:2.1.0'
 
     // optional
-    implementation 'io.github.emilevictor.neoproj4j:neoproj4j-geoapi:2.0.0'
-    implementation 'io.github.emilevictor.neoproj4j:neoproj4j-db:2.0.0'
-    implementation 'io.github.emilevictor.neoproj4j:neoproj4j-grids-us-legacy:2.0.0'
+    implementation 'io.github.emilevictor.neoproj4j:neoproj4j-geoapi:2.1.0'
+    implementation 'io.github.emilevictor.neoproj4j:neoproj4j-db:2.1.0'
+    implementation 'io.github.emilevictor.neoproj4j:neoproj4j-grids-us-legacy:2.1.0'
 }
 ```
 

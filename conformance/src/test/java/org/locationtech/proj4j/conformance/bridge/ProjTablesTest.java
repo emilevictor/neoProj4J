@@ -69,7 +69,7 @@ class ProjTablesTest {
     }
 
     @Test
-    @DisplayName("proj4j resolves 93 of PROJ's 186 operators")
+    @DisplayName("proj4j resolves 151 of PROJ's 186 operators")
     void registryCoverage() {
         Registry registry = new Registry();
         List<String> resolvable = new ArrayList<String>();
@@ -84,8 +84,12 @@ class ProjTablesTest {
         System.out.println("PROJ 9.8.1 operators resolvable by proj4j's Registry: "
                 + resolvable.size() + " of " + ProjTables.OPERATORS.size());
         System.out.println("  missing (" + missing.size() + "): " + missing);
+        // A FLOOR, NOT AN EXPECTED COUNT, and deliberately a slack one: this test's job is to catch
+        // the Registry losing whole families of operators, not to pin a coverage figure that every
+        // porting stream moves. 151 of 186 resolved on 2026-08-14 (the count is printed above, so it
+        // is read rather than trusted). Raise this only when the slack stops being useful.
         assertTrue(resolvable.size() >= 80,
-                "only " + resolvable.size() + " operators resolve; expected around 90");
+                "only " + resolvable.size() + " operators resolve; 151 resolved on 2026-08-14");
         // Was: all three of alsk/apian/bacon were registered against the ABSTRACT Projection
         // class, whose project() is the identity - so they returned lon/lat as though it were
         // projected metres. alsk alone was 16 silently-wrong builtins.gie assertions.

@@ -54,7 +54,7 @@ import org.locationtech.proj4j.gie.GieIoUnits;
  * <p>Not thread-safe: the steps wrap mutable proj4j {@code Projection} instances.
  * Build one per thread.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 public final class Pipeline {
 

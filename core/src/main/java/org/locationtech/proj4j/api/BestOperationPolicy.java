@@ -54,7 +54,7 @@ import org.locationtech.proj4j.ErrorCause;
  * nothing to act on. {@link ProjContext#describe()} says which of the two states applies rather than
  * letting a caller assume it is being enforced.
  *
- * @since 1.5.0
+ * @since 2.0.0
  */
 public enum BestOperationPolicy {
 

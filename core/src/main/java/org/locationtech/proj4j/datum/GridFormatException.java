@@ -56,7 +56,7 @@ import java.io.IOException;
  * escaping. The named subtype exists so a test can assert the <em>type</em> and not just a substring of
  * a message.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 public class GridFormatException extends IOException {
 

@@ -68,7 +68,7 @@ import org.locationtech.proj4j.ProjectionException;
  * {@link MolleweideProjection} and {@link SinusoidalProjection} can be driven directly, exactly as
  * {@link SpilhausProjection} and {@link ObliqueTransformationProjection} do with their children.
  *
- * @since 1.5.0
+ * @since 2.0.0
  */
 abstract class InterruptedProjection extends Projection {
 

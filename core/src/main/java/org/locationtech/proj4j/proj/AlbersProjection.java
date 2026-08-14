@@ -122,7 +122,7 @@ public class AlbersProjection extends Projection {
 	 * difference between the two operators upstream — hence the seam.
 	 *
 	 * @return {@link Projection#projectionLatitude1}
-	 * @since 1.5.0
+	 * @since 2.0.0
 	 */
 	protected double firstStandardParallel() {
 		return projectionLatitude1;
@@ -132,7 +132,7 @@ public class AlbersProjection extends Projection {
 	 * The cone's second standard parallel, radians. {@code aea} reads {@code +lat_2}.
 	 *
 	 * @return {@link Projection#projectionLatitude2}
-	 * @since 1.5.0
+	 * @since 2.0.0
 	 */
 	protected double secondStandardParallel() {
 		return projectionLatitude2;

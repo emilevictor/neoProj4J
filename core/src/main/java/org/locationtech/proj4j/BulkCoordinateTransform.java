@@ -158,7 +158,7 @@ import org.locationtech.proj4j.bulk.TransformStatus;
  * @see TransformStatus
  * @see CoordinateTransformFactory#createBulkTransform(CoordinateReferenceSystem,
  *      CoordinateReferenceSystem)
- * @since 1.5.0
+ * @since 2.0.0
  */
 public interface BulkCoordinateTransform {
 

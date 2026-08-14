@@ -24,8 +24,13 @@ import java.util.Map;
  *
  * <h2>Why probes are derived from parameters</h2>
  *
- * There is no area-of-use database in proj4j (that arrives with {@code proj4j-db}, several stages
- * away), so a CRS's plausible domain has to be inferred from the CRS's own definition. The existing
+ * There is an area-of-use database in proj4j now — {@code neoproj4j-db}'s
+ * {@code PjdxDatabase.extentsFor} returns the authority extents — but it is <b>not on this module's
+ * classpath and must not be</b>: {@code golden/pom.xml} depends on core and epsg only, and the whole
+ * point of this table is that a probe point is a function of the definition text, reproducible by
+ * anyone holding just those two artifacts. Rebasing the probes onto {@code db} would also invalidate
+ * all 53,430 baseline rows. So a CRS's plausible domain is inferred from the CRS's own definition.
+ * The existing
  * in-repo attempt at this is {@code core/src/test/java/org/locationtech/proj4j/proj/
  * ProjectionGridRoundTripper.gridExtent}, and the alternative — the one
  * {@code core/src/test/resources/proj4-epsg.csv} takes — is worse: <b>all 4,280 of its rows probe the
@@ -41,8 +46,9 @@ import java.util.Map;
  *     for a CRS whose latitudes are all negative, {@code latExtent[1]} never moves, the guard at
  *     {@code :132} ({@code latExtent[1] > Double.MIN_VALUE}) is false, and the method silently falls
  *     back to a 10&deg; box centred on the equator. <b>Every southern-hemisphere CRS is probed in the
- *     wrong hemisphere.</b> Here there is no sentinel at all: {@link #candidates} counts what it
- *     found.</li>
+ *     wrong hemisphere.</b> Here there is no sentinel at all: {@link #derive} seeds {@code lo} and
+ *     {@code hi} from the first key it actually parses and keeps a {@code found} counter, so
+ *     "no latitude in the definition" is a distinct case from "the latitude is negative".</li>
  * <li><b>{@code lat == 0.0} conflated with "absent".</b> {@code updateLat:150} is
  *     {@code if (lat == 0.0) return;}. {@code +lat_0=0} is explicit, legal and extremely common —
  *     every UTM zone and every equatorial Mercator has it — and it is not the same as an absent

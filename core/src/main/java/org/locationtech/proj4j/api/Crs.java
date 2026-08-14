@@ -79,7 +79,7 @@ import org.locationtech.proj4j.units.Units;
  * @see Proj
  * @see CrsOperation
  * @see ProjContext
- * @since 1.5.0
+ * @since 2.0.0
  */
 public final class Crs {
 

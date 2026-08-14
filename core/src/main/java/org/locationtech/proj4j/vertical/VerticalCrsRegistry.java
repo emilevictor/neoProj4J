@@ -70,7 +70,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>Thread-safe; registrations are visible to every subsequent lookup.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 public final class VerticalCrsRegistry {
 

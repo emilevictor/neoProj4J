@@ -62,7 +62,7 @@ import org.locationtech.proj4j.gie.GieIoUnits;
  *
  * <p>Immutable and thread-safe apart from mutating the array passed in.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 final class CartOperator implements PipelineOperator {
 

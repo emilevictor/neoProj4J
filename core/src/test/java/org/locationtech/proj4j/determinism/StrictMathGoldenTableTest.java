@@ -100,29 +100,43 @@ import static org.junit.Assert.fail;
  *       26 they do; on JDK 11 they do not differ anywhere in this probe set. The separate rule that
  *       nothing on the transform path may call it is enforced by the benchmark module's
  *       {@code CountingMath} tier, not here.</li>
- *   <li><b>Not a claim that nothing in the library calls {@code Math} any more — 673 sites still
+ *   <li><b>Not a claim that nothing in the library calls {@code Math} any more — 640 sites still
  *       do.</b> Seven {@code java.lang.Math} methods are {@code @IntrinsicCandidate} and therefore
  *       platform-variant: {@code sin cos tan log log10 exp pow}. (That is the set this codebase
  *       treats as variant, and it is the one named in {@code LandsatProjection} and
  *       {@code RepointBitIdentityTest} - not the naive "all the trig functions" set;
  *       {@code asin acos atan atan2 sqrt abs} already delegate to {@code StrictMath} or are exactly
  *       specified by IEEE 754.) Counted on 2026-08-13 over {@code core/src/main/java} (366 files),
- *       with comments and string literals removed first: <b>673 calls remain, in 74 files</b> -
- *       {@code sin} 246, {@code cos} 231, {@code tan} 85, {@code log} 50, {@code pow} 49,
- *       {@code exp} 12, {@code log10} 0. The heaviest single file is {@code KrovakProjection} with
+ *       with comments and string literals removed first: <b>640 calls remain, in 73 files</b> -
+ *       {@code sin} 239, {@code cos} 222, {@code tan} 79, {@code pow} 49, {@code log} 41,
+ *       {@code exp} 10, {@code log10} 0. The heaviest single file is {@code KrovakProjection} with
  *       <b>49</b> ({@code sin} 17, {@code cos} 12, {@code pow} 12, {@code tan} 8), then
- *       {@code SwissObliqueMercatorProjection} 33, {@code ObliqueMercatorProjection} 31,
- *       {@code SimpleConicProjection} 30 and {@code ProjectionMath} 29.
+ *       {@code ObliqueMercatorProjection} 31, {@code SimpleConicProjection} 30,
+ *       {@code ProjectionMath} 29 and {@code StereographicAzimuthalProjection} 27.
+ *       <p><b>RE-COUNTED 2026-08-14, down from 673 in 74 files, and the whole of the difference is
+ *       one file.</b> {@code SwissObliqueMercatorProjection} used to be listed here as the
+ *       second-heaviest at 33 and is now at zero: its {@code sin}/{@code cos}/{@code tan} went to
+ *       {@link FastStrictTrig} and its {@code log}/{@code exp}/{@code atan} to {@code StrictMath},
+ *       because somerc's turning locus feeds an {@code asin} whose argument is 1 to within a few
+ *       ulp, where the derivative is unbounded and one ulp is worth 0.1 m of easting. It was a red
+ *       {@code Build (JDK 21)} job: eastings pinned on aarch64 were different {@code double}s on
+ *       x86-64, one by 0.51 m. <b>This paragraph named that file as the second-heaviest offender
+ *       for ten days before the CI job went red</b>, which is the argument for the static probe
+ *       described below rather than for a bigger golden table. The arithmetic closes exactly:
+ *       673 - 33 = 640 and 74 - 1 = 73, and the per-method drops ({@code sin} -7, {@code cos} -9,
+ *       {@code tan} -6, {@code log} -9, {@code exp} -2, {@code pow} 0) sum to 33.
  *       <p><b>{@code KrovakProjection} is invisible to a grep.</b> It has
  *       {@code import static java.lang.Math.*}, so its calls read {@code sin(x)} rather than
  *       {@code Math.sin(x)}: a search for {@code Math\.} in that file matches 12 lines and none of
  *       its 49 calls. Count both spellings or under-report.
- *       <p>Two independent instruments agree on the 673, per method and per file across all 74: a
- *       comment-stripped regex sweep of the sources, and a {@code javap -c} scan of the 445
- *       compiled classes in {@code core/target/classes} counting every {@code invokestatic} into
- *       {@code java/lang/Math} with one of the seven names. {@code KrovakProjection}'s 49 was also
- *       hand-counted line by line.
- *       <p><b>The practical limitation for a caller:</b> a transform reaching any of those 673
+ *       <p>Two independent instruments agreed on the original 673, per method and per file across
+ *       all 74: a comment-stripped regex sweep of the sources, and a {@code javap -c} scan of the
+ *       445 compiled classes in {@code core/target/classes} counting every {@code invokestatic}
+ *       into {@code java/lang/Math} with one of the seven names. {@code KrovakProjection}'s 49 was
+ *       also hand-counted line by line. <b>The 640 is the bytecode instrument only</b>, re-run over
+ *       446 classes; it is the authoritative one of the two, since it sees the star import and
+ *       cannot be fooled by a spelling. Anyone re-pinning this should use it and say so.
+ *       <p><b>The practical limitation for a caller:</b> a transform reaching any of those 640
  *       sites may return different bits on a different JVM or a different CPU architecture. The
  *       divergence is last-bit - one ulp of a radian is about 2 pm - but it is real, and the golden
  *       table in this class says nothing about it. The bit-identity guarantee covers only what goes

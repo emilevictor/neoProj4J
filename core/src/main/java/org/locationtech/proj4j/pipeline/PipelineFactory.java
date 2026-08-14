@@ -94,7 +94,7 @@ import org.locationtech.proj4j.vertical.VGridShiftOperator;
  * <p>Instances hold an {@code +init=} expansion cache and a {@link Registry}; they
  * are cheap to create and safe to reuse from one thread.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 public final class PipelineFactory {
 

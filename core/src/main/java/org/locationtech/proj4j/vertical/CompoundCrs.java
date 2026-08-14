@@ -55,7 +55,7 @@ import org.locationtech.proj4j.InvalidValueException;
  * <p>Immutable, and thread-safe to the same degree the wrapped
  * {@link CoordinateReferenceSystem} is.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 public final class CompoundCrs implements Serializable {
 
@@ -113,12 +113,20 @@ public final class CompoundCrs implements Serializable {
     }
 
     /**
-     * The proj-string to execute, naming the grid file this library can actually open.
+     * The proj-string to execute, naming the grid file this library looks for on disk.
      *
      * <p>Differs from {@link #toProjString()} in one token: {@code +geoidgrids} carries the
-     * GTX name from {@code proj.db}'s {@code grid_alternatives} rather than the GeoTIFF one,
-     * because {@link org.locationtech.proj4j.datum.VerticalGrid} reads GTX only. When the
-     * GeoTIFF reader lands the two collapse into one.
+     * GTX name from {@code proj.db}'s {@code grid_alternatives} rather than the GeoTIFF one.
+     *
+     * <p><b>This used to say the reason was that {@code VerticalGrid} reads GTX only, and
+     * that the two would collapse when the GeoTIFF reader landed. The reader landed and they
+     * did not collapse</b> — {@link org.locationtech.proj4j.datum.VerticalGrid} reads both,
+     * so the split is now about which name is on the user's disk, not which format is
+     * parseable. See {@link VerticalCrs}'s class javadoc for the measured evidence.
+     * {@link #toProjString()} must keep reproducing PROJ's export exactly, so the two methods
+     * answer permanently different questions and this one is not going away.
+     * {@code CompoundCrsTest} pins that this string names the {@code .gtx} and contains no
+     * {@code .tif}, so changing the preference is a deliberate act, not a cleanup.
      *
      * @return a proj-string suitable for {@code PipelineFactory.create}
      */

@@ -52,7 +52,7 @@ package org.locationtech.proj4j;
  * the mechanical reason the contract above can promise a meaningful {@code cause()}.
  *
  * @see ErrorCause
- * @since 1.5.0
+ * @since 2.0.0
  */
 public class CrsTransformException extends Proj4jException {
 

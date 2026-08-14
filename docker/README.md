@@ -22,7 +22,7 @@ docker/
 ./docker/run.sh                     # the four default checks (measured: 0m46s warm, 2m39s cold)
 ./docker/run.sh conformance         # just one
 ./docker/run.sh ci golden           # any subset
-./docker/run.sh bench               # the opt-in performance gate (measured: 21m23s)
+./docker/run.sh bench               # the opt-in performance gate (measured: 21m16s)
 ./docker/run.sh --help
 ```
 
@@ -38,21 +38,24 @@ added, so treat them as a reading with a date on it, not as a constant:
 
 | check | mirrors | verdict | measured |
 |---|---|---|---|
-| `ci` | `ci.yaml` / `build-and-test` | **PASS** | `2573 tests, 0 failures`, all seven reactor projects `BUILD SUCCESS`. Module split: core **2141**, conformance **345** (its unit tests only — the corpus sweep is behind `-Pconformance` and does not run here), db **75**, geoapi **12**, and no test sources in `epsg` or `grids-us-legacy`. **Trail of this number:** `1792` (`maven-javadoc-plugin:jar (attach-javadocs)` failed on `neoproj4j-db`, stopping the reactor before `db` and `conformance`), `2142` once that was fixed, `2320`, then `2573` — every rise is new tests, **0 pre-existing tests broken at any point**, and the last skipped test in the repository has since been revived. |
-| `conformance` | `conformance.yaml` / `corpus` | PASS | `7441/7900` genuine passes, `regressed 0`, 7,923 assertions evaluated. Those are three different quantities: 7,923 in-block corpus rows evaluated, 7,900 of them non-vacuous, 7,441 of *those* passing (94.19%), with 457 failing and 2 skipped |
-| `golden` | `golden.yaml` / `golden` | **FAIL (expected)** | `2291 UNEXPLAINED`, **44/44** rules pinned, no `COUNT_MISMATCH`/`DEAD_RULE`/`EXPIRED_RULE`/`PENDING_RULE_FIRED`. Full split `12005 UNCHANGED · 41425 CHANGED · 0 ADDED · 0 REMOVED · 39134 INTENDED` over 53,430 rows. What is gated is that this report is *unchanged against the baseline*, not that the test passes, so a green `golden` is not what this check is waiting for |
+| `ci` | `ci.yaml` / `build-and-test` | **PASS** | `2667 tests, 0 failures, 3 skipped`, all seven reactor projects `BUILD SUCCESS`. Module split: core **2234** (2 skipped), conformance **345** (1 skipped; its unit tests only — the corpus sweep is behind `-Pconformance` and does not run here), db **75**, geoapi **13**, and no test sources in `epsg` or `grids-us-legacy`. Master at `2fc5989`, measured the same way, is **2640**. **Trail of this number:** `1792` (`maven-javadoc-plugin:jar (attach-javadocs)` failed on `neoproj4j-db`, stopping the reactor before `db` and `conformance`), `2142` once that was fixed, `2320`, `2573`, `2635`, `2640`, `2662`, then `2667` — every rise is new tests, **0 pre-existing tests broken at any point**. The last two readings are 5 apart and the report-file count did not move (251 both times), so those 5 are new methods in classes that already existed, not a new test class. The 3 skips are assumptions about build order, not disabled tests: 2 in `NoGeoApiInCoreTest` (geoapi not yet compiled, core not yet packaged, both true when surefire runs) and 1 in `GieConformanceTest` (corpus profile off). |
+| `conformance` | `conformance.yaml` / `corpus` | PASS | `7449/7902` genuine passes, `regressed 0`, 7,923 assertions evaluated. Those are three different quantities: 7,923 in-block corpus rows evaluated, 7,902 of them non-vacuous (21 vacuous `expect failure` rows are excluded from both numerator and denominator), 7,449 of *those* passing (94.27%), with 451 failing and 2 skipped. Master at `2fc5989` is `7448/7902` |
+| `golden` | `golden.yaml` / `golden` | **FAIL (expected)** | `2287 UNEXPLAINED`, **49/49** rules pinned, no `FIGURES_MOVED`/`COUNT_MISMATCH`/`DEAD_RULE`/`EXPIRED_RULE`/`PENDING_RULE_FIRED`. Full split `11994 UNCHANGED · 41436 CHANGED · 0 ADDED · 0 REMOVED · 39149 INTENDED` over 53,430 rows. What is gated is that this report is *unchanged against the baseline*, not that the test passes, so a green `golden` is not what this check is waiting for |
 | `determinism` | `determinism.yaml` / `bits` (one leg) | PASS | `22 tests, 0 failures` |
-| `bench` | `bench.yaml` / `gate` | PASS | `0 breaches`, **`245 gated, 0 EXCLUDED`, 245 arms**, `245 of 245 arms carry an allocation measurement`, in **21 m 23 s**. Was `172 gated, 9 EXCLUDED, 181 arms` earlier: **+64 arms** because `BulkTransformBenchmark` came out of the `staged` package and into the gate, and **−9 exclusions** because `crs-parse` rejoined Tier 1 when `io/InitFileCache` removed the per-call re-scan that made it flake |
+| `bench` | `bench.yaml` / `gate` | PASS | `0 breaches`, **`245 gated, 0 EXCLUDED`, 245 arms**, `245 of 245 arms carry an allocation measurement`, in **21 m 16 s**. Was `172 gated, 9 EXCLUDED, 181 arms` earlier: **+64 arms** because `BulkTransformBenchmark` came out of the `staged` package and into the gate, and **−9 exclusions** because `crs-parse` rejoined Tier 1 when `io/InitFileCache` removed the per-call re-scan that made it flake |
 
 **Failures are classified, not just counted.** An expected failure appears as `FAIL(expected)` with
 its reason spelled out and does not set the exit code; anything else is `FAIL` and does. The
 expectation is not hardcoded to a verdict - it is re-derived from the run:
 
 * **`golden`** is an expected failure *only while its failure is `UNEXPLAINED` rows and nothing
-  else*. `COUNT_MISMATCH`, `DEAD_RULE`, `EXPIRED_RULE` and `PENDING_RULE_FIRED` are checked for
-  separately and are reported as **real** failures, because they mean the rule set has stopped
-  describing the tree. The 2,291 unexplained rows are a triage backlog owned by the streams that
-  caused them; the gate goes green one rule at a time.
+  else*. Five markers are checked for separately and are reported as **real** failures:
+  `FIGURES_MOVED`, `COUNT_MISMATCH`, `DEAD_RULE`, `EXPIRED_RULE` and `PENDING_RULE_FIRED`. The last
+  four mean the rule set has stopped describing the tree. `FIGURES_MOVED` is a different fault: the
+  backlog figure itself moved — the six headline figures no longer match
+  `baseline/1.4.3/golden-expect.txt` — which is why the gate prints expected, actual and delta for it
+  rather than only naming it. The 2,287 unexplained rows are a triage backlog owned by the streams
+  that caused them; the gate goes green one rule at a time.
 * **`ci`** used to be an expected failure too, *only while the one failing class was `MetaCRSTest`*,
   whose input CSV was being regenerated. That regeneration landed, as did the `neoproj4j-db` javadoc
   fix, and `ci` is now simply **green**. The `MetaCRSTest` branch is retained because it derives the
@@ -172,11 +175,11 @@ the runner correctly refused to call the new failure expected.
 
 **That transcript is from 2026-08-01. It is quoted unedited, because it is a measurement rather
 than an example, and it is kept because it is the one recorded run that exercises all three terms of
-the tally. Every figure in it is stale — read it for the shape, not the numbers.** A run today
-reads `ci PASS 2573 tests, 0 failures` and `golden FAIL(expected) 2291 UNEXPLAINED rows,
-44/44 rules pinned`, so it shows two terms, not three (`3 passed, 1 failed AS EXPECTED,
-0 failed unexpectedly`, total `0m46s`, exit 0); the positive control in §1 is the one that still
-demonstrates the third on demand.
+the tally. Every figure in it is stale — read it for the shape, not the numbers.** A run on
+2026-08-14 on the 2.1.0 release branch reads `ci PASS 2667 tests, 0 failures` and
+`golden FAIL(expected) 2287 UNEXPLAINED rows, 49/49 rules pinned`, so it shows two terms, not three
+(`3 passed, 1 failed AS EXPECTED, 0 failed unexpectedly`, total `0m34s`, exit 0); the positive
+control in §1 is the one that still demonstrates the third on demand.
 
 ### 3. The container actually ran the tests
 
@@ -186,8 +189,8 @@ actually executed"* is the failure this runner is built against.
 
 | check | floor asserted | measured in the container |
 |---|---|---|
-| `ci` | ≥ 2,500 tests across all surefire XMLs | **2,573 tests**, 0 failures *(was 2,320; 2,142 before that; 1,792 before the `neoproj4j-db` javadoc fix let `db` and `conformance` reach their test phases)*. **The floor is a ratchet, not a ceiling — raise it deliberately.** 2,500 is the highest round figure that still fails when `db` (75 tests) drops out of the reactor; it cannot also cover `geoapi`'s 12 and leave any headroom. It was 1,700, which was 873 below the reading and had stopped catching a module dropping out at all. |
-| `conformance` | `GieConformanceTest` ≥ 7,900 tests; ≥ 25 other classes; `evaluated == index keys`; 0 skips outside the sweep; `skipped == still_failing` | **7,971 sweep tests**, **7,923 assertions evaluated** against a 7,923-key index, 26 other classes, 0 outside skips, 482 == 482 |
+| `ci` | ≥ 2,600 tests across all surefire XMLs | **2,667 tests**, 0 failures, 3 skipped *(was 2,662; 2,640; 2,635; 2,573; 2,320; 2,142; 1,792 before the `neoproj4j-db` javadoc fix let `db` and `conformance` reach their test phases)*. **The floor is a ratchet, not a ceiling — raise it deliberately.** 2,600 is the highest round figure that still fails when `db` (75 tests) drops out of the reactor: 2,667 − 75 = 2,592 < 2,600. It cannot also cover `geoapi`'s 13 and leave any headroom. **That property now holds by only 8 tests** — at a total of 2,675 the db-less reading reaches 2,600 and the floor stops catching `db`, so whoever pushes the total past 2,674 must raise this floor to 2,650 in the same change. It was 2,500, chosen against the 2,573 reading, and the suite outgrew it — 2,560 was 60 clear of it, so `db` could have vanished green. Before that it was 1,700. |
+| `conformance` | `GieConformanceTest` ≥ 7,900 tests; ≥ 25 other classes; `evaluated == index keys`; 0 skips outside the sweep; `skipped == still_failing` | **7,971 sweep tests**, **7,923 assertions evaluated** against a 7,923-key index, 26 other classes, 0 outside skips, 474 == 474 |
 | `golden` | exactly 1 `GoldenMasterTest`, 0 skips; generated line count == baseline; ≥ 55 tests in the module; the six diff figures equal `baseline/1.4.3/golden-expect.txt` | **53,431 lines** generated vs 53,431 baseline — that is `wc -l` of a file whose first line is a header, so **53,430 data rows**, which is the figure quoted everywhere else. **64 tests**, 0 skips. The figure check lives in `GoldenMasterTest`, not here, because `golden.yaml` is `schedule`-only and gates nothing on a PR |
 | `determinism` | ≥ 22 tests, 0 skips, ≥ 2 report files | **22 tests** in 4 classes, 0 failures |
 | `bench` | ≥ 200 JMH arms and ≥ 200 arms carrying `gc.alloc.rate.norm` (was 20, which one surviving class of ten satisfied) | see the `bench` row in the table at the top of this file; 245 arms measured |
@@ -261,8 +264,9 @@ widen the slack and do not raise a ratchet.
 
 ## Why `bench` is opt-in
 
-Measured at **21 m 23 s** in the container (was 15 m 47 s at 181 arms; the arm count is
-now **245**), and it wants a quiet machine. JMH shards one invocation per benchmark class; sharing the
+Measured at **21 m 16 s** in the container, and 21 m 23 s on an earlier run of the same 245
+arms, so read seven seconds as run-to-run noise rather than as a change (was 15 m 47 s at 181
+arms; the arm count is now **245**), and it wants a quiet machine. JMH shards one invocation per benchmark class; sharing the
 box does not make it lie - `gc.alloc.rate.norm` is a bytecode property - but it does make it slow, and
 a twenty-minute default would stop people running the other four, which together take **46 s**. It is
 also the only check that is a *measurement* rather than a comparison, so it belongs in a deliberate run
@@ -323,7 +327,7 @@ ratios between the checks, not as a budget for yours.
 | `golden` | 26 s | **6 s** | 27 s |
 | `determinism` | 4 s | **5 s** | 3 s |
 | **default run, all four** | **1 m 56 s** | **0 m 46 s** | **2 m 39 s** |
-| `bench`, opt-in | 15 m 47 s | **21 m 23 s** (245 arms, was 181) | — |
+| `bench`, opt-in | 15 m 47 s | **21 m 16 s** (245 arms, was 181) | — |
 
 The re-measured column was taken on a fully warm image and volume; `ci`'s 28 s against 79 s is the
 compile cache, not a change in the build. **Only `bench` is a real movement**, and it is arms, not

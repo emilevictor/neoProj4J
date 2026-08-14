@@ -27,7 +27,7 @@ import org.locationtech.proj4j.ErrorCause;
  * row asserts upstream rejection, so a failure that upstream would <em>not</em>
  * have produced must never be reported as agreement.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 public enum PipelineErrorCode {
 

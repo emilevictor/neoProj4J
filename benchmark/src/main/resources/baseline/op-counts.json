@@ -8,7 +8,7 @@
     "A count that RISES is an extra iteration or a reintroduced transcendental."
   ],
   "capturedAt": {
-    "commit": "8f0fbd81bf53f95bd3c824a18a65f673c7ae2635",
+    "commit": "8f0fbd81bf53f95bd3c824a18a65f673c7ae2635+uncommitted (the bare sha was written by a GateChecker that did not mark a dirty tree. Corrected by hand 2026-08-14: this capture shares capturedAt.date to the microsecond with allocation-baseline.json, which records the same tree as dirty, so both were taken from the same uncommitted working tree and a bare sha names a tree that does not contain the code measured. No op count was touched - only this provenance string. GateChecker.java:650-690 now marks dirtiness itself, so a future --record does not need this note.)",
     "date": "2026-08-02T16:21:38.424204Z",
     "jdk": "21.0.11+10-LTS",
     "arch": "aarch64",

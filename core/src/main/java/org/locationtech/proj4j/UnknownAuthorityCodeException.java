@@ -45,7 +45,7 @@ public class UnknownAuthorityCodeException extends CrsCreationException {
      *
      * @param cause   a refinement of {@link ErrorCause#UNKNOWN_CRS}
      * @param message the human-readable detail message
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public UnknownAuthorityCodeException(ErrorCause cause, String message) {
         super(cause, message);

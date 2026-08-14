@@ -1,3 +1,441 @@
+# neoProj4J 2.1.0 release notes
+
+Released 2026-08-14 to Maven Central under the same groupId and artifactId as 2.0.0 — see
+the README for the coordinates. Figures are measured unless labelled otherwise; where a number is an
+estimate or is still pending it says so.
+
+**2.0.0 was the engine change. 2.1.0 is the pass that followed it.** Twenty-two merged pull requests —
+#2 through #23 — plus three changes folded in at the end. Nothing here re-architects anything: it is
+the output of the first static-analysis run ever made over this tree and of a line-by-line review that
+followed it, and the two of them together found defects on paths that no test had ever reached.
+
+Almost every behaviour change below is one of two shapes, and it is worth knowing them before you read
+the list:
+
+- **A parameter that was read and then thrown away.** Parsed, dispatched into a method that ignored it,
+  and the caller told nothing. `+south`, `+zone` on the wrong operator, `+gamma` on anything that does
+  not read it, `+lat_0` on `rpoly`, and the seven `sconics` members' `+lat_1` / `+lat_2`.
+- **A parameter whose absence could not be told apart from an explicit zero.** Upstream tests for
+  *presence* — `pj_param`'s `t` sigil — and this library tested the value. Zero is a legal latitude, a
+  legal `+lat_ts` and a legal `+n`, so testing the value silently substitutes a default for a value the
+  caller actually gave, or answers from a default the caller never supplied.
+
+If you only read one section, read [Compatibility](#210-compatibility-what-moves-and-by-how-much). If you
+only read one item, read item 1.
+
+**Where the numbers come from.** Everything below was measured locally, most of it with an A/B against
+an otherwise identical tree. The CI workflow files are committed; **nothing here should be read as a
+green CI run**.
+
+---
+
+## 2.1.0 compatibility: what moves, and by how much
+
+Every row is **measured**. The magnitude is the point.
+
+The first item is the one most likely to break an existing deployment, and unlike the rest it can break
+it on input you have been feeding the library for years. The items after it change coordinates.
+
+### 1. A `+units=` value PROJ does not know now throws, where it used to become metres in silence
+
+This is the entry to read if you have proj strings stored in a database, a config file or a
+spreadsheet.
+
+`+units=` accepts the 21 linear ids in PROJ's `pj_units` table and nothing else. Anything else now
+raises `InvalidValueException: Unknown unit: <value>`, naming the value. The lookup is case-sensitive,
+because upstream's is: `us-ft` is accepted, `US-FT` is refused.
+
+**The spellings that stop working are the plausible ones**, which is what makes this worth a section of
+its own:
+
+| what you may have written | what it is |
+|---|---|
+| `feet`, `metre`, `metres`, `inches`, `kilometres` | the plural or the full name where PROJ wants the id — `ft`, `m`, `in`, `km` |
+| `deg`, `degree`, `degrees` | angular; `+units=` is linear only |
+| `ftUS`, `usft`, `ft-us`, `survey-ft`, `US-FT` | near-misses for `us-ft` |
+
+41 spellings PROJ refuses were accepted in all: 23 single tokens and 18 containing a space.
+
+**What the old behaviour actually did**, measured on `+proj=utm +zone=18 +datum=WGS84 +units=<U>` at
+(−75, 40) against `cs2cs` 9.8.1, where the correct output is `500000.0000 4427757.2187`:
+
+| `+units=` | proj4j 2.0.0 | PROJ 9.8.1 | proj4j 2.1.0 |
+|---|---|---|---|
+| `ftUS` and the other 40 | `500000.0000 4427757.2187` — the metre value, about **1.14 million units** from what the caller asked for | `Error 1027 … utm: Invalid value for units` | `InvalidValueException: Unknown unit: ftUS` |
+| `deg` / `degree` / `degrees` | `0.0000 39.7752` — a pair that reads like a lon/lat and is **wrong in both components** | rejected | `InvalidValueException` |
+| `us-ft` | correct | correct | correct, unchanged |
+
+**No registry row, no golden row and no conformance row moves.** Every `+units=` value across the
+shipped dictionaries and both corpora is already an id — `m` (6,478), `us-ft` (762), `ft` (143),
+`link` (1), nothing else, across 7,384 occurrences. **The whole cost falls on definitions written by
+hand**, which is precisely where the bad spellings are.
+
+**What to do.** On `+proj=longlat` the token was a no-op and can be deleted. Anywhere else, replace it
+with the id — `m`, `ft`, `us-ft` — and then check the number that comes out, because if the old
+definition said `feet` the old output was in metres and your stored coordinates are wrong by the
+conversion factor. `Units.linearUnitIds()` is new and returns the accepted set, so you can screen a
+definition store before you upgrade. `Units.findUnits`, `Units.isKnownUnit` and `Units.units` are
+unchanged, so `Units.isKnownUnit("deg")` is still `true` — the refusal is built at parse level, not in
+the lookup.
+
+### 2. **48,880.69 m** of easting: `+lat_ts=0` is now told apart from no `+lat_ts` at all
+
+On `merc`, an explicit `+lat_ts` also discards `+k`, so the two cannot be confused about scale. Testing
+the value cannot express "zero is a real latitude of true scale", so a definition that said
+`+lat_ts=0` was treated as though it had said nothing.
+
+Measured against `proj` 9.8.1 at 110° E, 0° on the three shipped definitions that pair `+lat_ts=0` with
+a `+k`: `esri:1816 <2934>`, `esri:2668 <21100>` and `esri:3015 <25700>`, which are one definition under
+three keys.
+
+**`Projection.equals` and `hashCode` now include whether `+lat_ts` was given.** `+proj=merc +lat_ts=0`
+and bare `+proj=merc` compare unequal where they used to compare equal. That costs a cache miss, never
+a wrong answer. A stream serialised by an older build still deserialises — `serialVersionUID` is
+unchanged and the absent boolean reads as `false` — but it will not equal the same definition parsed
+fresh here, and it keeps the old `scaleFactor`. `Projection.clearTrueScaleLatitude()` is new, because
+passing zero to the setter can no longer mean "never given".
+
+### 3. **10,000 km**: `+south=f` put your coordinates in the southern hemisphere
+
+`+south` was read for its presence. `+proj=utm +zone=33 +south=f` — which PROJ reads as *northern* —
+was projected south. Failing open, in the most literal sense.
+
+It now goes through the same rule as `pj_param`'s `b` sigil. Two deliberate divergences: `+south=` with
+an empty value is `false`, matching what 9.8.1 does in practice, and **`+south=0` throws** rather than
+guessing, because the sigil reads the first character only and so reads `+south=tomato` as southern.
+All 722 occurrences of `+south` in the shipped registries are bare, so nothing shipped moves.
+
+### 4. **434 km**: `tmerc` and `etmerc` read a `+zone` upstream does not give them
+
+Upstream reads `+zone` in `PJ_PROJECTION(utm)` alone. proj4j read it for all three, because one class
+is bound to two names. Either direction — a `+zone` silently applied, or the central meridian you
+expected being overridden — is 434 km.
+
+`+zone=0` and `+zone=61` were also accepted, computing a central meridian of ∓183°. Anything outside
+1..60 is refused at parse time now. `setUTMZone` survives as a public setter; it is simply no longer
+reachable from a proj string.
+
+### 5. Six operators stopped answering from parameters nobody supplied
+
+Two returned wrong numbers, four now refuse.
+
+| definition | was | is |
+|---|---|---|
+| bare `+proj=leac` | ran the conterminous-US parallels 45.5° / 29.5° where upstream runs 0 — **1,724 km** at (12, 56) on WGS84 | upstream's parallels |
+| `+proj=wag1 +n=0.5` | honoured an `+n` PROJ never reads for that operator — **525,401.03 m** in a straight line at (10, 55) on GRS80 | `+n` ignored, as upstream ignores it |
+| bare `+proj=urmfps` | answered — as `wag1` | refused |
+| bare `+proj=geos` | answered, from the nominal geostationary height of 35,785,831 m the caller never named | refused |
+| `+proj=gn_sinu +n=1` with no `+m` | answered | refused |
+| `+proj=imw_p` with exactly one parallel | answered | refused |
+
+Every refusal is tested from both sides, because refusing an explicit zero would trade upstream's
+defect for one of our own.
+
+### 6. **2,336 km**: the seven `sconics` members never read `+lat_1` or `+lat_2`
+
+`SimpleConicProjection` used hard-coded 30° and 60° behind a `FIXME`, and six of the seven were
+registered and live — so they returned plausible coordinates for standard parallels nobody chose. The
+figure is `tissot`, whose sixteen corpus rows all failed on it; 112 assertions in `builtins.gie` were
+failing on this one defect.
+
+An absent `+lat_2` is now refused rather than read as zero: **1,191 km** on `+proj=murd2 +a=6400000` at
+(10, 20), where 9.8.1 exits with "Missing parameter: lat_2 should be specified". An explicit
+`+lat_2=0` stays legal, because upstream accepts it.
+
+### 7. **37,098 km**: with no `+lon_0`, every forward projection behaved as though `+over` were set
+
+The forward longitude wrap was guarded on `+lon_0` being non-zero, so omitting `+lon_0` — the common
+case — skipped the wrap entirely. Worst case measured is `vandg` at longitude 180.1. **Nothing inside
+±180 moves**, including ±180.0 exactly.
+
+Van der Grinten's *inverse* had a related hole, now closed with upstream's `r > PISQ` branch: a point
+outside the map circle came back as a plausible in-range coordinate rather than the reflected one, up
+to **32.678°** of latitude at (10, 10).
+
+### 8. **A full turn of longitude, 360.000000000°**: `calcofi` lost its `+over`
+
+`+proj=calcofi +R=6400000` → `+proj=longlat +R=6400000` at (−200, 100) returned
+**152.4550931861857**. PROJ 9.8.1 returns **−207.544906814**. Silently, and `calcofi` is the one
+shipped projection that sets `+over` from its own `initialize()` — precisely the case the flag exists
+for.
+
+Two defects, and the second is why the first looked fixed. The prime meridian was applied one stage
+after `adjlon` rather than inside the inverse funnel with it, so this library computed
+`adjlon(lam + lam0) + from_greenwich` where `inv.cpp:113-117` computes
+`adjlon((lam + from_greenwich) + lam0)`; those differ whenever the sum crosses the antimeridian. And a
+composed transform runs the *target's* forward next, which wrapped the turn straight back.
+
+The fix is not to stop `longlat` wrapping — that would undo an improvement in 2.0.0 that is pinned by a
+test. **PROJ emits no step at all for a plain Greenwich geographic CRS**, so there is nothing there to
+wrap; that was verified with `projinfo` and `cs2cs`, not reasoned about. The forward direction is
+bit-identical.
+
+Two deliberate approximations, both unobservable in anything shipped:
+
+- **`+lon_0` is tested by value, not by presence.** A hand-written `+proj=longlat +lon_0=0` earns a
+  step in PROJ and does not here. Zero shipped geographic definitions carry `+lon_0`.
+- **An explicit `+over` on the *source* is not thrown away**, where PROJ discards it as an artefact of
+  `+over` not surviving its round trip through a CRS description. Reproducing that would mean
+  discarding a turn in the one case where the user spelled out that they wanted it kept.
+
+Six golden rows move, by one or two ULP in the recovered longitude and nothing else — the cause is
+association, not magnitude.
+
+### 9. **6,054 mm over 1,000 round trips**: the inverse grid shift gave up at a grid boundary
+
+When interpolation cannot produce a value, the iterate has stepped outside the grid the *input* was
+found in. That is not the same event as the iteration having failed, and PROJ says so in a comment and
+then acts on it at `grids.cpp:3451-3476` by fetching the grid the iterate landed in and continuing.
+proj4j had only the `break`, so it fell through to the first-approximation escape hatch and returned
+the unconverged iterate — off by roughly one whole grid shift, with every round trip restarting from
+the previous one's approximation.
+
+Measured with `+nadgrids=@conus,@alaska,@ntv2_0.gsb,@ntv1_can.dat`, where `conus` ends at 50° N and the
+iterate crosses into `alaska`:
+
+| point | PROJ 9.8.1 | proj4j before | proj4j after |
+|---|---|---|---|
+| −130.516041667, 50.0002461111 | 0.000000 mm at 1, 100 and 1,000 round trips | 12.94 mm at 1, **6,054.00 mm at 1,000** | 0.000001 mm |
+| a neighbouring point | 0.000000 mm | 12.98 mm at 1, **648.89 mm at 100** | 0.000000 mm |
+
+The escape hatch is intact where there is genuinely nowhere to move to, and a test pins that. **If you
+have stored coordinates computed through a multi-grid `+nadgrids` list near a grid boundary, they can
+be metres out**, and recomputing them is a data migration rather than a library upgrade.
+
+### 10. **181,695.126 m → 0.263 m**: ESRI-flavoured WKT is now read the way PROJ reads it
+
+PROJ sets a flag when a document says something only ESRI's exporter says, and under that flag the two
+`Hotine_Oblique_Mercator_*` method names take the skew angle from the azimuth and discard any skew
+parameter present. There are **two** triggers, not one — a `DATUM` named `D_something` and a `GEOGCS`
+named `GCS_something` — and both comparisons are case-sensitive, as upstream's are. proj4j honoured
+neither.
+
+Measured on the reporting user's own document: 181,695.126 m → 0.263 m forward, and
+181,984.105939 m → 0.263168 m reverse. The residual 0.26 m is a separate NAD83-to-WGS84 gap, not this
+defect. One case is pinned as a divergence rather than fixed: a GDAL parameter name inside an ESRI
+method name, a spelling no exporter writes.
+
+### 11. Eighteen inverse sines stopped inventing a latitude
+
+Each now routes through this project's port of upstream's `aasin`. `NaN` raises `NUMERICAL_FAILURE`, an
+argument just past 1 clamps while it stays inside upstream's own tolerance, and anything further out
+raises `COORDINATE_OUT_OF_DOMAIN`. Swiss oblique Mercator returned `NaN` for **both** coordinates over
+a band containing 15,753,267 measured input points; those points now clamp or raise.
+
+**One divergence is kept and recorded.** At latitudes of ±88° on the turning locus this library refuses
+where 9.8.1 answers, because Java's quotient overshoots 1 by 6.4e-14 — past upstream's tolerance — and
+closing it would mean inventing a tolerance PROJ does not have.
+
+### 12. `+ellps=NWL9D` and `+ellps=andrae` were computed on a near-flat disc
+
+`Registry` re-declared both with the inverse flattening in the pole-radius slot, so the constructor
+took 298.25 literally as a pole radius in metres and derived an eccentricity of 0.999999998906693,
+against GRS80's 0.0818. **Every transform through either name was wrong**, not slightly. Both now
+reference the already-correct `Ellipsoid` constants.
+
+In the same area: `+ellps=australian` failed lookup although the constant has always existed, and
+`Ellipsoid.AUSTRALIAN` was the only one of 50 declarations passing both a pole radius and a reciprocal
+flattening as non-zero — the discarded pole radius was rounded, 19.2 mm out. Normalising it to 0.0
+leaves every derived value bit-identical.
+
+### 13. Errors, causes and refusals that changed shape
+
+| change | what it means for you |
+|---|---|
+| **`+proj=geos` behind the globe reports `COORDINATE_OUT_OF_DOMAIN`, not `NUMERICAL_FAILURE`** | a cause reclassification, not a new throw — the call already failed closed. Update any `ErrorCause` match. The message now names longitude, latitude and orbit height |
+| **`+proj=leac +south` is honoured instead of refused** | an over-refusal: `aea.cpp` reads `+south` for that entry point. `+south` stays refused on `aea` and `longlat` |
+| **`+gamma`, `+no_uoff` and `+no_off` are dispatched only to operators that read them** | one off-corpus change, toward PROJ: `+proj=merc +gamma=nonsense` was rejected and is now accepted and ignored, because PROJ ignores unread parameters silently |
+| **`+pm` on an invertible projection no longer reports "pipeline is not invertible"** | see [Conformance](#210-conformance) — this was the only genuine regression against 1.4.3 in the whole corpus |
+| **40 exceptions that said nothing now say something** | `new ProjectionException()` with no message (13), `"I"` (13), `"F"` (8), `"I_ERROR"`, `"F_ERROR"`, and three bare legacy `pj_errno` codes. Each now names the projection, the quantity that left its range, the limit and the offending value. All keep their one-argument constructor, so no `cause()` changes |
+| **Two messages named a parameter the caller could not have written** | `outsideGrid()` said `+grids=` where `+proj=deformation` writes `+xy_grids=`; `VGridShiftOperator` did the same for `+geoidgrids=` |
+| **Seven angle parsing and formatting defects** | a trailing seconds `s` read as South, so `12d34m57s` lost its seconds; 12.99999 printing as `12d60'00"`; the sign lost below one degree; `123d` parsing in one parser and throwing in the other; minutes checked `> 59` against seconds' `>= 60`; a "decimal" pattern that formatted 12.5 as `12.1800`; and a parse position set on already-truncated text. **The sign rule follows `dmstor`**: a trailing cardinal assigns the sign and a leading minus is discarded, which corrects two long-standing wrong readings — `-1d30E` was −1.5 against upstream's +1.5, `-12d34S` was +12.5667 against −12.5667. Of 323 distinct DMS values in the registries, 77 open with a minus and 56 close with a cardinal, and none does both |
+
+### 14. Deprecations, and one allocation
+
+Nothing here moves a coordinate.
+
+- `ContradictoryParameterException`, `Projection.geocentric`, `Ellipsoid.INTL` and
+  `LambertAzimuthalEqualAreaProjection`'s boolean-south constructor are **deprecated, not removed** —
+  these are exported packages and removal is a binary break. The constructor never had any effect: its
+  body was commented out, and the two parameters it would have set belong to a different projection.
+  Use `+lat_0=-90`.
+- The three base-class `+gamma` / `+no_uoff` / `+no_off` setters are deprecated for the same reason.
+- **Prefer `Units.linearUnitIds()` to the `Units.LINEAR_UNITS` array.** `LINEAR_UNITS` is a fork-only
+  public field absent from upstream 1.4.3, and a consumer that read it from a static initialiser got
+  `NoSuchFieldError` out of `<clinit>` — an `Error`, so it escaped every `catch (Exception)` on its
+  path.
+- A lookup at the end of `proj4/nad/epsg` allocated **7.9 MB**; the forward and reverse lookups now
+  share one scan.
+
+---
+
+## 2.1.0 conformance
+
+| | |
+|---|---|
+| **gie corpus** | **7,449 / 7,902 genuine passes — 94.27 %** |
+| **GIGS** | **1,170 / 1,170 — 100 %**, unchanged |
+| corpus size | **7,923 assertions**, unchanged — no assertion appeared or disappeared |
+| the rest | 451 failing · 2 skipped |
+
+For reference, master before the three changes folded in at the end measured **7,448 / 7,902 —
+94.25 %**, against 2.0.0's 7,441 / 7,900 — 94.19 %.
+
+**The denominator moved, and the reason is the interesting part.** Vacuous `expect failure` rows —
+where PROJ built the operation and rejected the coordinate while proj4j failed to build it at all, so
+both "failed" and a naive harness scores a pass — are excluded from numerator and denominator alike,
+because "both engines failed" is evidence about neither. Two of those rows became **genuine** passes
+this release, which adds to both sides at once: 7,900 → 7,902. `lcc`'s two secant-cone guards and
+`omerc`'s two two-point guards are now ported verbatim, so proj4j refuses those definitions for the
+reason PROJ refuses them rather than because it could not build them.
+
+**The brief for that work said three assertions; the honest figure is two.** `eqdc`'s guard is
+declined, with the reasoning written into the Javadoc: the tempting argument that an exactly-zero
+numerator implies a rejection is wrong, and wrong in the direction that manufactures false passes.
+
+**Eight pinned-failure rows were deleted from `gie-expected-failures.tsv`**, which makes the gate
+stricter, not looser — a key absent from that file is expected to pass.
+
+### The one genuine regression against 1.4.3, and it is fixed
+
+Across all 7,923 assertions there was exactly one place where 1.4.3 was right and 2.0.0 was wrong:
+`gie/builtins.gie:137:1`, a Krovak definition with `+pm=ferro`, which reported
+`PipelineDefinitionException: pipeline is not invertible` and scored a round-trip deviation of Infinity
+mm against an expected 11 mm.
+
+**`+pm` was never the cause.** It decides *which engine runs*, and the two engines asked different
+questions: one interrogated the class hierarchy for a declared `projectInverse`, the other read the
+hand-maintained `hasInverse()` declaration — which is wrong in both directions and was read nowhere in
+`core/src/main` before this fork. `KrovakProjection` and `NewZealandMapGridProjection` are exactly
+where the two diverge. There is now one predicate,
+`Projection.hasInverseImplementation()`, public and overridable. It was `final` earlier in this
+release and is not any more, because `+proj=ob_tran` has to forward the question to its run-time
+child and no reflection over the wrapper class can answer it. So what stops the two from drifting
+apart is not that the method cannot be overridden: it is that there is only one question, asked in
+one place, and the javadoc names the single shape of override that is allowed. **This cannot move a number**: the predicate gates a throw and appears in no
+arithmetic.
+
+### Two GIGS rows stay failing on purpose
+
+This is the one place in this release where making a test pass would be a move *away* from correct.
+
+`gigs/5206.gie.failing:454` and `gigs/5207.2.gie.failing:386` ask for 5.6e-8 m over 1,000 round trips
+and get about **5.6 m**. That 5.6 m is **PROJ's own answer**: on the same grid bytes 9.8.1 gives
+5,599.885471 mm to our 5,599.885472 mm, and both engines produce the identical coordinate.
+
+Nothing fails to converge. Within about 3e-7 degrees of `conus`'s northern edge the forward shift
+carries the point across that edge, so the inverse's grid lookup — which can only work from the
+coordinate it is handed, and that coordinate is already shifted — legitimately answers an NTv2 subgrid.
+Inverting NTv2 is not inverting NADCON, and 5.6 m is what those two national realisations disagree by
+along that parallel. **It is bounded, not divergent**: the same figure at 1 round trip and at 1,000, in
+both engines. Neither engine reports anything, because on its own terms nothing failed. The fix belongs
+upstream.
+
+---
+
+## 2.1.0 gates
+
+*Figures are from a gate run on the released tree; where one is not yet measured it says so. The last
+measured point before the three in-flight changes is master immediately before them, in the pinned
+container (Temurin 21.0.11 / aarch64).*
+
+| gate | state | figure |
+|---|---|---|
+| **ci** | **green** | **2,667 tests / 0 failures**. Master measured 2,640 tests / 0 failures, against 2.0.0's 2,320 |
+| **conformance** | **green** | **7,449 / 7,902** against a committed 7,923-key index. Master measured 7,448 / 7,902 |
+| **golden** | **live, RED on purpose** | on this branch, **2,287 UNEXPLAINED** of 53,430 rows, **49 of 49** rules pinned. Master measured 12,002 UNCHANGED · 41,428 CHANGED · 0 ADDED · 0 REMOVED · 39,141 INTENDED · 2,287 UNEXPLAINED, and 48 of 48 rules — those six figures and that rule count are master's readings, not this branch's |
+| **determinism** | **green** | 22 tests, 0 failures; master measured the same 22 and 0. The count is a floor and upward drift is a notice, not a failure |
+| **bench**, and the **allocation** figures inside it | **green** | **0 breaches**; **245 gated, 0 EXCLUDED**, 245 arms, and **245 of 245** arms carry an allocation measurement. Measured 2026-08-14 on this branch in the pinned container (Temurin 21.0.11 / aarch64) from `./docker/run.sh bench`, in **21m16s**. One advisory, and it is an improvement rather than a breach: `TransformCacheBenchmark.createTransformUncached` at **96.000 B/op** against a ratchet of 112 |
+
+**Red on golden is still the intended state**, for the reason 2.0.0 gave: the gate fails on any changed
+row that no rule claims with a named mechanism and a pinned count, so those are rows somebody must
+*explain*, not rows somebody must *undo*. It runs weekly and on demand.
+
+**The workflow files are committed but no CI run backs any figure here.** Everything above was measured
+locally.
+
+### What is now checked that was not
+
+- **The golden gate's own six headline figures are asserted rather than printed.** `UNCHANGED`,
+  `CHANGED`, `ADDED`, `REMOVED`, `INTENDED` and `UNEXPLAINED` were computed, formatted, printed and
+  discarded; they were pinned as prose in five files and checked by eye, so 41,425 `CHANGED` could have
+  become 44,000 with nothing automated noticing. A mismatch now reports `FIGURES_MOVED` with expected,
+  actual and delta side by side.
+- **Round-trip is asserted for the first time**, over 7,992 registry assertions. Golden pins values and
+  never asserts the identity, so an inverse wrong since 1.4.3 sits in that baseline reading `UNCHANGED`
+  forever.
+- **A coverage build can be run at all.** Both halves were broken and each failed while looking like
+  something else's fault: JaCoCo's synthetic field failed an all-fields-final assertion, and two
+  modules declared a literal `<argLine>` with no `@{argLine}`, so their coverage read zero with nothing
+  failing to say so — which is why the largest exercise of `core` in the repository contributed to no
+  figure anyone had looked at. Measured afterwards: core 86.2 % instruction / 73.7 % branch, against
+  84.5 % / 71.4 % at the branch point with the same plumbing and none of the new tests.
+- **`db`'s index reproducibility proof never ran.** The documented command bound to a phase that runs
+  before the plugin, so it reported `BUILD SUCCESS` in 0.541 s having regenerated nothing — vacuous in
+  the direction that reports "reproducible". `VerifyIndex` also compared eleven fields fewer than it
+  appeared to: 486,491 comparisons, now 502,422.
+- **Three verification floors had stopped being floors** and are raised against measurement:
+  `CI_MIN_TESTS` 1,700 → 2,500 in #12 and 2,500 → 2,600 on the released tree, the golden module
+  floor 40 → 55, and the bench arm floor 20 → 200. The `CI_MIN_TESTS` figure is chosen, not rounded.
+  The floor exists so that the gate still fails when the `db` module's 75 tests drop out of the
+  reactor: the released tree measures 2,667 tests and 2,592 without `db`, so 2,600 still catches it.
+  The margin that matters is 8 — what is left before a db-less run reaches the floor and the floor
+  stops catching a missing module — not the 67 between the floor and the total. The remedy at that
+  point is 2,650, which is what `docker/run.sh` and `docker/README.md` carry.
+- **205 tests across 14 new files** over paths nobody had looked at, plus the revival of the
+  repository's only skipped test. Writing them is what found six of the defects listed above.
+- **The first static-analysis pass ever run over this tree** is recorded in
+  `reference/code-review-2026-08.md`, with each instrument, the exact command that produced its output,
+  and the one instrument that could not be run.
+
+---
+
+## 2.1.0 documentation corrections
+
+Two, both of which concealed something.
+
+- **41 citations pointed at four documents that have never existed in this repository.** A dangling
+  citation was hiding a wrong figure at least once: the pure-Java rewrite of `StrictMath.sin/cos/tan`
+  was attributed to JDK 17 and landed in JDK 21, so the claim was inverted rather than imprecise, and
+  no reader could have caught it by following the link. Most citations were repointed at something
+  real; five were deleted as unverifiable.
+- **`golden.yaml` said the golden report "is gated".** It was not, and the claim had been copied into
+  two other files. All four sites now say what the four genuinely automatic checks catch and what they
+  do not — and the missing check was then written.
+
+### The 2.0.0 "pending, in flight" placeholder is withdrawn
+
+2.0.0 listed the relaxation of `ClasspathResourceResolver.isSafeName` as in flight. **It was stale on
+the day it was written**: `ResourceNames` already permits interior path segments at tag `v2.0.0`, the
+rule shipped with the fork commit, and no commit since touches the file. The entry is dropped rather
+than carried forward. **No conformance figure is quoted for it, then or now** — the roughly 100
+assertions it was said to unlock have not been measured on a quiesced tree, and the corpus files they
+need are a separate question from the guard.
+
+---
+
+## 2.1.0 upgrade guidance
+
+1. **Search your stored proj strings for `+units=` before you upgrade.** Anything that is not one of
+   the 21 ids now throws. `Units.linearUnitIds()` gives you the list to screen against. If a definition
+   said `feet` or `metres`, the coordinates you computed from it are in metres and may be wrong.
+2. **If you write `+lat_ts=0`, `+south=<value>`, `+zone=` on `tmerc`/`etmerc`, bare `+proj=leac`,
+   `+proj=wag1 +n=`, any of the seven `sconics` members, or a forward projection without `+lon_0`** —
+   your coordinates move, in some cases by hundreds of kilometres. Items 2 through 7 above give the
+   figures.
+3. **If you use `+ellps=NWL9D` or `+ellps=andrae`, everything you computed through them is wrong.**
+   Recompute it.
+4. **If you have stored coordinates from a multi-grid `+nadgrids` list near a grid boundary**, check
+   them against item 9.
+5. **If you cache `Projection` objects by equality**, `+lat_ts` presence now participates in `equals`
+   and `hashCode`. You will see cache misses, never wrong answers.
+6. **If you match on `ErrorCause`**, `+proj=geos` behind the globe is now `COORDINATE_OUT_OF_DOMAIN`.
+7. **If you parse or format DMS strings with a leading minus and a trailing cardinal**, read item 13 —
+   two readings that were wrong are now right, and the change is in the sign.
+8. **If you read `Units.LINEAR_UNITS`**, move to `Units.linearUnitIds()`.
+
+---
+
 # neoProj4J 2.0.0 release notes
 
 Released 2026-08-06 to Maven Central as `io.github.emilevictor.neoproj4j:neoproj4j:2.0.0`, forked from
@@ -280,11 +718,57 @@ plausible-looking finite number now throws.
 | **Containment tolerance**: `1e-4` → `1e-5` (`REL_TOLERANCE_HGRIDSHIFT`) | proj4j accepted and **extrapolated** 2e-5° outside `conus`'s south edge where PROJ reports a transformation error |
 | **Antimeridian extents** now handled | `us_noaa_alaska.tif` declares `west = -194°`, so its whole western half was unreachable |
 | **Inverse grid shift** declared success when only *one* ordinate had converged (`&&` where PROJ tests the squared 2-norm), and on exhaustion returned the input unchanged | now throws `ConvergenceFailureException` (`ErrorCause.NUMERICAL_FAILURE`) |
+| **Inverse grid shift gave up at the first grid**: when the iterate stepped *off* the grid the input point was found in, proj4j returned PROJ's "presumably at grid edge" first approximation even when another listed grid covered the iterate. PROJ re-runs its grid lookup for the iterate and continues in the grid it lands in (`grids.cpp:3451-3476`), which proj4j did not do | **6.05 m after 1,000 NAD27 round trips** near 50°N 130.5°W, growing from 13 mm after one, because each trip restarts from the last trip's approximation. `conus` ends at 50°N and the iterate crosses into `alaska`; PROJ 9.8.1's trace says `Switching from grid conus to grid alaska` and closes to 0.000000 mm. Now 0.000001 mm |
 | **NAD27 → NAD83 in CONUS** | **95.573 m at San Francisco.** Two independent causes, both fixed: a parser bug that destroyed the grid list on a static singleton, and the absence of the `conus` grid. The second half was a packaging question, and it is settled — `neoproj4j-epsg` ships PROJ 9.8.1's `conus` verbatim at `proj4/nad/conus`, which is one of the built-in classpath grid prefixes. |
 
 Neither NTv1 error alone, nor the pair together, moved a result far enough to look like a bug. That is
 why it survived. **If you have stored coordinates computed through an NTv1 grid, they are wrong by
 about 13 m**, and recomputing them is a data migration, not a library upgrade.
+
+**A 16 m round-trip error next to a grid boundary is PROJ's own, and we keep it.** Within about
+3e-7° of `conus`'s northern edge — the worst case we have is `-112, 49.9999997` — a NAD27 → NAD83 →
+NAD27 round trip does not come back where it started. It is out by **5.364 m** after one trip and
+settles at **16.092 m** from the third trip on. Nothing fails to converge; both directions converge,
+in *different grids*. The forward shift carries the point across `conus`'s northern edge, and the
+inverse's grid lookup — which can only work from the coordinate it is handed, already shifted —
+lands in a Canadian grid instead. Inverting NTv1 is not inverting NADCON, and the gap is what those
+two national realisations disagree by along that parallel.
+
+Given the same grids, PROJ 9.8.1 does the same thing and reaches the same numbers. Measured with
+`proj_roundtrip`'s own phasing, distances on GRS80:
+
+| round trips | proj4j | PROJ 9.8.1, same grids |
+|---|---|---|
+| n = 1 | 5364.3054 mm | 5364.3055 mm |
+| n ≥ 3 (fixed point) | 16092.0488 mm | 16092.0489 mm |
+
+That is 0.000393 mm apart after one trip and 0.001037 mm apart at the fixed point. Four things
+follow, and three of them correct what an earlier draft of this note claimed:
+
+- **Which grid answers depends on which grids you have, and the answer here is `ntv1_can.dat`.**
+  `neoproj4j-epsg` ships `conus` and `ntv1_can.dat`; `alaska` comes from the optional
+  `grids-us-legacy` module and plays no part at all — the numbers above are identical with and
+  without it on the classpath. Nothing here ships `ntv2_0.gsb`. Give PROJ its full data set, which
+  does include `ntv2_0.gsb`, and its inverse lands there instead and gives a different answer:
+  5474.4661 mm at n = 1, settling at 10948.7935 mm, which is 5.167 m from ours. That is a difference
+  in grid coverage, not in arithmetic. Give PROJ only `conus` and `alaska` and its inverse refuses
+  outright — *"Coordinate to transform falls outside grid"*.
+- **It does accumulate, for the first three trips.** 5364 → 10728 → 16092 mm, then flat. Bounded,
+  but not flat from n = 1.
+- **Neither engine reports it.** PROJ's `errno` stays 0 and it emits no trace message; proj4j raises
+  nothing either, because on its own terms nothing failed.
+- **It is not new.** Reverting only `Grid.java` to its pre-2.1.0 state and re-measuring gives
+  bit-identical figures, so the grid-switch fix in the table above neither caused this nor made it
+  worse.
+
+Two rows record it — `gigs/5206.gie.failing:454` and `gigs/5207.2.gie.failing:386`, both asking for
+5.6e-8 m over 1,000 round trips — and they stay failing. PROJ 9.8.1's own `gie` cannot build the
+operation those rows use: `+proj=pipeline +step +init=epsg:4267 +inv +step +init=epsg:4269` is
+rejected with *"Bad step definition: init=epsg:4267"*, so upstream never scores these two rows at
+all. Ours does build it, so ours scores them, and fails them. Agreeing with PROJ is this project's
+standard for correct, and on the grids we ship we do agree — to a micron — so a local change that
+made these two rows pass would be a move *away* from correct. The fix belongs in the grid lookup
+upstream, and is written up for there.
 
 **One deliberate divergence from PROJ is kept**, and it is worth distinguishing from the fail-open in §1
 above, because the distinction is exactly why one was fixed and the other was not. `Grid.shift` falls
@@ -296,25 +780,26 @@ control.
 
 ---
 
-## Conformance: 94.19 % of the gie corpus, and what the denominator excludes
+## Conformance: 94.27 % of the gie corpus, and what the denominator excludes
 
 | | |
 |---|---|
-| **gie corpus** | **7,441 / 7,900 genuine passes — 94.19 %** |
+| **gie corpus** | **7,449 / 7,902 genuine passes — 94.27 %** |
 | **GIGS** | **1,170 / 1,170 — 100 %**, all 20 files |
 | complete files | **30 of the 42** active corpus files are at 100 % |
-| the rest | 457 failing · 2 skipped · 23 vacuous · 94 excluded (out of block) |
+| the rest | 451 failing · 2 skipped · 21 vacuous · 94 excluded (out of block) |
 
 **The denominator is not the corpus size, and this is the honest part of the number.** The corpus holds
 **7,923 assertions** across 42 active files — 6,962 `expect` plus 961 `roundtrip` — counted with a port
 of gie's own lexer rather than with `grep`, because `grep '^expect'` models neither block boundaries nor
 left-trimming. From that:
 
-- **23 rows are *vacuous* `expect failure` rows and are excluded from both numerator and denominator.**
+- **21 rows are *vacuous* `expect failure` rows and are excluded from both numerator and denominator.**
   A vacuous row is one where proj4j could not construct the operation *at all*: PROJ built it and
   rejected the coordinate, proj4j failed to build it, both "failed", and a naive harness scores a pass.
   **That is failure-to-implement counting as conformance**, and it is excluded rather than banked.
-  7,923 − 23 = **7,900**, and 7,441 + 457 + 2 + 23 = 7,923 exactly.
+  7,923 − 21 = **7,902**, and 7,449 + 451 + 2 + 21 = 7,923 exactly. Measured 2026-08-14 with
+  `./docker/run.sh conformance`, from its own per-file table.
 - **2 skips are reported separately and are never passes.**
 - **94 out-of-block lines** in `DHDN_ETRS89.gie` (which closes `</gie-strict>` at line 161 of 375) are
   reported as `94 excluded (out of block)`, not as "not run".
@@ -363,26 +848,34 @@ what will be done.
 
 ## The gates: what is enforced, and what is red
 
-Five regimes now measure this work. Four of them — `ci`, `conformance`, `allocation` and `determinism` —
+Five regimes now measure this work. Four of them — `ci`, `conformance`, `bench` and `determinism` —
 gate every push and pull request and are green. The fifth, `golden`, is **red on purpose**, and since
 2026-08-05 it is no longer a push or pull-request check. Reading a red gate as a defect would be exactly
 backwards: they were all green once for the same reason a scan that cannot fail always passes.
 
-*Every figure below re-measured 2026-08-03 in the pinned container (Temurin 21.0.11 / aarch64).*
+*The `ci`, `conformance`, `golden` and `determinism` rows were re-measured 2026-08-14 on this release
+branch in the pinned container (Temurin 21.0.11 / aarch64), from one
+`./docker/run.sh ci conformance golden determinism`. The `allocation` row was measured the same day,
+on the same branch, in the same container, by a second command: `./docker/run.sh bench`, which is
+opt-in and so has to be asked for on its own. That is two commands over one branch, not one command.
+There was no separate allocation run because there is no separate allocation check — the allocation
+figures are produced inside the bench run, which took 21m16s and reported 0 breaches. The `bench` row
+is the one exception: it states the pinned ratchet baseline as it stood on 2026-08-02, not a reading
+of this run.*
 
 | gate | state | figure |
 |---|---|---|
-| **ci** | **green** | whole 7-module reactor, `BUILD SUCCESS` with javadoc, **2,320 tests / 0 failures / 4 skipped** in 223 report files (`core` 1,917 · `conformance` 345 · `db` 52 · `geoapi` 6) |
-| **conformance** | **live, CI-wired, green** | baseline pair committed — `gie-expected-failures.tsv` (482 rows) and `gie-corpus-index.tsv` (**7,923 keys**). **7,441 / 7,900**, verdict `regressed 0, unexpected passes 0, new 0, disappeared 0` against the full index |
-| **golden** | **live, RED, and no longer a push or PR check** | **12,005 UNCHANGED · 41,425 CHANGED · 0 ADDED · 0 REMOVED · 39,134 INTENDED · 2,291 UNEXPLAINED** over 53,430 rows; **44 of 44** rules pinned with `expected_rows` (this figure has read 38, 41 and 42 at various points — count `golden/rules.yaml`, do not assume) |
+| **ci** | **green** | whole 7-module reactor, `BUILD SUCCESS` with javadoc, **2,667 tests / 0 failures / 3 skipped** in 251 report files (`core` 2,234 · `conformance` 345 · `db` 75 · `geoapi` 13). Master at `2fc5989`, measured the same way, is **2,640** |
+| **conformance** | **live, CI-wired, green** | baseline pair committed — `gie-expected-failures.tsv` (474 rows) and `gie-corpus-index.tsv` (**7,923 keys**). **7,449 / 7,902**, verdict `regressed 0, unexpected passes 0, new 0, disappeared 0` against the full index. Master at `2fc5989` is **7,448 / 7,902** |
+| **golden** | **live, RED, and no longer a push or PR check** | **11,994 UNCHANGED · 41,436 CHANGED · 0 ADDED · 0 REMOVED · 39,149 INTENDED · 2,287 UNEXPLAINED** over 53,430 rows; **49 of 49** rules pinned with `expected_rows` summing to 39,149 (this figure has read 38, 41, 42, 44 and 48 at various points — count `golden/rules.yaml`, do not assume) |
 | **allocation** | **live, green** | **0 breaches**; **245 gated, 0 EXCLUDED**, 245 / 245 arms, Tier 2 green. Was `172 gated / 9 excluded / 181 arms`: `BulkTransformBenchmark` joined the gate (+64) and `crs-parse` rejoined Tier 1 (−9 exclusions) |
 | **determinism** | **runs per leg, green** | **22** tests, 0 failures, 0 skips (was 15; the count is a floor, and the workflow now reports upward drift as a notice rather than failing) |
-| **bench** | baseline captured 2026-08-02 | **171 per-benchmark ratchets, all enforced, none reported-only**; 25 rules; 8 CRS pairs × 20 operations pinned; 2 remaining `TBD`s are `targetBytesPerOp` policy cells on rules whose ratchet is a real number |
+| **bench** | baseline captured 2026-08-02 | **170 per-benchmark ratchets, all enforced, none reported-only**; 25 rules; 8 CRS pairs × 19 operations pinned; 2 remaining `TBD`s are `targetBytesPerOp` policy cells on rules whose ratchet is a real number |
 
 **Why golden being red is the intended state.** The gate exits non-zero on any `UNEXPLAINED` row: a row
 whose behaviour changed and for which no rule in `golden/rules.yaml` claims responsibility with a stated
-mechanism and a pinned row count. 2,291 rows are in that state, down from **18,168 → 3,304 → 2,291** over
-two triage passes. Every one of them is a change somebody must *explain*, not a change somebody must
+mechanism and a pinned row count. 2,287 rows are in that state, down from **18,168 → 3,304 → 2,291 → 2,287**
+as rules have landed (measured 2026-08-14 with `./docker/run.sh golden`). Every one of them is a change somebody must *explain*, not a change somebody must
 *undo*, and the largest blocks are known: the reserved `proj4-epsg.csv` re-pin, `tmerc` rows probed
 thousands of kilometres outside their own zones where both series are meaningless, and a handful of
 `cass` / `omerc` / `merc` clusters. Turning the gate green by relaxing it would discard the only
@@ -509,7 +1002,15 @@ producing something.
   `+exact +convention=position_vector` helper the `cs2cs` emulation builds. Deliberately not exposed,
   because the user-facing operator additionally carries `convention=coordinate_frame`, `transpose` and
   seven time-dependent rates — **all of which appear in the corpus** — and shipping a subset would
-  silently ignore a token PROJ acts on. Costs 3 assertions in `GDA.gie` and 1 in `4D-API_cs2cs-style.gie`.
+  silently ignore a token PROJ acts on. Costs **11 failing assertions**: 7 in `more_builtins.gie`, 3
+  in `GDA.gie`, 1 in `4D-API_cs2cs-style.gie`. It additionally makes 2 more vacuous — one in
+  `4D-API_cs2cs-style.gie` and one in
+  `more_builtins.gie` — where the row is an `expect failure` that proj4j satisfies by not building
+  the operation at all, so it scores as a pass upstream while demonstrating nothing here. Counted
+  2026-08-14 from `conformance/src/test/resources/gie-expected-failures.tsv`, whose `reason` column
+  attributes each row: `grep helmert` returns 13 rows, 11 `FAIL` and 2 `VACUOUS_EXPECTED_FAILURE`.
+  The figure previously read "3 in `GDA.gie` and 1 in `4D-API_cs2cs-style.gie`", which missed the
+  whole `more_builtins.gie` block.
 - **`gridshift` (the unified operator) and `defmodel`.** Both need the GeoTIFF grid reader wired into
   the pipeline layer; the reader itself exists (below).
 - **`+proj=deformation +grids=`** — the single-file three-channel Geodetic TIFF Grid form. The two-grid

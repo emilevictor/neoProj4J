@@ -20,12 +20,12 @@
 # catch, and a re-pin without one is how that regression gets waved through.
 #
 # The INTENDED figure is also asserted a second way, and more tightly: every rule in rules.yaml
-# carries an exact, two-sided expected_rows, and as of this pin those 48 pins sum to exactly 39141.
+# carries an exact, two-sided expected_rows, and as of this pin those 49 pins sum to exactly 39149.
 # (This line said "45 pins sum to exactly 39138" before 2026-08-13. That was exactly right when it
 # was written: `grep -c "^  - id:" golden/rules.yaml` returns 45 at the previous pin's commit,
 # 075d9c9, and the expected_rows there sum to 39138. A later commit added a 46th rule without moving
 # the sum, so the count - not the sum - went stale one commit later; at HEAD the grep returns 46 and
-# the sum is still 39138. Both figures here are 48 and 39141 as measured in this worktree. Sum the
+# the sum is still 39138. Both figures here are 49 and 39149 as measured in this worktree. Sum the
 # pins with an ANCHORED pattern - `grep -Eo '^ +expected_rows: [0-9]+$'` - because an unanchored
 # match also picks up occurrences inside comments and double-counts.)
 # A change that moves INTENDED without moving a rule's expected_rows is therefore already a
@@ -84,4 +84,98 @@
 # edit. The 19303 is read from the run's own
 # `COUNT_MISMATCH NUM-KARNEY-LATITUDE-CORE expected_rows=19308 but matched 19303` line, not computed.
 # Measured with `./docker/run.sh ci conformance golden determinism`.
-golden diff: 12002 UNCHANGED, 41428 CHANGED, 0 ADDED, 0 REMOVED; 39141 INTENDED, 2287 UNEXPLAINED (baseline 53430 rows, current 53430 rows)
+#
+# RE-PINNED 2026-08-14 by the +over prime-meridian ordering fix. UNCHANGED 12002 -> 11996, CHANGED
+# 41428 -> 41434, INTENDED 39141 -> 39147; ADDED, REMOVED and UNEXPLAINED did not move. Exactly one
+# rule moved and it moved by exactly the same 6: NUM-KARNEY-LATITUDE-CORE 19308 -> 19314. So the
+# accounting closes on itself -- 6 rows leave UNCHANGED, the same 6 arrive in CHANGED, one rule
+# claims all 6, and INTENDED gains 6 while UNEXPLAINED stays put, meaning nothing joined the
+# backlog and nothing left it.
+#
+# WHICH six is measured, not inferred. golden-report.tsv carries only CHANGED rows, so the six were
+# obtained by set-differencing this worktree's report against the report from a tree with no core
+# change at all -- the #124 worktree, which touches conformance test sources only and whose golden
+# figures are byte-identical to master's. Six keys appear and none disappears:
+#
+#     CSV proj4-epsg.csv:03408   probe 0    ix   0x1.0p-53   OK -> OK
+#     CSV proj4-epsg.csv:03409   probe 0    ix   0x1.0p-53   OK -> OK
+#     SYN mod/longlat/pm_numeric probe 1    ix   0x1.0p-49   OK -> OK
+#     SYN mod/longlat/pm_numeric probe 2    ix   0x1.0p-48   OK -> OK
+#     SYN mod/longlat/pm_numeric probe 3    ix   0x1.0p-49   OK -> OK
+#     SYN mod/longlat/pm_numeric probe 4    ix   0x1.0p-48   OK -> OK
+#
+# `ix` is the only moved dimension on all six and every magnitude is an exact power of two -- one or
+# two ULP, 1.1e-16 to 3.6e-15 degrees. That is the signature of a changed order of association and
+# not of a changed answer: the inverse now computes `adjlon(lam + lam0) + pm` where it computed
+# `adjlon((lam + pm) + lam0)`, and where `+pm` is a plain number the two sums agree to every bit but
+# the last few. No row changes status, which is why NUM-KARNEY-LATITUDE-CORE -- whose whole purpose
+# is sub-micron drift with no status change, band 1e-6 -- is the right and the only claimant.
+# `pm_numeric` probe 0 is absent from the six because it was CHANGED before this change as well.
+#
+# PROJ-FORWARD-WRAP-CANONICALISES-RECOVERED-LONGITUDE is unmoved at 10, which is the guard worth
+# stating: this change does NOT revert #99's forward wrap to buy its fix.
+# Measured in this worktree with `mvn -B -Dmaven.javadoc.skip=true -Pgolden -pl golden -am verify`,
+# and independently reproduced by `./docker/run.sh golden` in the pinned container.
+#
+# COMBINED FOR THE 2.1.0 RELEASE BRANCH, 2026-08-14, AND THE DATA LINE BELOW IS NOW MEASURED ON THIS
+# TREE. This branch carries three changes on one base: the grid inverse-shift rebase (#122), the
+# pipeline inverse-availability fix (#123) and the +over prime-meridian ordering fix (#117). Only
+# #117 was ever measured to move a golden figure, and it was measured on the pre-#23 base. The two
+# blocks above are therefore both kept: the merc `+lat_ts` block records that #23 held all six
+# figures at 12002, 41428, 0, 0, 39141 and 2287 while moving rows underneath them, and the +over
+# block records the six rows #117 moves.
+#
+# The six figures on the data line below were composed as #117's, unchanged, by arithmetic, and the
+# gate has since CONFIRMED that composition byte for byte. The composition held because the two
+# changes are row-disjoint, as the two blocks above already showed: #23 moved `REG esri:2934`,
+# `REG esri:21100` and `REG esri:25700`, all of which were already CHANGED both before and after, so
+# none of them is in the UNCHANGED pool that #117's six leave; and #117's six are two
+# `CSV proj4-epsg.csv` rows and four `SYN mod/longlat/pm_numeric` rows, none of which is an esri REG
+# key. The rules.yaml pin did NOT carry over unchanged and was recomputed there - see the note at
+# NUM-KARNEY-LATITUDE-CORE.
+#
+# One cross-check held before the gate was run, and it is the reason 19309 is written at
+# NUM-KARNEY-LATITUDE-CORE rather than #117's 19314: the 48 pins in golden/rules.yaml must sum to
+# INTENDED, and with 19309 they sum to exactly 39147. With 19314 they would sum to 39152 and
+# disagree with this line by 5 - the five esri:25700 rows #23 had already removed. That was a claim
+# of mutual consistency only, and weaker than either file being right about the tree.
+#
+# MEASURED 2026-08-14 ON THIS BRANCH, and the weaker claim is now retired. `./docker/run.sh ci
+# conformance golden determinism` prints this data line back byte-identical - 11996, 41434, 0, 0,
+# 39147, 2287 - with `48/48 rules carry a pinned expected_rows` and NO hit for any of
+# FIGURES_MOVED, COUNT_MISMATCH, DEAD_RULE, EXPIRED_RULE or PENDING_RULE_FIRED. The absence of a
+# COUNT_MISMATCH is what independently confirms the 19309 pin: the run lists
+# `NUM-KARNEY-LATITUDE-CORE: 19309` among its matched counts, so the rule matched exactly the number
+# arithmetic predicted. #122 and #123 were measured to move no golden figure by their own authors
+# and neither touches this file; this run is the first measurement of all three in combination, and
+# it moved nothing further.
+#
+# RE-PINNED 2026-08-14 BY THE SOMERC DETERMINISM FIX, +2, AND THIS ONE IS MEASURED ON A FROZEN A/B
+# RATHER THAN COMPOSED. SwissObliqueMercatorProjection's 33 transcendental sites moved off
+# java.lang.Math onto FastStrictTrig and StrictMath, because all seven of Math's
+# sin/cos/tan/log/log10/exp/pow are @IntrinsicCandidate and somerc's turning locus turns one ulp
+# into 0.1 m of easting -- which is what had `Build (JDK 21)` red on x86-64 while green on aarch64.
+#
+# THE A/B: two full golden runs from one tree differing in exactly one file, and within that file
+# in nothing but the transcendental library -- javadoc and every expression byte-identical between
+# the legs. Without the change the run prints this file's PREVIOUS data line back byte for byte,
+# 11996 / 41434 / 0 / 0 / 39147 / 2287, with no COUNT_MISMATCH. With it: 11994 / 41436 / 0 / 0 /
+# 39149 / 2287. So -2 UNCHANGED, +2 CHANGED, +2 INTENDED, and UNEXPLAINED, ADDED and REMOVED all
+# held. Both legs were run in-reactor with `-am`: `mvn -Pgolden -pl golden` ALONE resolves core from
+# the local repository instead of the worktree, and the first attempt at this A/B did exactly that
+# and reported no movement, which is the kind of clean result that means the instrument was not
+# connected.
+#
+# THE TWO ROWS, by full-line diff of the two golden-report.tsv files -- two lines appear, none
+# disappears: `SYN proj/somerc` probes 3 and 4, moving fy by ten ulp (2.3 nm on an 1,854 km
+# northing) and ix/iy by seven and three ulp. Not probe 1, which was already CHANGED, moves a
+# different dimension and is byte-identical between the legs; probes 0 and 2 do not move. They are
+# claimed by the new NUM-SOMERC-FDLIBM-TRANSCENDENTALS, pinned at 2 with the probes enumerated, and
+# ordered immediately before NUM-KARNEY-LATITUDE-CORE so that the big provisional rule keeps its
+# 19309 rather than absorbing them and reading 19311 -- which is the COUNT_MISMATCH that found them
+# in the first place.
+#
+# THE SUM CROSS-CHECK STILL HOLDS, and it is now 49 pins rather than 48: they sum to 39149, which is
+# the INTENDED on the data line below. That is the same mutual-consistency check described above and
+# it is still the weaker claim; the A/B is the measurement.
+golden diff: 11994 UNCHANGED, 41436 CHANGED, 0 ADDED, 0 REMOVED; 39149 INTENDED, 2287 UNEXPLAINED (baseline 53430 rows, current 53430 rows)

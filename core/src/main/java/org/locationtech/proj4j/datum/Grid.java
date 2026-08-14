@@ -466,8 +466,9 @@ public final class Grid implements Serializable, GridCache.Sized {
      * <p>PROJ commits to the grid {@code findGrid} selected: if interpolation inside it fails, that
      * is the answer, and the next grid in {@code +nadgrids=} is never consulted (the one exception
      * is upstream's mid-iteration {@code findGrid} in the <em>inverse</em> loop at
-     * {@code :3452-3471}, which re-selects a grid for an iterate that has wandered out — a
-     * different mechanism). proj4j instead continues its loop. That divergence was a conscious
+     * {@code :3451-3476}, which re-selects a grid for an iterate that has wandered out — a
+     * different mechanism, ported in {@link #nad_cvt} and tested by
+     * {@code InverseGridShiftGridSwitchTest}). proj4j instead continues its loop. That divergence was a conscious
      * choice, is documented in {@code packaging-and-data.md}, and is <strong>not reversed
      * here</strong>: reversing it is a separate behavioural change with its own row set, and it
      * would be wrong to smuggle it in under a fail-closed fix.
@@ -504,7 +505,7 @@ public final class Grid implements Serializable, GridCache.Sized {
             // An indexed loop, not a for-each: the enhanced for over a List allocates an Iterator
             // per call, and this method runs once per coordinate per grid-shifted datum.
             for (int i = 0, n = grids.size(); i < n; i++) {
-                int outcome = applyOne(grids.get(i), inLam, inPhi, inverse, in);
+                int outcome = applyOne(grids.get(i), inLam, inPhi, inverse, in, grids, null);
                 if (outcome == TOTAL) {
                     total = true;
                     break;
@@ -540,7 +541,7 @@ public final class Grid implements Serializable, GridCache.Sized {
      * @param in      the coordinate, in radians, modified in place
      * @throws CrsTransformException {@link ErrorCause#COORDINATE_OUTSIDE_GRID} if the list is
      *                               non-empty and no grid in it can supply a value for this point
-     * @since 1.5
+     * @since 2.0.0
      */
     public static void shift(Grid[] grids, boolean inverse, ProjCoordinate in) {
         if (grids == null || grids.length == 0) {
@@ -556,7 +557,7 @@ public final class Grid implements Serializable, GridCache.Sized {
         boolean total = false;
         try {
             for (int i = 0; i < grids.length; i++) {
-                int outcome = applyOne(grids[i], inLam, inPhi, inverse, in);
+                int outcome = applyOne(grids[i], inLam, inPhi, inverse, in, null, grids);
                 if (outcome == TOTAL) {
                     total = true;
                     break;
@@ -626,11 +627,16 @@ public final class Grid implements Serializable, GridCache.Sized {
      * <em>"contained but produced nothing"</em> and <em>"did not contain it"</em> are different
      * answers to {@link #outsideGrid} and this method must not allocate to say so.
      *
+     * @param gridList  the whole list this grid came from, when the caller holds a {@link List};
+     *                  passed through to {@link #nad_cvt} so that the inverse iteration can move to
+     *                  another grid, as {@code grids.cpp:3457} does. Exactly one of this and
+     *                  {@code gridArray} is non-null.
+     * @param gridArray the same list, when the caller holds an array
      * @param out receives the shifted coordinate when the result is {@link #SHIFTED}, and is used
      *            as scratch otherwise
      */
     private static int applyOne(Grid grid, double inLam, double inPhi, boolean inverse,
-                                ProjCoordinate out) {
+                                ProjCoordinate out, List<Grid> gridList, Grid[] gridArray) {
         if (grid.nullGrid) {
             // HorizontalShiftGridSet::gridAt returns the null grid for any point at all, and
             // pj_hgrid_apply then returns the input. It shifts nothing and covers everything,
@@ -644,6 +650,26 @@ public final class Grid implements Serializable, GridCache.Sized {
         // Skip tables that don't match our point at all
         if (!isPointInExtent(inLam, inPhi, table)) return MISS;
 
+        // Use the table of whichever grid the descent settles on. 1.4.3 kept using the
+        // *parent* table here, so a matched NTv2 subgrid was located and then ignored -- the finer
+        // child values were never applied.
+        table = descend(grid, inLam, inPhi).table;
+        if (table == null || table.cvs == null) {
+            return NO_VALUE;
+        }
+
+        nad_cvt(inLam, inPhi, inverse, table, out, gridList, gridArray);
+
+        return Double.isNaN(out.x) ? NO_VALUE : SHIFTED;
+    }
+
+    /**
+     * {@code HorizontalShiftGrid::gridAt} ({@code 9.8.1:src/grids.cpp:2785}): the subgrid descent,
+     * from a grid already known to contain the point down to the finest child that still does.
+     *
+     * @return the grid the descent settled on, which is {@code grid} itself when no child applies
+     */
+    private static Grid descend(Grid grid, double inLam, double inPhi) {
         // If we have child nodes, check to see if any of them apply
         while (grid.child != null) {
             Grid child;
@@ -658,18 +684,40 @@ public final class Grid implements Serializable, GridCache.Sized {
 
             grid = child;
         }
+        return grid;
+    }
 
-        // Use the table of whichever grid the descent above settled on. 1.4.3 kept using the
-        // *parent* table here, so a matched NTv2 subgrid was located and then ignored -- the finer
-        // child values were never applied.
-        table = grid.table;
-        if (table == null || table.cvs == null) {
-            return NO_VALUE;
+    /**
+     * {@code findGrid} ({@code 9.8.1:src/grids.cpp:3251-3262}) composed with
+     * {@code HorizontalShiftGridSet::gridAt} ({@code grids.cpp:2775-2789}): the first grid in list
+     * order whose extent contains the point, descended to its finest applicable subgrid.
+     *
+     * <p>The list arrives as exactly one of a {@link List} or an array, because
+     * {@link #shift(List, boolean, ProjCoordinate)} and {@link #shift(Grid[], boolean,
+     * ProjCoordinate)} hold it in those two shapes and neither may allocate to call this — see
+     * {@link #shift(Grid[], boolean, ProjCoordinate)} for why the array overload exists at all.
+     *
+     * <p>{@code null} is returned both when nothing contains the point and when what contains it is
+     * the null grid, which shifts nothing: {@code grids.cpp:3458} rejects
+     * {@code newGrid->isNullGrid()} for the same reason its caller cannot iterate against a grid
+     * with no values.
+     *
+     * @return the table to iterate against, or {@code null} if there is none
+     */
+    private static ConversionTable findTable(List<Grid> gridList, Grid[] gridArray,
+                                             double inLam, double inPhi) {
+        final int n = gridList != null ? gridList.size() : gridArray != null ? gridArray.length : 0;
+        for (int i = 0; i < n; i++) {
+            final Grid grid = gridList != null ? gridList.get(i) : gridArray[i];
+            if (grid.nullGrid) return null;
+            final ConversionTable table = grid.table;
+            if (table == null) continue;
+            if (!isPointInExtent(inLam, inPhi, table)) continue;
+            final ConversionTable settled = descend(grid, inLam, inPhi).table;
+            if (settled == null || settled.cvs == null) return null;
+            return settled;
         }
-
-        nad_cvt(inLam, inPhi, inverse, table, out);
-
-        return Double.isNaN(out.x) ? NO_VALUE : SHIFTED;
+        return null;
     }
 
     /**
@@ -878,12 +926,17 @@ public final class Grid implements Serializable, GridCache.Sized {
      * <p>{@code out} carries the result and doubles as scratch. It is the caller's own coordinate;
      * {@link #restoreUnlessShifted} puts it back if this returns without a value or throws.
      *
+     * @param gridList  the whole grid list, when the caller holds a {@link List}; exactly one of
+     *                  this and {@code gridArray} is non-null. Needed because the inverse iteration
+     *                  can walk off {@code table} and has to continue in another grid
+     *                  ({@code grids.cpp:3451-3476}).
+     * @param gridArray the same list, when the caller holds an array
      * @param out receives the converted coordinate in {@code x}/{@code y}; {@code x} is
      *            {@code NaN} when no value could be produced
      */
     // This method corresponds to the nad_cvt function in proj.4
     private static void nad_cvt(double inLam, double inPhi, boolean inverse, ConversionTable table,
-                                ProjCoordinate out) {
+                                ProjCoordinate out, List<Grid> gridList, Grid[] gridArray) {
         if (Double.isNaN(inLam)) {
             out.x = inLam;
             out.y = inPhi;
@@ -891,7 +944,7 @@ public final class Grid implements Serializable, GridCache.Sized {
         }
 
         double tbLam = inLam - table.ll.lam;
-        final double tbPhi = inPhi - table.ll.phi;
+        double tbPhi = inPhi - table.ll.phi;
         tbLam = ProjectionMath.normalizeLongitude(tbLam - Math.PI) + Math.PI;
         nad_intr(tbLam, tbPhi, table, out);
         double tLam = out.x;
@@ -915,10 +968,42 @@ public final class Grid implements Serializable, GridCache.Sized {
                 final double delLam = out.x;
                 final double delPhi = out.y;
                 if (Double.isNaN(delLam)) {
+                    // grids.cpp:3451-3476. "We can possibly go outside of the initial guessed grid,
+                    // so try to fetch a new grid into which iterate..." -- the iterate has stepped
+                    // off `table`, which is not the same thing as the iteration having failed. PROJ
+                    // re-runs findGrid for the current iterate and, if that lands in a *different*
+                    // grid, rebases onto it and keeps iterating against the same shared budget.
+                    // Only when there is no other grid to move to does it fall through to the
+                    // first-approximation escape hatch below.
+                    //
+                    // Skipping the rebase is not a smaller version of PROJ's behaviour, it is a
+                    // different answer: at -130.516042, 50.0002461 (`gigs/5207.2.gie.failing:414`)
+                    // conus ends at 50 deg N and the iterate crosses into alaska, where PROJ
+                    // converges to 0.000000 mm over 1,000 round trips. Returning the first
+                    // approximation there instead drifts -- 12.9 mm after one trip, 6,054 mm after
+                    // 1,000 -- because each trip restarts from the previous trip's approximation.
+                    final double lpLam = tLam + table.ll.lam;
+                    final double lpPhi = tPhi + table.ll.phi;
+                    final ConversionTable newTable = findTable(gridList, gridArray, lpLam, lpPhi);
+                    if (newTable != null && newTable != table) {
+                        table = newTable;
+                        tLam = lpLam - table.ll.lam;
+                        tPhi = lpPhi - table.ll.phi;
+                        // tb is re-derived from the *original* input against the new grid's origin,
+                        // not carried over: it is an offset from that origin (grids.cpp:3466-3472).
+                        tbLam = ProjectionMath.normalizeLongitude(
+                                inLam - table.ll.lam - Math.PI) + Math.PI;
+                        tbPhi = inPhi - table.ll.phi;
+                        // grids.cpp:3473-3474 -- so that a `continue` cannot be mistaken for
+                        // convergence on the residual left behind by the previous grid.
+                        difLam = Double.MAX_VALUE;
+                        difPhi = Double.MAX_VALUE;
+                        continue;
+                    }
                     // PROJ logs "Inverse grid shift iteration failed, presumably at grid edge.
-                    // Using first approximation." and proceeds with the current iterate. Ported
-                    // verbatim: this is a documented approximation, not a silent failure, and it is
-                    // reachable at every grid boundary.
+                    // Using first approximation." (grids.cpp:3495-3499) and proceeds with the
+                    // current iterate: a documented approximation, not a silent failure, and
+                    // reachable at every boundary that no other listed grid continues past.
                     atGridEdge = true;
                     break;
                 }

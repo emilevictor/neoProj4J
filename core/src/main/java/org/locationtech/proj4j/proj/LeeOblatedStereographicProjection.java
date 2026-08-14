@@ -26,7 +26,7 @@ import org.locationtech.proj4j.util.Complex;
  * second coefficient is genuinely complex, {@code (-0.0088162, -0.00617325)}, which is what
  * rotates the oblate lobe onto the Pacific basin.
  *
- * @since 1.5.0
+ * @since 2.0.0
  */
 public class LeeOblatedStereographicProjection extends ModifiedStereographicProjection {
 

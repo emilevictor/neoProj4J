@@ -27,7 +27,7 @@ import java.io.IOException;
  * exception <em>naming the feature</em>, never a plausible-looking coordinate. A separate type exists
  * so a caller can tell "this file needs something we do not have" from "these bytes are corrupt".
  *
- * @since 1.5
+ * @since 2.0.0
  */
 public class UnsupportedTiffException extends IOException {
 

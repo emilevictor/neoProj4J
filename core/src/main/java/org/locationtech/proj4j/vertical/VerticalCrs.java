@@ -40,10 +40,23 @@ import java.io.Serializable;
  *
  * <p>{@link #geoidGrids()} is the name PROJ emits — a GeoTIFF. {@link #legacyGeoidGrids()}
  * is the GTX name {@code proj.db}'s {@code grid_alternatives} table records as its
- * predecessor ({@code egm96_15.gtx} for {@code us_nga_egm96_15.tif}), and it is the one
- * {@link org.locationtech.proj4j.datum.VerticalGrid} can actually read, because this
- * library has no GeoTIFF reader yet. Collapsing the two into one field would have meant
- * either emitting a proj-string PROJ does not emit or naming a file we cannot open.
+ * predecessor ({@code egm96_15.gtx} for {@code us_nga_egm96_15.tif}).
+ *
+ * <p><b>This used to say the GTX name was the only one we could open. That is no longer
+ * true and has not been since the GeoTIFF reader landed:</b>
+ * {@link org.locationtech.proj4j.datum.VerticalGrid} dispatches on the {@code .gtx} suffix
+ * first and otherwise sniffs the header with {@code GeoTiffDataset.isTiff}, and reads both.
+ * Measured 2026-08-14 with {@code ./docker/run.sh ci}: 2,784 lines across
+ * {@code org.locationtech.proj4j.datum.tiff} and {@code datum/GeoTiffGrid.java}, and 68
+ * green tests — 62 in {@code datum.geotiff} plus {@code GeoTiffSelfCycleTest}'s 6.
+ *
+ * <p>The two fields stay separate for a reason that never depended on reader support:
+ * {@link #geoidGrids()} has to reproduce PROJ's export token-for-token, while
+ * {@link #readableGeoidGrids()} answers the different question of which file to open, and
+ * a user's PROJ data directory holds one name or the other, not reliably both. Collapsing
+ * them would mean emitting a proj-string PROJ does not emit. Which of the two
+ * {@link #readableGeoidGrids()} prefers is now a choice rather than a necessity; it prefers
+ * GTX, and {@code CompoundCrsTest} pins that, so changing it is a deliberate act.
  *
  * <h2>Down-positive axes are recorded but not expressible</h2>
  *
@@ -56,7 +69,7 @@ import java.io.Serializable;
  *
  * <p>Immutable and thread-safe.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 public final class VerticalCrs implements Serializable {
 
@@ -132,7 +145,8 @@ public final class VerticalCrs implements Serializable {
 
     /**
      * @return the GTX name {@code proj.db}'s {@code grid_alternatives} gives for
-     *         {@link #geoidGrids()}, which is the form this library can read, or {@code null}
+     *         {@link #geoidGrids()}, or {@code null}. Both forms are readable — see the
+     *         class javadoc — so this is the alternative name, not the only usable one.
      */
     public String legacyGeoidGrids() {
         return legacyGeoidGrids;

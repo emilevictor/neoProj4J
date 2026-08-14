@@ -22,6 +22,7 @@ package org.locationtech.proj4j.proj;
 import org.locationtech.proj4j.ProjCoordinate;
 import org.locationtech.proj4j.ProjectionException;
 import org.locationtech.proj4j.datum.Ellipsoid;
+import org.locationtech.proj4j.util.FastStrictTrig;
 import org.locationtech.proj4j.util.ProjectionMath;
 
 /**
@@ -130,15 +131,56 @@ import org.locationtech.proj4j.util.ProjectionMath;
  * ellipsoids, 65 million points, no {@code NaN} anywhere &mdash; was sampling between the
  * teeth. That sentence was true of its own measurement and false about the code.
  *
- * <p>With the clamp, 12 of those 14 latitudes return a finite coordinate. Nine of the twelve
- * eastings are bit-identical to PROJ 9.8.1's; at latitudes 43, 75 and 82 they are
- * {@code 0.0947}, {@code 0.268} and {@code 0.354} m from it, because PROJ's {@code libm} holds
- * the same quotient just below 1 where Java's puts it just above, so the clamp fires on one
- * side only. At latitude &minus;88 the Java quotient overshoots 1 by {@code 6.4e-14} and at
- * 88 by {@code 5.8e-14}, past {@link ProjectionMath#ONE_TOL}, so {@code asinChecked} raises
- * {@link org.locationtech.proj4j.ErrorCause#COORDINATE_OUT_OF_DOMAIN} &mdash; the caller was
- * already getting an exception at those two points, and now the message names the step that
- * failed. PROJ answers there, its own argument never having reached 1.
+ * <p>With the clamp, 12 of those 14 latitudes returned a finite coordinate; with the fdlibm
+ * routing described next, <b>all 14 do</b>, and <b>12 of the 14 eastings are bit-identical to
+ * PROJ 9.8.1's</b> (up from nine), with no refusals left. The two that are not are latitudes
+ * &minus;43 and 82, at {@code 0.0947} and {@code 0.1557} m &mdash; see below for why those two
+ * cannot be closed by anything this class does.
+ *
+ * <h2>Every transcendental here goes through fdlibm, because one ulp is worth 0.1 m</h2>
+ *
+ * <p>This class used to call {@link Math#sin}, {@link Math#cos}, {@link Math#tan},
+ * {@link Math#log} and {@link Math#exp} &mdash; 33 sites, the second-heaviest concentration in
+ * {@code core}. All five are {@code @IntrinsicCandidate}: HotSpot replaces them with a
+ * hand-written per-architecture routine, so their last bit depends on the CPU. Everything here
+ * now goes through {@link FastStrictTrig} ({@code sin}, {@code cos}, {@code tan}) or
+ * {@link StrictMath} ({@code log}, {@code exp}, {@code atan}), both specified to the bit.
+ * {@code Math.sqrt} and {@code Math.abs} are left alone, being exactly specified by IEEE 754.
+ *
+ * <p><b>Why it matters here specifically.</b> On the turning locus the quotient at
+ * {@code somerc.cpp:33} is 1 to within a few ulp, and {@code asin}'s derivative is unbounded
+ * there. The easting departs from the clamped value as the <em>square root</em> of the
+ * shortfall, {@code a * kR * sqrt(2d)}, so <b>one ulp of quotient is 0.0947 m of easting</b>.
+ * Every transcendental feeding that quotient therefore decides a tenth of a metre with its last
+ * bit, and a projection whose answer moves with the CPU is not one this library can ship.
+ * The symptom was a red CI job: three eastings pinned on aarch64 were different {@code double}s
+ * on x86-64, one of them by 0.51 m.
+ *
+ * <p><b>The two latitudes that used to refuse do not any more, and that was never a deliberate
+ * divergence.</b> At &minus;88 and 88 the {@link Math} quotient overshot 1 by {@code 6.4e-14}
+ * and {@code 5.8e-14}, past {@link ProjectionMath#ONE_TOL}, so {@code asinChecked} raised
+ * {@link org.locationtech.proj4j.ErrorCause#COORDINATE_OUT_OF_DOMAIN} while PROJ answered. That
+ * was recorded here, and in the test, as a divergence from the oracle to be kept. It was an
+ * artefact of the aarch64 {@code sin}/{@code cos} chain: the fdlibm quotient at those two
+ * latitudes is {@code 1 - 2.6e-14} and {@code 1 - 3.2e-14}, the clamp never fires, and both
+ * return {@code proj}'s easting to the bit.
+ *
+ * <h3>PROJ has no single answer on this locus either, so bit parity is not available</h3>
+ *
+ * <p><b>Measured, not argued.</b> {@code somerc.cpp}'s forward was transcribed to C with PROJ's
+ * own {@code DEG_TO_RAD}, compiled from one source with {@code clang -O2 -arch arm64} and
+ * {@code -arch x86_64}, and fed identical input bits &mdash; so only {@code libm} differs. The
+ * arm64 build reproduces the {@code proj} 9.8.1 binary at all fourteen latitudes, bit for bit,
+ * which is what makes it a valid stand-in; the x86-64 build disagrees with it at two of them:
+ * latitude 43 by <b>0.0947 m</b> (arm64 takes the {@code asin}, x86-64 clamps) and latitude 56
+ * by <b>0.1340 m</b> (the other way round). Twelve of fourteen agree, so the instrument is
+ * neither noisy nor vacuous.
+ *
+ * <p>So &quot;PROJ 9.8.1's answer&quot; is a number per CPU here, and the residual
+ * {@code 0.0947} m and {@code 0.1557} m at &minus;43 and 82 are the same phenomenon in the
+ * other direction &mdash; fdlibm against Apple's {@code libm}, on a quotient whose exact value
+ * is 1. <b>Determinism and bit parity with the oracle conflict on this locus, and this class
+ * chooses determinism</b>, which is also what moved it from 9 to 12 bit-exact eastings.
  *
  * <p>At {@code (89.69824704017273, 80)} the forward is now
  * {@code 9985163.185561286, 1.5496570739723718E7}, bit-identical to {@code proj}'s
@@ -157,8 +199,10 @@ import org.locationtech.proj4j.util.ProjectionMath;
  * <p>With {@code +proj=somerc +lat_0=46.9524055970347 +lon_0=0 +ellps=bessel} at
  * {@code (-8.1, -43.1)}, {@code proj} gives an easting of {@code -10019820.590799341} and this
  * class gives {@code -1.0019819438357947E7} &mdash; <b>1.1524413935840130 m apart</b>, the
- * northing agreeing to {@code 1.4e-7} m. Measured before and after the clamp, that easting is
- * the same {@code double} both times: the argument of the {@code asin} there is comfortably
+ * northing agreeing to {@code 1.4e-7} m. Measured before and after the clamp <b>and before and
+ * after the fdlibm routing</b>, that easting is the same {@code double} every time: this is not
+ * a case where the platform {@code libm} and fdlibm differ, only one where PROJ and Java do.
+ * The argument of the {@code asin} there is comfortably
  * inside the domain, so no clamp fires on either side. The gap is Java's transcendental
  * functions against the platform {@code libm}'s, amplified because {@code asin}'s derivative
  * grows without bound as its argument approaches 1. It is real, bounded, and confined to a set
@@ -191,20 +235,20 @@ public class SwissObliqueMercatorProjection extends Projection {
     phi0 = projectionLatitude;
     
 	  hlf_e = 0.5 * e;
-	  cp = Math.cos(phi0);
+	  cp = FastStrictTrig.cos(phi0);
 	  cp *= cp;
 	  c = Math.sqrt(1 + es * cp * cp * rone_es);
-	  sp = Math.sin(phi0);
+	  sp = FastStrictTrig.sin(phi0);
 	  // asinChecked, which is upstream's aasin (somerc.cpp:84). It cannot change the answer here:
 	  // sp is sin(lat_0) and c is sqrt(1 + es*cos^4(lat_0)/(1-es)), which is at least 1, so
 	  // |sp / c| <= 1. At lat_0 = 90 exactly the quotient is 1.0, where asinChecked clamps to
 	  // HALFPI and Math.asin(1.0) returns HALFPI too. Measured at lat_0 = -90, -46.95, 0, 46.95
 	  // and 90: identical bits from both, and identical K, kR, cosp0 and sinp0.
-	  cosp0 = Math.cos( phip0 = ProjectionMath.asinChecked(sinp0 = sp / c) );
+	  cosp0 = FastStrictTrig.cos( phip0 = ProjectionMath.asinChecked(sinp0 = sp / c) );
 	  sp *= e;
-	  K = Math.log(Math.tan(ProjectionMath.FORTPI + 0.5 * phip0)) - c * (
-	      Math.log(Math.tan(ProjectionMath.FORTPI + 0.5 * phi0)) - hlf_e *
-	      Math.log((1. + sp) / (1. - sp)));
+	  K = StrictMath.log(FastStrictTrig.tan(ProjectionMath.FORTPI + 0.5 * phip0)) - c * (
+	      StrictMath.log(FastStrictTrig.tan(ProjectionMath.FORTPI + 0.5 * phi0)) - hlf_e *
+	      StrictMath.log((1. + sp) / (1. - sp)));
 	  kR = scaleFactor * Math.sqrt(one_es) / (1. - sp * sp);
 	}
 
@@ -225,23 +269,23 @@ public class SwissObliqueMercatorProjection extends Projection {
 	public ProjCoordinate project(double lplam, double lpphi, ProjCoordinate xy) {
 	  double phip, lamp, phipp, lampp, sp, cp;
 
-	  sp = e * Math.sin(lpphi);
-	  phip = 2.* Math.atan( Math.exp( c * (
-	      Math.log(Math.tan(ProjectionMath.FORTPI + 0.5 * lpphi)) - hlf_e * Math.log((1. + sp)/(1. - sp)))
+	  sp = e * FastStrictTrig.sin(lpphi);
+	  phip = 2.* StrictMath.atan( StrictMath.exp( c * (
+	      StrictMath.log(FastStrictTrig.tan(ProjectionMath.FORTPI + 0.5 * lpphi)) - hlf_e * StrictMath.log((1. + sp)/(1. - sp)))
 	    + K)) - ProjectionMath.HALFPI;
 	  lamp = c * lplam;
-	  cp = Math.cos(phip);
+	  cp = FastStrictTrig.cos(phip);
 	  // asinChecked is upstream's aasin (9.8.1:src/aasincos.cpp:11-21): return Math.asin(v)
 	  // for |v| < 1, clamp to +/-HALFPI for 1 <= |v| <= ONE_TOL, raise beyond that. somerc.cpp
 	  // calls it on both of these lines, :32 and :33.
-	  phipp = ProjectionMath.asinChecked(cosp0 * Math.sin(phip) - sinp0 * cp * Math.cos(lamp));
+	  phipp = ProjectionMath.asinChecked(cosp0 * FastStrictTrig.sin(phip) - sinp0 * cp * FastStrictTrig.cos(lamp));
 	  // This is the argument that overshoots. cos(phipp) is a rounded sqrt(1 - a*a) for the a
 	  // computed on the line above, so the quotient reaches 1 + 1 ULP on the turning locus, where
 	  // a bare Math.asin answers NaN. See the class comment for the band of NaN eastings that
 	  // produced.
-	  lampp = ProjectionMath.asinChecked(cp * Math.sin(lamp) / Math.cos(phipp));
+	  lampp = ProjectionMath.asinChecked(cp * FastStrictTrig.sin(lamp) / FastStrictTrig.cos(phipp));
 	  xy.x = kR * lampp;
-	  xy.y = kR * Math.log(Math.tan(ProjectionMath.FORTPI + 0.5 * phipp));
+	  xy.y = kR * StrictMath.log(FastStrictTrig.tan(ProjectionMath.FORTPI + 0.5 * phipp));
 	  return xy;
 	}
 
@@ -250,19 +294,19 @@ public class SwissObliqueMercatorProjection extends Projection {
 	  int i;
 	  double lplam, lpphi;
 
-	  phipp = 2. * (Math.atan(Math.exp(xyy / kR)) - ProjectionMath.FORTPI);
+	  phipp = 2. * (StrictMath.atan(StrictMath.exp(xyy / kR)) - ProjectionMath.FORTPI);
 	  lampp = xyx / kR;
-	  cp = Math.cos(phipp);
+	  cp = FastStrictTrig.cos(phipp);
 	  // The forward's two lines seen from the other side, and upstream calls aasin on both of
 	  // these too, :48 and :49. The second is the one that overshoots.
-	  phip = ProjectionMath.asinChecked(cosp0 * Math.sin(phipp) + sinp0 * cp * Math.cos(lampp));
-	  lamp = ProjectionMath.asinChecked(cp * Math.sin(lampp) / Math.cos(phip));
-	  con = (K - Math.log(Math.tan(ProjectionMath.FORTPI + 0.5 * phip)))/c;
+	  phip = ProjectionMath.asinChecked(cosp0 * FastStrictTrig.sin(phipp) + sinp0 * cp * FastStrictTrig.cos(lampp));
+	  lamp = ProjectionMath.asinChecked(cp * FastStrictTrig.sin(lampp) / FastStrictTrig.cos(phip));
+	  con = (K - StrictMath.log(FastStrictTrig.tan(ProjectionMath.FORTPI + 0.5 * phip)))/c;
 	  for (i = NITER; i != 0 ; --i) {
-	    esp = e * Math.sin(phip);
-	    delp = (con + Math.log(Math.tan(ProjectionMath.FORTPI + 0.5 * phip)) - hlf_e *
-	        Math.log((1. + esp)/(1. - esp)) ) *
-	      (1. - esp * esp) * Math.cos(phip) * rone_es;
+	    esp = e * FastStrictTrig.sin(phip);
+	    delp = (con + StrictMath.log(FastStrictTrig.tan(ProjectionMath.FORTPI + 0.5 * phip)) - hlf_e *
+	        StrictMath.log((1. + esp)/(1. - esp)) ) *
+	      (1. - esp * esp) * FastStrictTrig.cos(phip) * rone_es;
 	    phip -= delp;
 	    if (Math.abs(delp) < ProjectionMath.EPS10)
 	      break;

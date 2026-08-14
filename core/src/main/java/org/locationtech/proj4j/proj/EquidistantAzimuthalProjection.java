@@ -123,7 +123,7 @@ public class EquidistantAzimuthalProjection extends AzimuthalProjection {
 	 * {@link #M1} instead of {@code Mp}/{@code N1}/{@code G}/{@code He}.
 	 *
 	 * @param guam whether to use the Guam formulation
-	 * @since 1.5.0
+	 * @since 2.0.0
 	 */
 	public void setGuam(boolean guam) {
 		this.guam = guam;
@@ -131,7 +131,7 @@ public class EquidistantAzimuthalProjection extends AzimuthalProjection {
 
 	/**
 	 * @return whether {@code +guam} is in force
-	 * @since 1.5.0
+	 * @since 2.0.0
 	 */
 	public boolean isGuam() {
 		return guam;

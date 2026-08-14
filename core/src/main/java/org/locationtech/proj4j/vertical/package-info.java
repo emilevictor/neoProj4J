@@ -61,6 +61,6 @@
  * {@code +proj=push +v_3} / {@code +proj=pop +v_3} around the geocentric leg, which restores
  * the caller's third ordinate byte for byte.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 package org.locationtech.proj4j.vertical;

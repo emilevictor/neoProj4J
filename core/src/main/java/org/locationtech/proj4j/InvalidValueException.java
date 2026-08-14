@@ -59,7 +59,7 @@ public class InvalidValueException extends CrsCreationException {
 	 *
 	 * @param cause   a refinement of {@link ErrorCause#INVALID_PARAM_VALUE}
 	 * @param message the human-readable detail message
-	 * @since 1.5.0
+	 * @since 2.0.0
 	 */
 	public InvalidValueException(ErrorCause cause, String message) {
 		super(cause, message);
@@ -72,7 +72,7 @@ public class InvalidValueException extends CrsCreationException {
 	 * @param cause     a refinement of {@link ErrorCause#INVALID_PARAM_VALUE}
 	 * @param message   the human-readable detail message
 	 * @param throwable the underlying throwable, or null
-	 * @since 1.5.0
+	 * @since 2.0.0
 	 */
 	public InvalidValueException(ErrorCause cause, String message, Throwable throwable) {
 		super(cause, message, throwable);

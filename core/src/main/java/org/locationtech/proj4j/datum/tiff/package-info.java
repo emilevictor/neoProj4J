@@ -56,6 +56,6 @@
  * so two threads parsing the same grid produce bit-identical results and
  * {@code org.locationtech.proj4j.datum.GridCache} may keep either.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 package org.locationtech.proj4j.datum.tiff;
