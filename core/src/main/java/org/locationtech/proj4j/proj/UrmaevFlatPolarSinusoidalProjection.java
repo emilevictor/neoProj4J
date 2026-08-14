@@ -33,7 +33,15 @@ public class UrmaevFlatPolarSinusoidalProjection extends Projection {
 	private final static double C_x = 0.8773826753;
 	private final static double Cy = 1.139753528477;
 
-	private double n = 0.8660254037844386467637231707;// wag1
+	/**
+	 * The shape parameter. This is not urmfps's default: urmfps has none, and
+	 * {@code Proj4Parser} refuses {@code +proj=urmfps} without {@code +n}, as
+	 * {@code urmfps.cpp:56-59} does. It is wag1's hard-coded value, sqrt(3)/2, which
+	 * {@code urmfps.cpp:78-79} assigns without reading any keyword. Wagner1Projection reuses this
+	 * kernel by extending this class, so this is where its value has to sit; that inheritance is
+	 * also why the parser's {@code +n} dispatch is guarded by operator name.
+	 */
+	private double n = 0.8660254037844386467637231707;
 	private double C_y;
 
 	public UrmaevFlatPolarSinusoidalProjection() {

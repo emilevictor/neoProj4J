@@ -60,13 +60,13 @@ import org.locationtech.proj4j.proj.Projection;
  * <p>122 of the 151 instantiable registry names report {@code hasInverse() == true}. Each is built
  * with the corpus tests' idiom — {@code new CRSFactory().createFromParameters(name, def)}, as
  * {@code proj.tierA.TierADomainAndParserGapTest} and {@code proj.tierB.TierBCorpus} do — from
- * {@code +proj=<name> +ellps=GRS80} plus, for the eighteen operators that <em>require</em> extra
+ * {@code +proj=<name> +ellps=GRS80} plus, for the twenty operators that <em>require</em> extra
  * parameters, the minimum that makes {@code initialize()} succeed (see {@link #REQUIRED}).
  *
  * <p>Each is probed at {@link #POINTS}: an 8&nbsp;&times;&nbsp;7 lon/lat grid plus twelve awkward
  * cases (both signed antimeridians, both poles, both near-poles, small offsets from the origin, the
- * two tropics). <b>68 points &times; 122 projections = 8,296 probes</b>; 303 are refused by the
- * forward and skipped, leaving <b>7,993 round-trip assertions</b>. The whole class runs in well
+ * two tropics). <b>68 points &times; 122 projections = 8,296 probes</b>; 304 are refused by the
+ * forward and skipped, leaving <b>7,992 round-trip assertions</b>. The whole class runs in well
  * under a second.
  *
  * <p>A point the forward <em>refuses</em> — by throwing, or by returning a non-finite ordinate — is
@@ -103,7 +103,7 @@ import org.locationtech.proj4j.proj.Projection;
  *
  * <h2>The anti-rot mechanism</h2>
  *
- * <p>30 of the 122 fail. They are pinned in {@link #PINNED} with the error actually measured, and
+ * <p>29 of the 122 fail. They are pinned in {@link #PINNED} with the error actually measured, and
  * the test asserts the failing set <em>equals</em> that table:
  *
  * <ul>
@@ -183,7 +183,7 @@ public class RegistryRoundTripAuditTest {
     // ------------------------------------------------------------------- required parameters
 
     /**
-     * The eighteen operators that cannot be built from {@code +proj=<name> +ellps=GRS80} alone,
+     * The twenty operators that cannot be built from {@code +proj=<name> +ellps=GRS80} alone,
      * with the minimum that makes {@code initialize()} succeed. Every one of these is asserted to
      * be <em>necessary</em> by {@link #requiredParametersAreStillRequired()}, so this cannot become
      * a place to hide a fix.
@@ -195,6 +195,9 @@ public class RegistryRoundTripAuditTest {
             {"bonne", "+lat_1=45"},
             {"ccon", "+lat_1=45"},
             {"euler", "+lat_1=30 +lat_2=60"},
+            // Nominal geostationary height. geos has no default: an absent +h is 0 here as it is
+            // upstream, and 0 fails geos.cpp:226-230's h/a > 0 test.
+            {"geos", "+h=35785831"},
             {"gn_sinu", "+m=1 +n=2"},
             {"imw_p", "+lat_1=30 +lat_2=60"},
             {"labrd", "+lat_0=-19"},
@@ -209,6 +212,9 @@ public class RegistryRoundTripAuditTest {
             {"tissot", "+lat_1=30 +lat_2=60"},
             {"tpeqd", "+lat_1=30 +lon_1=-10 +lat_2=40 +lon_2=10"},
             {"tpers", "+h=500000"},
+            // urmfps.cpp:56-59 tests +n for presence. wag1 is the same kernel with n hard-coded,
+            // so it needs nothing and is deliberately absent from this list.
+            {"urmfps", "+n=0.5"},
             {"vitk1", "+lat_1=30 +lat_2=60"},
     };
 
@@ -230,7 +236,7 @@ public class RegistryRoundTripAuditTest {
     private static final double REFUSED = Double.POSITIVE_INFINITY;
 
     /**
-     * The 30 projections whose inverse does not undo their forward on this ladder, each with the
+     * The 29 projections whose inverse does not undo their forward on this ladder, each with the
      * worst error measured, in degrees. {@link #REFUSED} means the inverse threw or answered
      * {@code NaN} on a point the forward had accepted.
      *

@@ -168,6 +168,58 @@ class ProjOperatorSetupTest {
             reject("proj=tpers R=1 h=0", "tpers shares nsper_setup"),
             accept("proj=tpers R=1 h=10", "ordinary"),
 
+            // ---- geos: the same h/a model, plus a +sweep value set
+            reject("proj=geos R=1 h=0", "corpus row builtins.gie:2183"),
+            reject("proj=geos R=1", "+h defaults to 0, with no presence test"),
+            reject("proj=geos R=1 h=-5", "negative height"),
+            reject("proj=geos R=1 h=1e11", "corpus row builtins.gie:2188 - h/a > 1e10"),
+            accept("proj=geos R=1 h=1e10", "exactly at the upper bound"),
+            accept("proj=geos R=1 h=10", "ordinary"),
+            accept("proj=geos ellps=GRS80 h=35785831",
+                    "corpus row builtins.gie:2137 - the nominal geostationary height"),
+            reject("proj=geos R=1 h=10 sweep=z", "sweep must be x or y"),
+            reject("proj=geos R=1 h=10 sweep=xy", "one character only"),
+            reject("proj=geos R=1 h=10 sweep=", "an empty value is not 'x' or 'y' either"),
+            accept("proj=geos R=1 h=10 sweep=x", "legal, though proj4j ignores it"),
+            accept("proj=geos R=1 h=10 sweep=y", "the upstream default, written out"),
+
+            // ---- urmfps / wag1: the same kernel, only one of which reads +n
+            reject("proj=urmfps a=6400000", "+n is required"),
+            reject("proj=urmfps a=6400000 n=0", "n must be in ]0,1]"),
+            reject("proj=urmfps a=6400000 n=-0.5", "nor negative"),
+            reject("proj=urmfps a=6400000 n=1.5", "nor above 1"),
+            accept("proj=urmfps a=6400000 n=0.5", "corpus row builtins.gie:7712"),
+            accept("proj=urmfps a=6400000 n=1", "exactly at the upper bound"),
+            accept("proj=wag1 a=6400000", "corpus row builtins.gie:7977 - n is hard-coded"),
+            accept("proj=wag1 a=6400000 n=0", "wag1 never reads the key, so no range applies"),
+            accept("proj=wag1 a=6400000 n=-1", "same"),
+
+            // ---- gn_sinu: two presence tests before either value test
+            reject("proj=gn_sinu a=6400000", "+n named first"),
+            reject("proj=gn_sinu a=6400000 m=1", "still the missing n"),
+            reject("proj=gn_sinu a=6400000 n=1", "then the missing m"),
+            reject("proj=gn_sinu a=6400000 n=0 m=1", "n must be > 0"),
+            reject("proj=gn_sinu a=6400000 n=-1 m=1", "same"),
+            reject("proj=gn_sinu a=6400000 n=1 m=-1", "m must be >= 0"),
+            accept("proj=gn_sinu a=6400000 n=1 m=0", "m=0 is legal, which is why the "
+                    + "presence test cannot be a value test"),
+            accept("proj=gn_sinu a=6400000 m=1 n=2", "corpus row builtins.gie:2220"),
+
+            // ---- imw_p: two presence tests the two value tests do not subsume
+            reject("proj=imw_p ellps=GRS80", "lat_1 named first"),
+            reject("proj=imw_p ellps=GRS80 lat_2=30", "still the missing lat_1"),
+            reject("proj=imw_p ellps=GRS80 lat_1=30", "then the missing lat_2 - the case "
+                    + "the |lat_1 - lat_2| test cannot see"),
+            reject("proj=imw_p ellps=GRS80 lat_1=30 lat_2=30", "|lat_1 - lat_2| == 0"),
+            reject("proj=imw_p ellps=GRS80 lat_1=30 lat_2=-30", "|lat_1 + lat_2| == 0"),
+            reject("proj=imw_p ellps=GRS80 lat_1=0 lat_2=0", "both, written out"),
+            reject("proj=imw_p ellps=GRS80 lat_1=0.5 lat_2=0.5000000001",
+                    "1e-10 degrees apart is under EPS on the half difference"),
+            accept("proj=imw_p ellps=GRS80 lat_1=0 lat_2=10",
+                    "corpus row builtins.gie:3108 - an explicit 0 selects PHI_1_IS_ZERO"),
+            accept("proj=imw_p ellps=GRS80 lat_1=10 lat_2=0", "and PHI_2_IS_ZERO"),
+            accept("proj=imw_p ellps=GRS80 lat_1=0.5 lat_2=2", "corpus row builtins.gie:3085"),
+
             // ---- urm5 / s2 / isea
             reject("proj=urm5 a=6400000", "+n is required"),
             reject("proj=urm5 a=6400000 n=0", "n must be in ]0,1]"),

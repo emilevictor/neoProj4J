@@ -35,24 +35,33 @@ import org.locationtech.proj4j.util.ProjectionMath;
  *
  * <h2>Setup rejections</h2>
  *
- * <p>{@code phi12} ({@code imw_p.cpp:31-57}) reports four errors, but only two shapes reach the
- * arithmetic: {@code |lat_2 - lat_1| / 2 < 1e-10} and {@code |lat_2 + lat_1| / 2 < 1e-10}. Its
- * other two are {@code +lat_1} and {@code +lat_2} <em>absence</em> tests, and this class does not
- * need them: {@link Projection#projectionLatitude1} and {@link Projection#projectionLatitude2}
- * both default to 0, so an absent pair gives {@code del == sig == 0} and trips the first check
- * anyway. The corpus's second block spells {@code +lat_1=0} explicitly, which is legal and
- * selects {@code PHI_1_IS_ZERO}, so absence and zero must <em>not</em> be conflated in the mode
- * selection &mdash; and upstream decides the mode on the value, never on presence.
+ * <p>{@code phi12} ({@code imw_p.cpp:31-57}) reports four errors. Two are value tests and belong
+ * here: {@code |lat_2 - lat_1| / 2 < 1e-10} and {@code |lat_2 + lat_1| / 2 < 1e-10}. The other two
+ * are {@code +lat_1} and {@code +lat_2} <em>absence</em> tests ({@code imw_p.cpp:36-41}) and they
+ * live in {@code Proj4Parser}, because a {@code Projection} cannot see absence:
+ * {@link Projection#projectionLatitude1} and {@link Projection#projectionLatitude2} both hold 0
+ * whether the keyword was omitted or written as 0.
+ *
+ * <p>This class used to claim the two value tests made the absence tests unnecessary, on the
+ * grounds that an absent pair gives {@code del == sig == 0} and trips the first check. That is true
+ * of an absent <em>pair</em> and false of exactly one absent parallel, which is the case that
+ * mattered: {@code +proj=imw_p +ellps=GRS80 +lat_1=30} left {@code lat_2} at 0, passed both value
+ * tests with {@code del = sig = 15}&deg;, and answered a question nobody asked, while PROJ says
+ * "Missing parameter: lat_2 should be specified".
+ *
+ * <p>Absence and zero must not be conflated in the other direction either. The corpus's second
+ * block spells {@code +lat_1=0} explicitly, which is legal and selects {@code PHI_1_IS_ZERO}
+ * ({@code imw_p.cpp:207}); upstream decides the mode on the value, never on presence.
  *
  * <h2>{@code +lon_1} is a presence test, and its default is latitude-dependent</h2>
  *
  * <p>Absent {@code +lon_1}, upstream picks 2&deg;, 4&deg; or 8&deg; according to whether
  * {@code |(lat_1 + lat_2)/2|} is at most 60&deg;, at most 76&deg;, or more &mdash; the IMW
  * sheet widths. Because 0 is a legal {@code +lon_1}, presence cannot be recovered from the value,
- * so {@link #lon1} is {@code NaN} until {@link #setLon1(double)} is called. As with
- * {@link TwoPointEquidistantProjection}, {@code Proj4Parser} currently routes {@code +lon_1} to
- * {@link ObliqueMercatorProjection} alone, so the latitude-dependent default is what every
- * definition gets today &mdash; which is also what both corpus blocks exercise.
+ * so {@link #lon1} is {@code NaN} until {@link #setLon1(double)} is called.
+ * {@code Proj4Parser} assigns it from {@code +lon_1} when the keyword is present and leaves the
+ * {@code NaN} otherwise, so the latitude-dependent default is what a definition without
+ * {@code +lon_1} gets &mdash; which is what both corpus blocks exercise.
  *
  * <h2>{@code loc_for}'s {@code yc} out-parameter is loop-carried</h2>
  *

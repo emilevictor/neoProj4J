@@ -18,6 +18,7 @@ package org.locationtech.proj4j.proj;
 import java.util.Objects;
 
 import org.locationtech.proj4j.ErrorCause;
+import org.locationtech.proj4j.InvalidValueException;
 import org.locationtech.proj4j.ProjCoordinate;
 import org.locationtech.proj4j.ProjectionException;
 import org.locationtech.proj4j.util.ProjectionMath;
@@ -45,10 +46,15 @@ import org.locationtech.proj4j.util.ProjectionMath;
  * <p>Two parameters matter beyond the usual {@code +lon_0} and ellipsoid:
  * <ul>
  * <li><b>{@code +h}</b>, the height of the orbit in metres, reaching {@link #setHeightOfOrbit}.
- *     Upstream has no default and rejects a definition that omits it; this class defaults
- *     {@link #heightOfOrbit} to 35785831 m, the nominal geostationary height, and
- *     {@code Proj4Parser} assigns the keyword only when it is present, so that field value is the
- *     effective default for a bare {@code +proj=geos}.</li>
+ *     There is no default, because upstream has none. This class used to hold 35785831 m, the
+ *     nominal geostationary height, and since {@code Proj4Parser} assigns the keyword only when it
+ *     is present, that number was the effective default for a bare {@code +proj=geos}: we answered
+ *     where PROJ refuses, and answered as though the caller had asked for a satellite they never
+ *     mentioned. It is now 0, which {@link #initialize()} rejects, matching
+ *     {@code geos.cpp:206,226-230} — upstream reads {@code "dh"} with no presence test, so an
+ *     omitted {@code +h} and an explicit {@code +h=0} are the same input there and are refused by
+ *     the same value test. That is why this is a default and a range check rather than a presence
+ *     test in the parser.</li>
  * <li><b>{@code +sweep}</b>, which chooses whether the scan angles are taken about the x or the y
  *     axis. It is <em>not</em> implemented here. Upstream defaults it to {@code y} and flips the
  *     two angles when it is {@code x}; this class always behaves as {@code +sweep=y}, which is the
@@ -62,9 +68,10 @@ public class GeostationarySatelliteProjection extends Projection {
     private static final long serialVersionUID = 7598288678901692538L;
 
     /**
-     * Height of orbit - Geostationary satellite projection
+     * Height of orbit, in metres, above the point where {@code +lon_0} crosses the equator. No
+     * default: 0 is upstream's value for an absent {@code +h} and {@link #initialize()} refuses it.
      */
-    protected double heightOfOrbit = 35785831.0;
+    protected double heightOfOrbit = 0.0;
 
     private double _radiusP;
     private double _radiusP2;
@@ -74,17 +81,36 @@ public class GeostationarySatelliteProjection extends Projection {
     private double _c;
 
     /**
-     * Constructor
+     * Constructor. Deliberately does not call {@link #initialize()}, as
+     * {@link LambertConformalConicProjection} also does not: with no default orbit height,
+     * initialising here would throw before {@code Proj4Parser} had a chance to assign {@code +h}.
+     * {@code Proj4Parser} calls {@code initialize()} itself once every parameter is in place.
      */
     public GeostationarySatelliteProjection() {
         name = "Geostationary";
-        initialize();
     }
 
+    /**
+     * @throws org.locationtech.proj4j.InvalidValueException if {@code +h} is absent, zero, negative
+     *         or more than 1e10 times the semi-major axis
+     */
     @Override
     public void initialize() {
         super.initialize();
         _radiusG = 1 + (_radiusG1 = heightOfOrbit / a);
+        /*
+         * geos.cpp:226-230, on the same quantity: radius_g_1 is h/a, so the test is scale-free and
+         * catches an absent +h, a zero one and a negative one together. Upstream's errno is
+         * PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE, not MISSING_ARG, even for the absent case, because
+         * upstream cannot tell the two apart either -- it reads "dh" with no presence test.
+         */
+        if (_radiusG1 <= 0 || _radiusG1 > 1e10) {
+            throw new InvalidValueException(ErrorCause.INVALID_PARAM_VALUE,
+                    "Invalid value for h: +proj=geos needs an orbit height in metres, greater"
+                            + " than 0 and at most 1e10 times the semi-major axis; got "
+                            + heightOfOrbit + " m over a = " + a + " m. An omitted +h is 0 here,"
+                            + " as it is upstream (geos.cpp:206,226-230)");
+        }
         _c = _radiusG * _radiusG - 1.0;
         if (!this.spherical) {
             _radiusP = Math.sqrt(one_es);

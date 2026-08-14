@@ -753,8 +753,53 @@ public class Proj4Parser {
          * there: the class holds NaN for "absent" and derives lam_1 from the latitude
          * instead, so this must stay a `!= null` guard and must never be given a 0
          * default.
+         *
+         * The two parallels are the opposite case and have to be tested here, for the
+         * same reason as sconics above. imw_p.cpp:36-41 tests PRESENCE of lat_1 and then
+         * of lat_2, before reading either value. initialize()'s |lat_1 - lat_2| and
+         * |lat_1 + lat_2| tests catch BOTH being absent, because then both differences
+         * are zero, but they cannot catch exactly one: +proj=imw_p +ellps=GRS80
+         * +lat_1=30 leaves lat_2 at 0, passes both tests, and answers as though
+         * +lat_2=0 had been typed. PROJ refuses it with "Missing parameter: lat_2 should
+         * be specified". An explicit +lat_1=0 or +lat_2=0 is legal upstream -- it even
+         * selects a separate code path, PHI_1_IS_ZERO at imw_p.cpp:207 -- so this
+         * cannot be a test on the value 0.
+         *
+         * The cause is INVALID_PARAM_VALUE and not MISSING_PARAM because upstream sets
+         * PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE for these two, not
+         * PROJ_ERR_INVALID_OP_MISSING_ARG (imw_p.cpp:38, :41).
+         *
+         * Upstream draws NO distinction between imw_p and sconics here, so do not read
+         * this choice as one. sconics.cpp:49 and :52 set the same ILLEGAL_ARG_VALUE, and
+         * the 9.8.1 CLI reports "Error 1027 (Invalid value for an argument)" for a missing
+         * parallel on imw_p and on all seven sconics members -- euler, murd1, murd2,
+         * murd3, pconic, tissot, vitk1. This imw_p throw therefore matches upstream's
+         * cause; the sconics presence check at :234 and :241 above raises MISSING_PARAM,
+         * i.e. PROJ's 1026, and does NOT. That mismatch is pre-existing and is left alone
+         * here rather than fixed in passing.
+         *
+         * Nothing observable turns on it: no coordinate is affected, the only ErrorCause
+         * the conformance bridge branches on is MISSING_GRID
+         * (Proj4jGieOperationFactory.java:393), the golden gate reads none, and no test
+         * pins a cause for either family -- they assert the exception type and that the
+         * message names the missing parameter. Correcting sconics is a separate change.
          */
         if (projection instanceof InternationalMapOfTheWorldPolyconicProjection) {
+            if (params.get(Proj4Keyword.lat_1) == null) {
+                throw new InvalidValueException(ErrorCause.INVALID_PARAM_VALUE,
+                        "Missing parameter: lat_1 should be specified. +proj="
+                                + params.get(Proj4Keyword.proj) + " needs both +lat_1 and"
+                                + " +lat_2; an omitted standard parallel is not the same as one"
+                                + " given as 0 (imw_p.cpp:36-41)");
+            }
+            if (params.get(Proj4Keyword.lat_2) == null) {
+                throw new InvalidValueException(ErrorCause.INVALID_PARAM_VALUE,
+                        "Missing parameter: lat_2 should be specified. +proj="
+                                + params.get(Proj4Keyword.proj) + " needs both +lat_1 and"
+                                + " +lat_2; an omitted standard parallel is not the same as one"
+                                + " given as 0 (imw_p.cpp:36-41)");
+            }
+
             s = params.get(Proj4Keyword.lon_1);
             if (s != null)
                 ((InternationalMapOfTheWorldPolyconicProjection) projection)
@@ -762,15 +807,33 @@ public class Proj4Parser {
         }
 
         /*
-         * +n reaches urmfps (urmfps.cpp:56-66), urm5 (urm5.cpp:36-47) and gn_sinu
-         * (gn_sinu.cpp:180-198), and +m reaches gn_sinu alone. Dispatched on the
-         * concrete class rather than through Projection because "n" and "m" are the two
-         * most heavily overloaded letters in PROJ: each is a shape parameter of a dozen
-         * unrelated operators and a unitless scale in the CRS parser (io.cpp:12520).
+         * +n reaches FOUR operators: urmfps (urmfps.cpp:56-66), urm5 (urm5.cpp:36-47),
+         * gn_sinu (gn_sinu.cpp:180-198) and fouc_s (fouc_s.cpp:61, its own branch
+         * below). +m reaches gn_sinu alone. Dispatched on the concrete class rather than
+         * through Projection because "n" and "m" are the two most heavily overloaded
+         * letters in PROJ: each is a shape parameter of a dozen unrelated operators and a
+         * unitless scale in the CRS parser (io.cpp:12520).
          *
-         * Absence is a hard error upstream ("Missing parameter n." / "m."). That check
-         * belongs in each projection's own initialize(), which already range-checks;
-         * the parser's job is only to get the value there.
+         * Absence is NOT uniformly an error, and where it is an error the check cannot
+         * live in initialize(). Upstream is three different rules:
+         *
+         *   urmfps, urm5, gn_sinu   test presence first, with pj_param's 't' sigil, and
+         *                           say "Missing parameter n." / "m."
+         *   fouc_s                  never tests presence; an absent +n is n = 0, which is
+         *                           inside its legal [0,1] range and answers
+         *   wag1                    never reads the key at all; it assigns
+         *                           0.8660254037844386467637231707 itself
+         *                           (urmfps.cpp:71-81)
+         *
+         * The presence half has to be here because a Projection cannot see it: by the
+         * time initialize() runs, an omitted +n and an explicit +n=0 are the same 0.0 in
+         * the same field. A value test in initialize() is not a substitute in either
+         * direction. For gn_sinu's m it under-refuses -- +proj=gn_sinu +n=1 without +m
+         * passes `m < 0` and answers, where PROJ says "Missing parameter m." For fouc_s
+         * it would over-refuse a legal input. Only gn_sinu's n happens to coincide, since
+         * `n <= 0` rejects the absent 0 as well, and even there the parser has to raise it
+         * so that the bare form reports the missing n before the missing m, as upstream
+         * does.
          *
          * All three keys are read with pj_param's 'd' sigil, so parseDouble and not
          * parseAngle. gn_sinu's dispatch is on GeneralSinusoidalProjection and NOT on
@@ -778,11 +841,31 @@ public class Proj4Parser {
          * hard-code their own m and n and read neither key upstream, so
          * McBrydeThomasFlatPolarSinusoidalProjection must not receive them.
          */
-        if (projection instanceof UrmaevFlatPolarSinusoidalProjection) {
+
+        /*
+         * Guarded by operator name, the way the utm branch above is, and for the same
+         * reason. Wagner1Projection extends UrmaevFlatPolarSinusoidalProjection to reuse
+         * its kernel and so inherits setN, which made an `instanceof` dispatch hand +n to
+         * an operator that upstream never lets it reach: +proj=wag1 +n=0.5 changed our
+         * answer and does not change PROJ's. At (10, 55) on +ellps=GRS80, forward, we
+         * returned (891018.067867611, 6135305.446220606) where PROJ 9.8.1 returns
+         * (688376.287161978, 6620055.430083310) with or without the +n -- 202,641.78 m
+         * too far east and 484,749.98 m too far south, 525,401.03 m in a straight line,
+         * silently. We now agree with PROJ to every printed digit. It also makes the
+         * presence test below correct for both classes at once: bare wag1 must still
+         * answer, on its own hard-coded n, and only bare urmfps is refused.
+         */
+        if (projection instanceof UrmaevFlatPolarSinusoidalProjection
+                && "urmfps".equals(params.get(Proj4Keyword.proj))) {
             s = params.get(Proj4Keyword.n);
-            if (s != null)
-                ((UrmaevFlatPolarSinusoidalProjection) projection)
-                        .setN(parseDouble(Proj4Keyword.n, s));
+            if (s == null) {
+                throw new InvalidValueException(ErrorCause.MISSING_PARAM,
+                        "Missing parameter: n should be specified. +proj=urmfps has no default"
+                                + " shape parameter; an omitted +n is not the same as +n=0"
+                                + " (urmfps.cpp:56-59)");
+            }
+            ((UrmaevFlatPolarSinusoidalProjection) projection)
+                    .setN(parseDouble(Proj4Keyword.n, s));
         }
         if (projection instanceof Urmaev5Projection) {
             Urmaev5Projection urm5 = (Urmaev5Projection) projection;
@@ -796,13 +879,27 @@ public class Proj4Parser {
         }
         if (projection instanceof GeneralSinusoidalProjection) {
             GeneralSinusoidalProjection gnSinu = (GeneralSinusoidalProjection) projection;
+            // Upstream names n first, then m, and only then reads either value
+            // (gn_sinu.cpp:180-188). Keeping that order here is what makes a bare
+            // +proj=gn_sinu report the missing n rather than the missing m.
+            if (params.get(Proj4Keyword.n) == null) {
+                throw new InvalidValueException(ErrorCause.MISSING_PARAM,
+                        "Missing parameter: n should be specified. +proj=gn_sinu has no default"
+                                + " n; an omitted +n is not the same as +n=0"
+                                + " (gn_sinu.cpp:180-183)");
+            }
+            if (params.get(Proj4Keyword.m) == null) {
+                throw new InvalidValueException(ErrorCause.MISSING_PARAM,
+                        "Missing parameter: m should be specified. +proj=gn_sinu has no default"
+                                + " m; an omitted +m is not the same as +m=0, which is legal"
+                                + " (gn_sinu.cpp:184-188)");
+            }
+
             s = params.get(Proj4Keyword.n);
-            if (s != null)
-                gnSinu.setN(parseDouble(Proj4Keyword.n, s));
+            gnSinu.setN(parseDouble(Proj4Keyword.n, s));
 
             s = params.get(Proj4Keyword.m);
-            if (s != null)
-                gnSinu.setM(parseDouble(Proj4Keyword.m, s));
+            gnSinu.setM(parseDouble(Proj4Keyword.m, s));
         }
         /*
          * fouc_s is the fourth reader of +n and was missing. Upstream reads it as "dn"

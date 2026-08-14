@@ -20,7 +20,14 @@
 # catch, and a re-pin without one is how that regression gets waved through.
 #
 # The INTENDED figure is also asserted a second way, and more tightly: every rule in rules.yaml
-# carries an exact, two-sided expected_rows, and as of this pin those 45 pins sum to exactly 39138.
+# carries an exact, two-sided expected_rows, and as of this pin those 48 pins sum to exactly 39141.
+# (This line said "45 pins sum to exactly 39138" before 2026-08-13. That was exactly right when it
+# was written: `grep -c "^  - id:" golden/rules.yaml` returns 45 at the previous pin's commit,
+# 075d9c9, and the expected_rows there sum to 39138. A later commit added a 46th rule without moving
+# the sum, so the count - not the sum - went stale one commit later; at HEAD the grep returns 46 and
+# the sum is still 39138. Both figures here are 48 and 39141 as measured in this worktree. Sum the
+# pins with an ANCHORED pattern - `grep -Eo '^ +expected_rows: [0-9]+$'` - because an unanchored
+# match also picks up occurrences inside comments and double-counts.)
 # A change that moves INTENDED without moving a rule's expected_rows is therefore already a
 # COUNT_MISMATCH. It is pinned here as well so that all six figures are visible in one place.
 #
@@ -36,4 +43,26 @@
 # itself: it was INTENDED under PROJ-TMERC-PODER-ENGSAGER-DEFAULT inside that rule's 1 cm band and
 # is now 5.0e6 m outside it, so that rule is re-pinned 14038 -> 14037 in the same change. The
 # other four were already UNEXPLAINED and the new rule absorbs them.
-golden diff: 12005 UNCHANGED, 41425 CHANGED, 0 ADDED, 0 REMOVED; 39138 INTENDED, 2287 UNEXPLAINED (baseline 53430 rows, current 53430 rows)
+#
+# RE-PINNED 2026-08-14 by the +proj=geos and +proj=urmfps refusals. UNCHANGED 12005 -> 12002,
+# CHANGED 41425 -> 41428, INTENDED 39138 -> 39141; ADDED, REMOVED and UNEXPLAINED did not move.
+# Three rows changed sides, all three of them `SYN proj/geos`: probes 0, 1 and 2 matched the baseline
+# exactly before this change and now raise, so they leave UNCHANGED and arrive in CHANGED already
+# claimed by the new rule PROJ-GEOS-REQUIRES-A-POSITIVE-H-RATIO. That rule claims all five
+# `proj/geos` probes, and the other two -- 3 and 4 -- were CHANGED already, which is why CHANGED
+# gains 3 and not 5. Which three is measured, not assumed: replaying the five probes through
+# `+proj=geos <canonical> +h=35785831`, the old class default written out by hand, reproduces the
+# pre-change row exactly, and probes 0, 1 and 2 come back byte-identical to golden.tsv in all six
+# numeric columns while probes 3 and 4 differ in the last two bits of the inverse latitude, and
+# probe 3 in the inverse longitude's last two bits as well -- the
+# signature of NUM-KARNEY-LATITUDE-CORE, which is the rule that claimed them and is re-pinned below.
+# The second new rule, PARSE-URMFPS-REQUIRES-N, claims five `SYN proj/urmfps` rows that were CHANGED
+# before as well, so it moves no headline figure of its own. INTENDED gains exactly the 3 rows that
+# arrived in CHANGED. UNEXPLAINED does not move: nothing new is unaccounted for, and nothing on the
+# backlog was resolved. Two existing rules lose rows to the two new ones and are re-pinned in the
+# same change, each for a reason written out at the rule: PROJ-INVERSE-CORRECTED-ROUND-TRIP-NOW-
+# EXACT-FWD-ALSO 45 -> 40 (the five urmfps rows are now OK -> EXC and that rule requires OK -> OK)
+# and NUM-KARNEY-LATITUDE-CORE 19310 -> 19308 (two geos rows, same reason). 10 claimed by new rules
+# minus 5 minus 2 lost by old ones is +3, which is the INTENDED move. Measured in this worktree with
+# `mvn -B -Dmaven.javadoc.skip=true -Pgolden -pl golden -am verify`.
+golden diff: 12002 UNCHANGED, 41428 CHANGED, 0 ADDED, 0 REMOVED; 39141 INTENDED, 2287 UNEXPLAINED (baseline 53430 rows, current 53430 rows)

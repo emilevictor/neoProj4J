@@ -357,7 +357,7 @@ public class NewOperatorContractTest {
     /**
      * {@code imw_p} needs {@code |lat_1 - lat_2| > 0} and {@code |lat_1 + lat_2| > 0}, which
      * together also refuse an absent pair &mdash; but {@code +lat_1=0} on its own is legal and
-     * selects {@code PHI_1_IS_ZERO} ({@code imw_p.cpp:46-55}, {@code :208-212}). The corpus
+     * selects {@code PHI_1_IS_ZERO} ({@code imw_p.cpp:46-55}, {@code :207}). The corpus
      * exercises both.
      */
     @Test
