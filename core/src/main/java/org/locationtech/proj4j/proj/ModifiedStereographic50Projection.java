@@ -38,7 +38,7 @@ import org.locationtech.proj4j.util.Complex;
  * so the antipodal-ish point at (60&deg;E, 45&deg;S) is a platform-dependent failure upstream and
  * is asserted by nobody. It is <em>not</em> counted in this projection's 16 assertions.
  *
- * @since 1.5.0
+ * @since 2.0.0
  */
 public class ModifiedStereographic50Projection extends ModifiedStereographicProjection {
 

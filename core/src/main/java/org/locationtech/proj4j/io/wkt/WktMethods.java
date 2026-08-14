@@ -81,7 +81,24 @@ final class WktMethods {
     private static final int FLAG_LCC_1SP = 8;
     /** Polar Stereographic (variant B): {@code +lat_0} is ±90, from the sign of EPSG 8832. */
     private static final int FLAG_POLAR_STEREO_B = 16;
-    /** Equidistant Cylindrical: proj4j ignores both of its origin parameters. */
+    /**
+     * Equidistant Cylindrical: a non-zero {@code lat_ts} or {@code lat_0} is refused.
+     *
+     * <p>STALE REASON, KEPT BEHAVIOUR. This said proj4j ignores both origin parameters. It no
+     * longer does — {@code PlateCarreeProjection} ports 9.8.1's {@code eqc.cpp}, implementing
+     * both EPSG:1029 and EPSG:1028, and applies both parameters — so this refusal is
+     * over-strict and its message ("which proj4j's implementation ignores") is untrue.
+     *
+     * <p>The parameters being refused are not rounding-level. Measured with {@code proj} 9.8.1
+     * at lon 10 / lat 20 / {@code +ellps=GRS80}, {@code +lat_ts=30} is worth 148,332 m of
+     * easting (964862.8025 against 1113194.9079 bare) and {@code +lat_0=45} is worth
+     * 4,984,944 m of northing.
+     *
+     * <p>Left in place because relaxing it is a behaviour change needing its own evidence: that
+     * is task #126, out of scope for 2.1.0.
+     * {@code Wkt2ReaderTest.equidistantCylindricalWithStandardParallelIsRefused} pins it and
+     * carries the same note.
+     */
     private static final int FLAG_EQC = 32;
     /** Hotine Oblique Mercator: degenerates to {@code +proj=somerc} at azimuth 90. */
     private static final int FLAG_HOTINE = 64;

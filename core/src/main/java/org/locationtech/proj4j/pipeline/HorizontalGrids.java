@@ -94,7 +94,7 @@ import org.locationtech.proj4j.datum.Grid;
  * <p>Immutable after construction; {@link #apply} and {@link #value} keep all state
  * in locals, so one instance is safe to share.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 final class HorizontalGrids {
 

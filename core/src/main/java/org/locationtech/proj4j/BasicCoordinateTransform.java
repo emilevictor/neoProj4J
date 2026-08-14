@@ -147,21 +147,6 @@ public class BasicCoordinateTransform implements CoordinateTransform, BulkCoordi
     /** The target-side counterpart; see {@link #srcAxesEnu}. */
     private final boolean tgtAxesEnu;
 
-    /**
-     * The prime-meridian offsets, in radians, inlined out of
-     * {@link PrimeMeridian#toGreenwich(ProjCoordinate)} and
-     * {@link PrimeMeridian#fromGreenwich(ProjCoordinate)}.
-     * <p>
-     * <b>The add is never elided when the offset is zero</b>, and that is not an oversight:
-     * {@code -0.0 + 0.0} is {@code +0.0}, so skipping the addition would change the sign of zero
-     * for a longitude of exactly {@code -0.0} — a value that occurs at the prime meridian on real
-     * data, and one that {@link Double#doubleToRawLongBits(double)} distinguishes. The single-point
-     * path performs the addition unconditionally, so the bulk path must too.
-     */
-    private final double srcPmOffset;
-    /** The target-side offset, subtracted rather than added; see {@link #srcPmOffset}. */
-    private final double tgtPmOffset;
-
     /** {@code srcCRS.getDatum()}, hoisted out of the per-point loop. */
     private final Datum srcDatum;
     /** {@code tgtCRS.getDatum()}, hoisted out of the per-point loop. */
@@ -258,7 +243,7 @@ public class BasicCoordinateTransform implements CoordinateTransform, BulkCoordi
      * @param tgtCRS            the target CRS to transform to
      * @param domainErrorPolicy what {@link #transform} does with a per-coordinate failure; null
      *                          is treated as {@link DomainErrorPolicy#THROW}
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public BasicCoordinateTransform(CoordinateReferenceSystem srcCRS,
                                     CoordinateReferenceSystem tgtCRS,
@@ -343,11 +328,6 @@ public class BasicCoordinateTransform implements CoordinateTransform, BulkCoordi
         srcAxesEnu = srcAxes != null && AxisOrder.ENU.equals(srcAxes);
         tgtAxesEnu = tgtAxes != null && AxisOrder.ENU.equals(tgtAxes);
 
-        srcPmOffset = srcProj == null ? 0.0
-                : srcProj.getPrimeMeridian().getOffsetFromGreenwich();
-        tgtPmOffset = tgtProj == null ? 0.0
-                : tgtProj.getPrimeMeridian().getOffsetFromGreenwich();
-
         srcDatum = srcCRS.getDatum();
         tgtDatum = tgtCRS.getDatum();
 
@@ -382,39 +362,14 @@ public class BasicCoordinateTransform implements CoordinateTransform, BulkCoordi
     }
 
     /**
-     * Whether a projection can actually be inverted.
+     * Whether a projection can actually be inverted — {@link Projection#hasInverseImplementation()},
+     * which is where the predicate and the reasons for it now live.
      *
-     * <h4>Why this does not simply return {@code hasInverse()}</h4>
-     *
-     * <p>Because {@code hasInverse()} is a hand-maintained <em>declaration</em>, it was read
-     * nowhere in {@code core/src/main} before 1.5.0, and an unread boolean declared 66 times
-     * across 102 classes drifts. Gating on it alone is wrong in <b>both</b> directions, and each
-     * direction was found by a test rather than by reading:
-     *
-     * <table>
-     * <caption>where {@code hasInverse()} disagrees with reality</caption>
-     * <tr><th>class</th><th>{@code hasInverse()}</th><th>{@code projectInverse} override</th>
-     *     <th>truth</th></tr>
-     * <tr><td>{@code KrovakProjection}</td><td>absent, so {@code false}</td><td>yes</td>
-     *     <td>invertible — EPSG:2065 and EPSG:5514 round-trip</td></tr>
-     * <tr><td>{@code NewZealandMapGridProjection}</td><td>absent, so {@code false}</td>
-     *     <td>yes</td><td>invertible — EPSG:27200 round-trips</td></tr>
-     * <tr><td>{@code LandsatProjection}</td><td>{@code true}</td>
-     *     <td>no: its method takes {@code Point2D.Double} and overrides nothing</td>
-     *     <td>not invertible</td></tr>
-     * <tr><td>{@code LongLatProjection}</td><td>absent, so {@code false}</td><td>no</td>
-     *     <td>invertible — its inverse is the DTR multiply in
-     *         {@code Projection.inverseProjectRadians}</td></tr>
-     * <tr><td>{@code PlateCarreeProjection}, {@code LinearProjection}</td><td>{@code true}</td>
-     *     <td>no</td><td>invertible — the base identity really is their inverse, because their
-     *         forward is the base identity too</td></tr>
-     * </table>
-     *
-     * <p>So the question asked is "is there an implementation", answered against the class
-     * hierarchy, with {@code hasInverse()} and {@link Projection#isGeographic()} kept as the
-     * affirmative shortcuts they are reliable for. Had this gate keyed on {@code hasInverse()}
-     * alone it would have rejected three working CRSs — Krovak twice and NZMG once — which is
-     * the same class of mistake as the defect it exists to fix, only louder.
+     * <p>It used to be implemented here, privately, and that was the whole of the {@code +pm}
+     * regression: the pipeline engine could not reach it, so {@code Cs2csOperator} asked
+     * {@code hasInverse()} instead and refused to invert {@code +proj=krovak … +pm=ferro} while
+     * this engine inverted the same definition without {@code +pm} quite happily. Two engines, two
+     * answers, one projection. Moving it to {@code Projection} is what makes there be one answer.
      *
      * <p>Reflection, once per {@code BasicCoordinateTransform}, never per coordinate. The result
      * is cached in {@link #srcInverseAvailable}.
@@ -423,20 +378,7 @@ public class BasicCoordinateTransform implements CoordinateTransform, BulkCoordi
      * @return true if inverse-projecting through {@code p} computes something
      */
     private static boolean inverseAvailable(Projection p) {
-        if (p.hasInverse() || p.isGeographic()) {
-            return true;
-        }
-        for (Class<?> c = p.getClass(); c != null && c != Projection.class;
-                c = c.getSuperclass()) {
-            try {
-                c.getDeclaredMethod("projectInverse",
-                        double.class, double.class, ProjCoordinate.class);
-                return true;
-            } catch (NoSuchMethodException notHere) {
-                // keep walking up
-            }
-        }
-        return false;
+        return p.hasInverseImplementation();
     }
 
     @Override
@@ -454,7 +396,7 @@ public class BasicCoordinateTransform implements CoordinateTransform, BulkCoordi
      * The policy this transform applies to a per-coordinate failure.
      *
      * @return the policy; never null
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public DomainErrorPolicy getDomainErrorPolicy() {
         return domainErrorPolicy;
@@ -537,7 +479,11 @@ public class BasicCoordinateTransform implements CoordinateTransform, BulkCoordi
             srcCRS.getProjection().inverseProjectRadians(tgt, tgt);
         }
 
-        srcCRS.getProjection().getPrimeMeridian().toGreenwich(tgt);
+        // No PrimeMeridian.toGreenwich here any more, and none below: inv_finalize
+        // (9.8.1:src/inv.cpp:113) adds from_greenwich in the same statement as lam0, BEFORE its
+        // adjlon, and fwd_prepare (:108) subtracts it in the same statement as lam0, before its
+        // adjlon. Doing it as a separate stage here put it on the wrong side of both wraps. See
+        // Projection.inverseProjectRadians, and issue #117 for what that cost.
 
         // 'fix' commented out, see https://github.com/locationtech/proj4j/issues/116
         // fixes bug where computed Z value sticks around
@@ -553,13 +499,11 @@ public class BasicCoordinateTransform implements CoordinateTransform, BulkCoordi
                 // brackets exactly this leg with push/pop and returns the caller's third ordinate
                 // byte for byte -- so for ProjCoordinate's NaN sentinel, "leave it untouched" and
                 // "propagate NaN" are the same instruction. Restoring here is sufficient: the
-                // remaining stages are PrimeMeridian (x only), Projection (does not read or write
-                // z at all) and AxisOrder (copies or negates it).
+                // remaining stages are Projection (does not read or write z at all) and AxisOrder
+                // (copies or negates it).
                 tgt.z = Double.NaN;
             }
         }
-
-        tgtCRS.getProjection().getPrimeMeridian().fromGreenwich(tgt);
 
         if (doForwardProjection) {
             // project from geographic to planar
@@ -855,13 +799,8 @@ public class BasicCoordinateTransform implements CoordinateTransform, BulkCoordi
      *         identity copy. Not skipped for a reversed axis, where it negates.</td></tr>
      * <tr><td>{@code inverseProjectRadians(tgt, tgt)}</td><td>the same call</td>
      *     <td>same method, same object</td></tr>
-     * <tr><td>{@code getPrimeMeridian().toGreenwich(tgt)}</td><td>{@code c.x += srcPmOffset}</td>
-     *     <td>that method <em>is</em> {@code coord.x += offset}. Never elided at offset 0, because
-     *         {@code -0.0 + 0.0} is {@code +0.0}.</td></tr>
      * <tr><td>{@code datumTransform(tgt)}</td><td>{@link #datumStage(ProjCoordinate)}</td>
      *     <td>same operations, same order; only the predicates guarding them are hoisted</td></tr>
-     * <tr><td>{@code getPrimeMeridian().fromGreenwich(tgt)}</td><td>{@code c.x -= tgtPmOffset}</td>
-     *     <td>as above</td></tr>
      * <tr><td>{@code projectRadians(tgt, tgt)}</td><td>the same call</td><td>same method</td></tr>
      * <tr><td>{@code getAxisOrder().fromENU(tgt)}</td><td>skipped when ENU, else the same call</td>
      *     <td>as above</td></tr>
@@ -914,7 +853,6 @@ public class BasicCoordinateTransform implements CoordinateTransform, BulkCoordi
             if (doInverseProjection) {
                 srcProj.inverseProjectRadians(c, c);
             }
-            c.x += srcPmOffset;
 
             if (!datumTransformIsNoOp) {
                 datumStage(c);
@@ -925,8 +863,6 @@ public class BasicCoordinateTransform implements CoordinateTransform, BulkCoordi
                     c.z = Double.NaN;
                 }
             }
-
-            c.x -= tgtPmOffset;
 
             if (doForwardProjection) {
                 tgtProj.projectRadians(c, c);

@@ -37,7 +37,7 @@ package org.locationtech.proj4j.api;
  * <p>Immutable and safe to share between threads.
  *
  * @see CrsOperation#accuracy()
- * @since 1.5.0
+ * @since 2.0.0
  */
 public final class Accuracy {
 

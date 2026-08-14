@@ -80,7 +80,7 @@ public class ProjectionException extends CrsTransformException {
      *
      * @param cause   a refinement of {@link ErrorCause#COORDINATE_OUT_OF_DOMAIN}
      * @param message the human-readable detail message
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public ProjectionException(ErrorCause cause, String message) {
         super(cause, message);
@@ -94,7 +94,7 @@ public class ProjectionException extends CrsTransformException {
      * @param proj    the projection that rejected the coordinate; its
      *                {@link Projection#toString()} is prepended to the message
      * @param message the human-readable detail message
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public ProjectionException(ErrorCause cause, Projection proj, String message) {
         super(cause, proj.toString() + ": " + message);

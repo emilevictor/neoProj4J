@@ -197,7 +197,7 @@ public class Units {
      * stable entry point to depend on.
      *
      * @return the 21 accepted ids, unmodifiable; never null and never empty
-     * @since 1.5.0
+     * @since 2.1.0
      */
     public static Set<String> linearUnitIds() {
         return LINEAR_UNIT_IDS;

@@ -94,7 +94,7 @@ import java.util.Map;
  *
  * <p>Stateless; not instantiable.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 final class PipelineJson {
 

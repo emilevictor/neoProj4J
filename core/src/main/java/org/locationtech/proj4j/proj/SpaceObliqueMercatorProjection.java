@@ -83,7 +83,7 @@ import org.locationtech.proj4j.util.ProjectionMath;
  *
  * @see LandsatProjection
  * @see MisrSpaceObliqueMercatorProjection
- * @since 1.5.0
+ * @since 2.0.0
  */
 public class SpaceObliqueMercatorProjection extends Projection {
 

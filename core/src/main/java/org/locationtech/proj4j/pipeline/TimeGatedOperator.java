@@ -72,7 +72,7 @@ import org.locationtech.proj4j.gie.GieIoUnits;
  * <p>The wrapper delegates its unit sides and its invertibility to the operator it
  * wraps, so it is invisible to {@link PipelineFactory}'s continuity check.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 final class TimeGatedOperator implements PipelineOperator {
 

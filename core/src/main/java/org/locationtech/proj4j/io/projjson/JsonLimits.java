@@ -25,7 +25,7 @@ package org.locationtech.proj4j.io.projjson;
  * {@code io.wkt}, and a nesting limit is an implementation invariant that should not become public
  * API just to be shared across two packages.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 final class JsonLimits {
 

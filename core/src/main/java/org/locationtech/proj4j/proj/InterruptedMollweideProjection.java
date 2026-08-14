@@ -59,7 +59,7 @@ import org.locationtech.proj4j.ProjCoordinate;
  * {@link #forwardZone} already being correct and on the five {@code x_0} corrections already having
  * been applied. Hence the two phases in {@link #setupZones()} and their order.
  *
- * @since 1.5.0
+ * @since 2.0.0
  */
 public class InterruptedMollweideProjection extends InterruptedProjection {
 

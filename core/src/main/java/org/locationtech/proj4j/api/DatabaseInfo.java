@@ -61,7 +61,7 @@ import org.locationtech.proj4j.spi.ProjDatabase;
  *
  * @see Proj#databaseVersion()
  * @see Proj#databaseInfo()
- * @since 1.5.0
+ * @since 2.0.0
  */
 public final class DatabaseInfo {
 

@@ -93,7 +93,7 @@ import org.locationtech.proj4j.util.ProjectionMath;
  * resolve here instead: {@code mil_os}, {@code lee_os}, {@code gs48}, {@code gs50} and
  * {@code alsk}.
  *
- * @since 1.5.0
+ * @since 2.0.0
  */
 public abstract class ModifiedStereographicProjection extends Projection {
 

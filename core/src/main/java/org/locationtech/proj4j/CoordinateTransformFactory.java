@@ -83,7 +83,7 @@ public class CoordinateTransformFactory {
      * A factory whose transforms all apply the given policy to a per-coordinate error.
      *
      * @param domainErrorPolicy the policy; null is treated as {@link DomainErrorPolicy#THROW}
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public CoordinateTransformFactory(DomainErrorPolicy domainErrorPolicy) {
         this.domainErrorPolicy =
@@ -94,7 +94,7 @@ public class CoordinateTransformFactory {
      * The policy every transform from this factory applies to a per-coordinate error.
      *
      * @return the policy; never null
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public DomainErrorPolicy getDomainErrorPolicy() {
         return domainErrorPolicy;
@@ -144,7 +144,7 @@ public class CoordinateTransformFactory {
      * @param sourceCRS the source CoordinateReferenceSystem
      * @param targetCRS the target CoordinateReferenceSystem
      * @return a bulk transformation from the source CRS to the target CRS
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public BulkCoordinateTransform createBulkTransform(CoordinateReferenceSystem sourceCRS,
                                                        CoordinateReferenceSystem targetCRS) {

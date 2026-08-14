@@ -623,7 +623,16 @@ public final class GateChecker {
         existing.put("ratchets", ratchets);
         Path allocPath = dir.resolve("allocation-baseline.json");
         Files.write(allocPath, Json.write(existing).getBytes(StandardCharsets.UTF_8));
-        System.out.println("  wrote " + allocPath + "  (" + ratchets.size()
+        // Count only the real ratchets. The block also carries a _note, and counting it made
+        // this line print one too many for the whole of 2.0.0, which is where every stale "171"
+        // in the documentation came from.
+        int perBenchmarkRatchets = 0;
+        for (String key : ratchets.keySet()) {
+            if (!key.startsWith("_")) {
+                perBenchmarkRatchets++;
+            }
+        }
+        System.out.println("  wrote " + allocPath + "  (" + perBenchmarkRatchets
                 + " per-benchmark ratchets)");
         return 0;
     }
@@ -641,18 +650,42 @@ public final class GateChecker {
     /**
      * Best-effort commit id. A baseline that does not say which tree it came from is not reviewable -
      * you cannot tell whether a differing number is a regression or a different starting point.
+     *
+     * <p>A dirty tree gets a {@code -dirty} suffix, and that suffix is the point of this method
+     * rather than a detail of it. `git rev-parse HEAD` alone reports the last commit no matter how
+     * far the working tree has moved from it, so a baseline recorded mid-edit claims a provenance
+     * that reads as reproducible and is not: the numbers came from code that is in no tree anybody
+     * else can check out. Under-reporting dirtiness is the expensive direction, so a status check
+     * that fails is recorded as {@code -dirty?} rather than assumed clean.
      */
     private static String gitCommit() {
+        String head = git("git", "rev-parse", "HEAD");
+        if (head == null || head.isEmpty()) {
+            return "unknown";
+        }
+        String status = git("git", "status", "--porcelain");
+        if (status == null) {
+            return head + "-dirty?";
+        }
+        return status.isEmpty() ? head : head + "-dirty";
+    }
+
+    /**
+     * Runs a command and returns its trimmed stdout, or null if it did not exit 0. Stderr is
+     * discarded rather than merged: merged into stdout, one git warning would read as a modified
+     * file and mark a clean tree dirty.
+     */
+    private static String git(String... command) {
         try {
-            Process p = new ProcessBuilder("git", "rev-parse", "HEAD")
-                    .redirectErrorStream(true).start();
+            Process p = new ProcessBuilder(command)
+                    .redirectError(ProcessBuilder.Redirect.DISCARD).start();
             String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-            return p.waitFor() == 0 && !out.isEmpty() ? out : "unknown";
+            return p.waitFor() == 0 ? out : null;
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
-            return "unknown";
+            return null;
         }
     }
 

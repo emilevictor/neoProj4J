@@ -40,7 +40,7 @@ import java.util.List;
  * an exception message instead of losing it, which is the one place this port deviates from upstream —
  * PROJ writes it to a log nobody reads.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 public final class GeoTiffDataset {
 

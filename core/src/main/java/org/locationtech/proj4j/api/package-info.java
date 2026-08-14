@@ -91,6 +91,6 @@
  * {@link org.locationtech.proj4j.api.DatabaseInfo} for the full inventory of what a PROJ.4
  * {@code +init=} dictionary can and cannot answer.
  *
- * @since 1.5.0
+ * @since 2.0.0
  */
 package org.locationtech.proj4j.api;

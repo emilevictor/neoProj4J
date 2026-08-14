@@ -99,6 +99,6 @@
  * operators are <b>not</b> thread-safe, because they wrap mutable proj4j
  * {@code Projection} instances. Build one pipeline per thread.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 package org.locationtech.proj4j.pipeline;

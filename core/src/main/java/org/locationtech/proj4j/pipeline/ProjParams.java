@@ -45,7 +45,7 @@ import java.util.List;
  *
  * <p>Immutable and thread-safe.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 public final class ProjParams {
 

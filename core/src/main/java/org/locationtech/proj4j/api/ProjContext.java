@@ -64,7 +64,7 @@ import org.locationtech.proj4j.spi.ProjDatabase;
  * @see BestOperationPolicy
  * @see DomainErrorPolicy
  * @see ParseMode
- * @since 1.5.0
+ * @since 2.0.0
  */
 public final class ProjContext {
 

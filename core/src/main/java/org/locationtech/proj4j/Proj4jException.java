@@ -129,7 +129,7 @@ public class Proj4jException extends RuntimeException
 	 *
 	 * @return the error cause; never null
 	 * @see ErrorCause
-	 * @since 1.5.0
+	 * @since 2.0.0
 	 */
 	public ErrorCause cause() {
 		return errorCause;
@@ -141,7 +141,7 @@ public class Proj4jException extends RuntimeException
 	 * {@link #setStackTraceCaptureEnabled(boolean)} has been called.
 	 *
 	 * @return true if {@link #fillInStackTrace()} walks the stack
-	 * @since 1.5.0
+	 * @since 2.0.0
 	 */
 	public static boolean isStackTraceCaptureEnabled() {
 		return captureStackTraces;
@@ -154,7 +154,7 @@ public class Proj4jException extends RuntimeException
 	 * the process's own command line.
 	 *
 	 * @param enabled whether to capture stack traces
-	 * @since 1.5.0
+	 * @since 2.0.0
 	 */
 	public static void setStackTraceCaptureEnabled(boolean enabled) {
 		captureStackTraces = enabled;

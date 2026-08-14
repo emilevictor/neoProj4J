@@ -50,7 +50,7 @@ public class UnsupportedParameterException extends CrsCreationException
 	 *
 	 * @param cause   a refinement of {@link ErrorCause#PROJECTION_NOT_IMPLEMENTED}
 	 * @param message the human-readable detail message
-	 * @since 1.5.0
+	 * @since 2.0.0
 	 */
 	public UnsupportedParameterException(ErrorCause cause, String message) {
 		super(cause, message);
@@ -63,7 +63,7 @@ public class UnsupportedParameterException extends CrsCreationException
 	 * @param cause     a refinement of {@link ErrorCause#PROJECTION_NOT_IMPLEMENTED}
 	 * @param message   the human-readable detail message
 	 * @param throwable the underlying throwable, or null
-	 * @since 1.5.0
+	 * @since 2.0.0
 	 */
 	public UnsupportedParameterException(ErrorCause cause, String message, Throwable throwable) {
 		super(cause, message, throwable);

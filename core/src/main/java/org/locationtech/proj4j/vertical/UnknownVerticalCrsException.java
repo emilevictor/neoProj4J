@@ -28,7 +28,7 @@ import org.locationtech.proj4j.UnknownAuthorityCodeException;
  * existing caller catches, which is the same class of surprise as returning a fabricated
  * height.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 public class UnknownVerticalCrsException extends UnknownAuthorityCodeException {
 

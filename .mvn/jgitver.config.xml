@@ -5,8 +5,31 @@
   <mavenLike>true</mavenLike>
   <useGitCommitId>false</useGitCommitId>
   <autoIncrementPatch>true</autoIncrementPatch>
-  <!-- Default is `master` alone. `main` is this repository's default branch, so
-       without it every build here would be X.Y.Z-main-SNAPSHOT. A clean X.Y.Z still
-       requires HEAD to be exactly an annotated vX.Y.Z tag. -->
+  <!-- jgitver's default is `master` alone, and `master` IS this repository's default branch,
+       so the default alone would have worked. `main` is listed as well, deliberately: it costs
+       nothing and it keeps a build on a branch named `main` from coming out as
+       X.Y.Z-main-SNAPSHOT. DO NOT DELETE IT thinking it is dead. It is a harmless extra, not a
+       leftover. What must not be removed is `master`.
+
+       A clean X.Y.Z requires HEAD to be exactly an annotated vX.Y.Z tag, and that is necessary
+       but NOT sufficient. Two more conditions, both measured by driving jgitver 0.14.0's own API
+       against the existing v2.0.0 tag rather than reasoned about:
+
+       1. HEAD must be on a branch named in nonQualifierBranches, or detached. On any other
+          branch, VersionStrategy.enhanceVersionWithBranch runs unconditionally and appends the
+          branch name even to a release version. Tagging v2.1.0 on release/2.1.0-combined with a
+          clean tree computes 2.1.0-release_2.1.0_combined, not 2.1.0. This is the whole reason
+          `master` above is load bearing.
+       2. The tree must be clean, and one untracked file is enough to spoil it. GitUtils.isDirty
+          is jgit's Status.isClean(). Dirty at the tag, on a branch, computes X.Y.(Z+1)-SNAPSHOT.
+          The `useDirty` setting does NOT govern this: it only controls whether the literal
+          qualifier `dirty` is appended. The patch bump reads dirtiness separately, and is
+          suppressed only when HEAD is detached, which is why a measurement taken in a detached
+          scratch clone once made this look harmless.
+
+       Keep every double hyphen out of this comment. XML forbids one inside a comment, jgitver
+       reads this file before anything else, and the failure is total: `mvn` aborts with a
+       ParseError, no module builds, and all four gates report "no reports" rather than naming
+       the cause. It cost a full gate run once. -->
   <nonQualifierBranches>main,master</nonQualifierBranches>
 </configuration>

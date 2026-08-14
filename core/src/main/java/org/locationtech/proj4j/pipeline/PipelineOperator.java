@@ -45,7 +45,7 @@ import org.locationtech.proj4j.gie.GieIoUnits;
  * coordinate, and mapping that onto an exception at the step boundary is what
  * keeps a failure from being mistaken for a plausible answer.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 public interface PipelineOperator {
 

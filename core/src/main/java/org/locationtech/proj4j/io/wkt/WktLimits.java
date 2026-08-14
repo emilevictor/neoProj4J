@@ -38,7 +38,7 @@ package org.locationtech.proj4j.io.wkt;
  * {@code security.parsers.WktDepthLimitTest} and cross-checked against
  * {@code io.projjson.JsonLimits} there, so the two formats cannot drift apart unnoticed.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 final class WktLimits {
 

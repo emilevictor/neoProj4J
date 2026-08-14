@@ -478,11 +478,32 @@ aarch64 / Mac OS X, and the file holds **25 rules and 170 per-benchmark ratchets
 reported-only**; `op-counts.json` holds **8 pairs × 20 leaves = 160**, no `TBD`. Verified independently
 in the container on 2026-08-03: `0 breaches; 245 gated, 0 EXCLUDED; 245 arms`, 21 m 23 s.
 
-**One provenance caveat, and it is the same class of defect this table exists to prevent.**
-`GateChecker.gitCommit()` is a bare `git rev-parse HEAD` and does **not** mark a dirty tree. The
-`+uncommitted` suffix above was **hand-added**; `op-counts.json` and any future `--record` will stamp a
-clean-looking sha over a dirty tree. Until that is fixed, read `capturedAt.commit` as "at least this
-sha", never as "this tree".
+**170, and count it this way, because the other way gives 171 and both figures are in circulation.**
+The `ratchets` block has **171** keys. **170** of them are per-benchmark ratchets, each a benchmark
+key with a byte figure; the 171st is `_note`, which holds the block's prose and gates nothing. Count
+the numeric entries, not the keys — re-counted 2026-08-14 with a JSON parse and again with
+`jq '[.ratchets | keys[] | select(startswith("_")|not)] | length'`, which agree. `GateChecker`'s
+`--record` line printed `171 per-benchmark ratchets` because it counted `_note` too, and that log
+line is where every stale `171` in this repository came from. It is fixed in this release
+(`GateChecker.java:626-636`) and now prints 170, so it is only a figure copied out of a log from
+2.0.0 or earlier that reads one too high. The `160` above is
+the same shape: it counts each pair's `_crs` label alongside that pair's **19** op counts, so 152 op
+counts are pinned.
+
+**One provenance caveat, fixed in this release, and it is the same class of defect this table exists
+to prevent.** `GateChecker.gitCommit()` was a bare `git rev-parse HEAD` and did **not** mark a dirty
+tree, so the `+uncommitted` suffix above had to be **hand-added** after the fact. That was not a
+hypothetical risk: `op-counts.json` records the bare sha `8f0fbd81` with no suffix at all, and its
+`capturedAt.date` is `2026-08-02T16:21:38.424204Z` — the same instant, to the microsecond, as the
+allocation baseline that was dirty. One run, one tree, two records, and only one of them says so.
+The fix is at `GateChecker.java:650-690`: `gitCommit()` appends `-dirty` when `git status
+--porcelain` comes back non-empty, and `-dirty?` when the status check itself fails, because
+assuming a tree is clean is the expensive direction to be wrong in. Stderr is discarded rather than
+merged into stdout, since one git warning line merged in would read as a modified file and mark a
+clean tree dirty. Nothing reads `capturedAt.commit` programmatically — it is provenance for a human
+deciding whether a differing number is a regression or a different starting point — so neither the
+defect nor the fix can move a gate. For any baseline captured before this release, keep reading
+`capturedAt.commit` as "at least this sha", never as "this tree".
 
 The `capturedAt.commit` field deliberately does **not** read as a bare sha. `HEAD` does not contain
 this module at all, so a bare `7362c85` would say the baseline came from a tree that cannot produce

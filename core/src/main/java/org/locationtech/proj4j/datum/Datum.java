@@ -558,7 +558,7 @@ public class Datum implements java.io.Serializable {
      * {@code Grid.shift(Grid[], …)} treats as a no-op.
      *
      * @return the resolved grids, or {@code null} if this datum has none
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public Grid[] gridArray() {
         List<Grid> resolved = gridList();

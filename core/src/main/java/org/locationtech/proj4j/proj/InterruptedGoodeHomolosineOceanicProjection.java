@@ -53,7 +53,7 @@ import org.locationtech.proj4j.ProjCoordinate;
  * declares {@code d130} <em>after</em> {@code d160} in its constant block, and its inverse's
  * first two lobe branches omit their braces. Neither affects behaviour.
  *
- * @since 1.5.0
+ * @since 2.0.0
  */
 public class InterruptedGoodeHomolosineOceanicProjection extends InterruptedProjection {
 

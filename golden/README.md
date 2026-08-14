@@ -134,7 +134,7 @@ never published, so a YAML parser here costs downstream nothing.
 
 **`+rf=` appears in no registry dictionary and in no test CSV — zero occurrences, verified by grep.**
 The largest behavioural fix in this project is the `+rf`/`+f` transposition in
-`parser/DatumParameters.java:119-133`. Without a synthetic matrix that fix has *no baseline rows to
+`parser/DatumParameters.java:264-281`. Without a synthetic matrix that fix has *no baseline rows to
 move* and this regime would report it as a no-op. Three parts:
 
 * `proj/<name>` — all 188 of PROJ 9.8.1's `PROJ_HEAD` names (`pipeline`, `helmert`, `cart`, `noop`,
@@ -156,14 +156,16 @@ upstream guard tests. Sources are all geographic CRS so the probe is a lon/lat p
 input pinning is needed. `EPSG:4326` is excluded from both ends: a WGS84-hub pair cannot exercise the
 datum-transform decision that three confirmed defects live in.
 
-**Curation finding, recorded here because it changed the curation:** across all 9,013 defs there is
-**not one geographic CRS that proj4j reports as `TYPE_GRIDSHIFT`**, so five of the 25 combinations were
-unreachable from observed types. The cause is the confirmed defect at `parser/Proj4Parser.java:53` —
-`EPSG:4267` is `+proj=longlat +datum=NAD27 +no_defs` with no `+nadgrids` token, so the first parse of
-it executes `Datum.NAD27.setGrids(null)` permanently, JVM-wide, flipping
-`TYPE_GRIDSHIFT → TYPE_UNKNOWN` for all 205 codes on that datum. `pairs.tsv` therefore records the
-**declared** type: observed where proj4j reports one, corrected to `TYPE_GRIDSHIFT` where the
-definition declares a grid-shifted datum.
+**Curation finding, recorded here because it changed the curation:** across all 9,013 defs there was
+**not one geographic CRS that proj4j reported as `TYPE_GRIDSHIFT`**, so five of the 25 combinations
+were unreachable from observed types. The cause was a parser defect that has since been fixed:
+`Proj4Parser.java:139-143` now derives a new `Datum` through `DatumParameters`, under a comment saying
+the shared singletons must never be mutated there. It used to call `Datum.NAD27.setGrids(null)` on the
+singleton while parsing any `+datum=NAD27` definition carrying no `+nadgrids` token — `EPSG:4267` is
+`+proj=longlat +datum=NAD27 +no_defs` — so the first parse of one destroyed the grid list permanently,
+JVM-wide, flipping `TYPE_GRIDSHIFT → TYPE_UNKNOWN` for all 205 codes on that datum. `pairs.tsv` was
+curated against that tree and still records the **declared** type: observed where proj4j reported one,
+corrected to `TYPE_GRIDSHIFT` where the definition declares a grid-shifted datum.
 
 ### Probe derivation
 
@@ -323,20 +325,22 @@ in `reason`.
 
 ## Seeded rules, and the counts that are honestly unknown
 
-> **SUPERSEDED 2026-08-01: there are no unknown counts left. All 44 rules are `status: active` with
+> **SUPERSEDED 2026-08-01: there are no unknown counts left. All 49 rules are `status: active` with
 > a pinned integer `expected_rows`, and `GoldenRulesTest.noActiveRuleMayLeaveItsExpectedRowsUnpinned`
 > now makes that a build failure rather than a convention.** *(This said 38 until 2026-08-02, 41
-> until 2026-08-03 and 42 until 2026-08-11; the file grows and the prose does not, which is why the
-> count is re-derived here rather than copied. Two anchored counts that agree as of 2026-08-11: a
-> YAML parse of `golden/rules.yaml` gives **44** rules, 44 unique `id`s, 44 with `status: active` and
-> 44 with `expected_rows`; and `grep -cE '^  - id:'` gives **44**. Note a bare `grep -c 'id:'`
-> overcounts —
+> until 2026-08-03, 42 until 2026-08-11, 44 until 2026-08-14, and 48 until
+> `NUM-SOMERC-FDLIBM-TRANSCENDENTALS` landed later that same day; the file grows and the prose does
+> not, which is why the count is re-derived here rather than copied. Four anchored counts that agree
+> as of 2026-08-14: `grep -cE '^  - id:'` gives **49**, `grep -oE '^  - id: [A-Za-z0-9_-]+' | sort -u
+> | wc -l` gives 49 unique `id`s, `grep -cE '^    status: active'` gives 49, and
+> `grep -cE '^    expected_rows: [0-9]+'` gives 49 — whose values sum to 39,149. Note a bare
+> `grep -c 'id:'` overcounts —
 > some occurrences are prose inside `reason` blocks and comments — which is exactly the kind of
 > unanchored count that put a wrong number here in the first place. The six remaining `TBD` tokens
 > in the file are all in prose — `reason` text and comments — and none is in an `expected_rows`
 > field.)*
 >
-> *One of the 44, **`NUM-LAEA-HYPOT-TO-NORM2`**, is the argument for pinning in one line, and how it
+> *One of the 49, **`NUM-LAEA-HYPOT-TO-NORM2`**, is the argument for pinning in one line, and how it
 > was discovered shows why: `LambertAzimuthalEqualAreaProjection`'s `Math.hypot` → `MathHelpers.norm2`
 > moved 2 rows into `NUM-KARNEY-LATITUDE-CORE`'s territory, which raised a `COUNT_MISMATCH` at 19,326
 > against its pin of 19,324. **A globbed rule would have absorbed them in silence.** The new rule
@@ -454,7 +458,7 @@ errors are either sub-metre or enormous, with no long tail of subtle drift.
 `mvn -Pgolden -pl golden -am verify` is **expected to fail**. Its current expected report is:
 
 ```
-12,005 UNCHANGED · 41,425 CHANGED · 0 ADDED · 0 REMOVED · 39,134 INTENDED · 2,291 UNEXPLAINED
+11,994 UNCHANGED · 41,436 CHANGED · 0 ADDED · 0 REMOVED · 39,149 INTENDED · 2,287 UNEXPLAINED
 ```
 
 The same line is pinned in `.github/workflows/golden.yaml`. A green golden run would mean the
@@ -486,10 +490,12 @@ What else the job enforces on its own:
   tree, and they are real failures rather than backlog. A `FIGURES_MOVED` is reported *alongside*
   these, never instead of them: the run is already red on the backlog, and a check that
   short-circuited would make re-pinning look like progress.
-- `INTENDED` is additionally pinned a second and tighter way: all 44 rules in `rules.yaml` carry an
-  exact, two-sided `expected_rows`, and those pins sum to exactly 39,134.
+- `INTENDED` is additionally pinned a second and tighter way: all 49 rules in `rules.yaml` carry an
+  exact, two-sided `expected_rows`, and those pins sum to exactly 39,149. Count and sum them with
+  anchored patterns — `grep -cE '^  - id:'` and `grep -oE '^    expected_rows: [0-9]+'` — because an
+  unanchored match also picks up occurrences inside comments and double-counts.
 - The workflow's non-vacuity step requires that the test existed, ran exactly once and was not
-  skipped; that at least 50 tests ran in this module with none skipped; and that the generated table
+  skipped; that at least 55 tests ran in this module with none skipped; and that the generated table
   has the same line count as the committed baseline.
 
 The test's pass/fail bit still carries no information on its own — it was red before and is red
@@ -505,9 +511,11 @@ The breakdown below is from the `2,729 UNEXPLAINED` snapshot taken when this mod
 because the shapes are still the ones worth routing to their owners:
 
 * ~1,700 rows of `OK → OK` numeric movement above `1e-5`, i.e. above the numerical-core band.
-* `23` rows `OK → EXC:java.lang.IllegalStateException` in `PAIR` — a **new** non-`Proj4jException`
-  escape, which belongs to the fail-closed work (`GeocentricConverter.java:122-125` throws
-  `IllegalStateException`).
+* `23` rows `OK → EXC:java.lang.IllegalStateException` in `PAIR` — at the time a **new**
+  non-`Proj4jException` escape, routed to the fail-closed work. It has since been fixed:
+  `GeocentricConverter.java:190` throws `CrsTransformException` with `ErrorCause.INVALID_COORDINATE`,
+  under a comment reading `// Was IllegalStateException`, so `catch (Proj4jException)` sees it. Those
+  23 rows no longer exist in either direction — see the `IllegalStateException: 217 → 0` entry below.
 * `45` rows turning into `EXC:java.lang.NullPointerException` (`35` from
   `EXC:UnsupportedParameterException`, `10` from `OK`) in `SYN` — an NPE is never an intended
   failure mode.
@@ -748,7 +756,7 @@ baseline side: 217  EXC:java.lang.IllegalStateException
 * **`NullPointerException`: 45 → 0.** Gone between two runs four hours apart. **No rule was written
   for them, and none should be**: no mechanism was verified for the fix, and a rule asserting an
   intent nobody stated is worse than an `UNCHANGED` row. They are simply gone.
-* **`IllegalStateException`: 217 → 0** on the current side. `GeocentricConverter.java:131` was the
+* **`IllegalStateException`: 217 → 0** on the current side. `GeocentricConverter.java:190` was the
   only source on the coordinate path and now raises `CrsTransformException(INVALID_COORDINATE)`, so
   `catch (Proj4jException)` sees it. The 217 split **55** `→ ProjectionException` (claimed by
   `FAILCLOSED-UNCHECKED-ISE-REPLACED`), **162** `→ OK` (the datum stream's, unclaimed — see below)
@@ -758,25 +766,35 @@ baseline side: 217  EXC:java.lang.IllegalStateException
 
 Which leaves one, and it is invisible to this gate:
 
-* **50 rows throw `java.util.NoSuchElementException`, in the baseline *and* in the current run.**
-  `Projection.setSouthernHemisphere` (`Projection.java:946`) and `Projection.setHeightOfOrbit`
-  (`Projection.java:1053`) throw a bare `NoSuchElementException` — not a `Proj4jException` — for any
-  projection that does not implement them, with **no message at all**. `SYN/mod/{aea,lcc,longlat,
-  merc,tmerc,utm}/h` and `SYN/mod/{aea,lcc,longlat,merc}/south` hit it. Because it is unchanged
-  since 1.4.3 the diff never mentions it: **this regime reports changes, so a defect that predates
-  the baseline is exactly what it cannot see.** → fail-closed owner.
+* **50 rows threw `java.util.NoSuchElementException` in the baseline *and* in the current run, which is
+  why this gate never mentioned them.** That has since been fixed.
+  `Projection.setSouthernHemisphere` (`Projection.java:1443`) and `Projection.setHeightOfOrbit`
+  (`Projection.java:1656`) now throw `UnsupportedParameterException` with
+  `ErrorCause.PROJECTION_NOT_IMPLEMENTED` and a message naming both the parameter and the projection
+  that does not read it. Each javadoc (`:1412`, `:1646`) records that it used to throw a bare
+  `NoSuchElementException` with **no message at all** — unchecked, and not a `Proj4jException`, so it
+  escaped every `catch (Proj4jException)` in the library and in every caller.
+  `SYN/mod/{aea,lcc,longlat,merc,tmerc,utm}/h` and `SYN/mod/{aea,lcc,longlat,merc}/south` hit it. The
+  reason it went unreported outlives the defect: **this regime reports changes, so a defect that
+  predates the baseline is exactly what it cannot see** — a reader found these, not the gate.
 
 And one **regression in kind** rather than in value, which the no-sentinels rule covers but the
 `(0,0,0)` fix did not reach:
 
 * **`PAIR/t14/epsg:4173>epsg:26748` probe 4** (`(5, 5)` into NAD27 Alaska zone 8). The `tmerc`
-  forward answers `1.289e8, 2.662e7` m for a point 5,000 km outside the CRS. The inverse then lands
-  on the Z axis, and `GeocentricConverter.convertGeocentricToGeodeticIter`'s `P/a < genau` branch
-  (`GeocentricConverter.java:192-193`, `At_Pole = true; Longitude = 0.0`) answers
-  **`(0°, 90°, 0.000104 m)`** — the north pole, at a tenth of a millimetre. 1.4.3 answered latitude
-  `−9.36e10°`, which no caller could mistake for a coordinate. The `(0,0,0)` centre-of-mass fiction
-  was removed a few lines below; the on-axis fiction was not, and it is *more* dangerous because it
-  is entirely plausible. → fail-closed owner.
+  forward answers `1.289e8, 2.662e7` m for a point 5,000 km outside the CRS, and the inverse then lands
+  on the Z axis. **The conclusion recorded here no longer holds, because the branch it was about has
+  been removed.** `GeocentricConverter.convertGeocentricToGeodeticIter` used to carry a `P/a < genau`
+  branch that set the longitude to `0.0` for any point within 6.4 micrometres of the axis, answering
+  **`(0°, 90°, 0.000104 m)`** where 1.4.3 had answered latitude `−9.36e10°`. There is no `At_Pole` flag
+  and no such branch in the file now: `GeocentricConverter.java:293` computes
+  `Longitude = Math.atan2(Y, X)` unconditionally, as `9.8.1:src/conversions/cart.cpp:224` does, so a
+  near-axis point keeps its real meridian instead of being told it sits on Greenwich, and a point
+  exactly on the axis gets `atan2(±0, +0) = ±0` — the conventional pole longitude `more_builtins.gie`
+  pins. Only the genuinely ambiguous `(0, 0, 0)` is refused, at `:269`, with
+  `CrsTransformException(INVALID_COORDINATE)`. The comment above `:293` gives the same reason this
+  bullet gave — an invented Greenwich is dangerous *because* it is plausible — as the reason for
+  removing it. What this row answers now has not been re-measured here.
 
 ---
 
@@ -1265,10 +1283,12 @@ data-driven counts in files two agents are still writing.
 `LagrangeProjection` acquired a `projectInverse` this release, and **upstream agrees** —
 9.8.1 `src/projections/lagrng.cpp:101-102` assigns `P->inv = lagrng_s_inverse` as well as `P->fwd`,
 so the 1.4.3-era belief that Lagrange was forward-only was simply wrong. The name is removed from the
-list and the pin is now 85 = 17 × 5. **Route this: `core`'s own
-`NoInverseGateTest.baseProjectInverseRaisesForForwardOnlyProjections:96` asserts "Lagrange must
-declare no inverse for this test to mean anything" and fails on the frozen tree.** Two streams
-disagree about `lagrng` and upstream sides with the one that gave it an inverse. → fail-closed owner.
+list and the pin is now 85 = 17 × 5. **That routing has already happened.** `core`'s own
+`NoInverseGateTest.baseProjectInverseRaisesForForwardOnlyProjections:96` no longer mentions Lagrange —
+its `forwardOnly` array is `AiryProjection`, `AugustProjection`, `DenoyerProjection` and
+`LarriveeProjection`, and its javadoc says `aitoff` and `lagrng` "used to be on this list and have been
+removed, because they both gained the inverse upstream has". The two streams that disagreed about
+`lagrng` have settled on the one that gave it an inverse.
 
 **2. `PROJ-MOD-STER-GS50-DOMAIN-REFUSED` was a `DEAD_RULE` on its first run** — it matched all five
 rows and **declined all five**, reporting `inside changed (- -> F) and allow_inside_change is not
@@ -1353,7 +1373,7 @@ The mechanism is the confirmed defect this file already documents under "Determi
 couplings": `parser/Proj4Parser.java` used to call `Datum.NAD27.setGrids(null)` on the **shared
 static singleton** while parsing any `+datum=NAD27` definition that carried no `+nadgrids` token, so
 the first NAD27 CRS parsed destroyed the grid list process-wide — including its own — and every
-NAD27 row in the 1.4.3 baseline is unshifted. `Proj4Parser.java:95-97` now says so in a comment and
+NAD27 row in the 1.4.3 baseline is unshifted. `Proj4Parser.java:139-143` now says so in a comment and
 copies into a `DatumParameters` instead. This is a fix, and it matches PROJ, whose `+datum=NAD27`
 is `nadgrids=@conus,@alaska,@ntv2_0.gsb,@ntv1_can.dat`.
 
@@ -1450,18 +1470,22 @@ together with a freshly generated baseline (see [Commands](#commands)).
 
 ## Determinism and known couplings
 
-* **Generation order is load-bearing and fixed.** `parser/Proj4Parser.java:53` mutates process-global
-  static `Datum` singletons as a side effect of parsing, so the output depends on the order CRS are
-  created. The order is the golden total order, and both sides of a comparison walk it identically.
-  Parsed CRS are cached per run (`Proj4FileReader` re-scans the 888 KB `epsg` resource on *every* call),
-  which changes how many times each idempotent global write happens but not the order in which distinct
-  writes first occur.
+* **Generation order is fixed, and the parse side effect that made it load-bearing is gone.**
+  `Proj4Parser.java:139-143` now derives a new `Datum` through `DatumParameters`, under a comment saying
+  the shared static singletons must never be mutated there; it used to call `setGrids()` on one of them
+  while parsing, which made the output depend on the order CRS were created in. The order is still the
+  golden total order and both sides of a comparison still walk it identically — that holds whether or
+  not a parse writes to global state. Parsed CRS are cached per run (`Proj4FileReader` re-scans the
+  888 KB `epsg` resource on *every* call), which is now a question of cost rather than of correctness.
 * **Locale, charset and timezone are pinned via `argLine`, not `systemPropertyVariables`.**
   `Locale.getDefault()` and the default charset are initialised during JVM startup, before surefire can
   set a system property inside the fork — setting them that way looks right and does nothing. It matters
-  here: `Proj4FileReader.java:41` calls `toLowerCase()` with no `Locale`, so under `tr_TR` "ESRI"
-  becomes "esri" with a dotless ı and **all 2,954 ESRI codes become unresolvable**, which would show up
-  as 2,954 spurious `REMOVED` rows.
+  here, and there is a fixed defect that shows why: `Proj4FileReader.java:76` folds the authority with
+  `toLowerCase(Locale.ROOT)`, and until `6d5e9af` (2026-08-05) it was a bare `toLowerCase()`. Under
+  `tr_TR` the Turkish casing rule maps `I` to the dotless `ı`, so "ESRI" lowercased to "esrı", the
+  lookup for `proj4/nad/esri` never resolved, and **all 2,954 ESRI codes became unresolvable** — which
+  here would have shown up as 2,954 spurious `REMOVED` rows. The `Locale.ROOT` argument is what keeps
+  that from recurring, and pinning the locale in `argLine` is what would make its removal visible.
 * **The `CSV` section's key set floats with the working tree.** Those files are `core`'s test resources
   and `core` publishes no test jar, so they are read from `core/src/test/resources` rather than the
   classpath. A change to them appears as `ADDED`/`REMOVED` rows, which a rule can declare. At the time

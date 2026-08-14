@@ -57,7 +57,7 @@ import org.locationtech.proj4j.gie.GieIoUnits;
  * {@linkplain PipelineOperator#overrideUnits override its units} while the pipeline
  * is being assembled.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 public final class PipelineStep {
 

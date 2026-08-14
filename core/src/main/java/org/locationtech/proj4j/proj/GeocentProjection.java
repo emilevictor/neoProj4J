@@ -240,11 +240,20 @@ public class GeocentProjection extends Projection {
         converter().convertGeocentricToGeodetic(dst);
         checkFinite(dst, "inverse", x, y, z);
 
-        // inv_finalize's PJ_IO_UNITS_RADIANS branch (inv.cpp:110-118). Guarded on != 0 exactly as
-        // Projection.inverseProjectRadians guards it, so that a definition without +lon_0 is
-        // bit-for-bit unchanged -- `x + 0.0` is not the identity on -0.0.
-        if (projectionLongitude != 0) {
-            dst.x = ProjectionMath.normalizeLongitude(dst.x + projectionLongitude);
+        // inv_finalize's PJ_IO_UNITS_RADIANS branch (inv.cpp:113-117), which adds BOTH
+        // from_greenwich and lam0 and only then wraps. from_greenwich is here rather than in
+        // BasicCoordinateTransform for the reason Projection.inverseProjectRadians gives; this class
+        // bypasses that funnel, so without these two lines a `+proj=geocent +pm=` lost its prime
+        // meridian silently once the composition layer stopped applying it. No shipped definition
+        // combines the two -- 181 `+proj=geocent` rows across the five dictionaries, 0 with `+pm=`
+        // -- so this is reachable only from a hand-written proj-string, which is exactly the case
+        // that would have gone wrong with no test to catch it.
+        //
+        // Still guarded on "either is non-zero", so that the overwhelmingly common definition with
+        // neither is bit-for-bit unchanged: `x + 0.0` is not the identity on -0.0.
+        final double fromGreenwich = getPrimeMeridian().getOffsetFromGreenwich();
+        if (projectionLongitude != 0 || fromGreenwich != 0) {
+            dst.x = ProjectionMath.normalizeLongitude(dst.x + fromGreenwich + projectionLongitude);
         }
         return dst;
     }
@@ -260,10 +269,12 @@ public class GeocentProjection extends Projection {
             throw new ProjectionException(ErrorCause.INVALID_COORDINATE, this,
                     "non-finite geodetic height " + h + " m");
         }
-        // fwd_prepare's lam0 subtraction, fwd.cpp:105-112. Guarded on != 0 for the -0.0 reason
-        // given in inverseProjectRadians.
-        if (projectionLongitude != 0) {
-            lam = ProjectionMath.normalizeLongitude(lam - projectionLongitude);
+        // fwd_prepare's subtraction, fwd.cpp:108: from_greenwich AND lam0, associated left to right,
+        // then the wrap. Guarded on "either is non-zero" for the -0.0 reason given in
+        // inverseProjectRadians, which also explains why the prime meridian is here at all.
+        final double fromGreenwich = getPrimeMeridian().getOffsetFromGreenwich();
+        if (projectionLongitude != 0 || fromGreenwich != 0) {
+            lam = ProjectionMath.normalizeLongitude((lam - fromGreenwich) - projectionLongitude);
         }
 
         dst.x = lam;

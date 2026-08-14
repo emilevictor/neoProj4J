@@ -18,10 +18,12 @@ name: Golden Master
 #
 # THIS JOB IS EXPECTED TO FAIL, AND THAT IS THE CORRECT OUTCOME. Its current assertion reads:
 #
-#     12,002 UNCHANGED · 41,428 CHANGED · 0 ADDED · 0 REMOVED · 39,141 INTENDED · 2,287 UNEXPLAINED
+#     11,994 UNCHANGED · 41,436 CHANGED · 0 ADDED · 0 REMOVED · 39,149 INTENDED · 2,287 UNEXPLAINED
 #
-# (Measured 2026-08-13 in a worktree with `mvn -B -Pgolden -pl golden -am verify`, and pasted from
-# that run. This line said 39,134 INTENDED and 2,291 UNEXPLAINED until then, which had already been
+# (Measured 2026-08-14 on the 2.1.0 release branch with `./docker/run.sh golden`, and pasted from
+# that run. It read 11,996 · 41,434 · 39,147 on the same branch before
+# NUM-SOMERC-FDLIBM-TRANSCENDENTALS landed, 12,002 · 41,428 · 39,141 on 2026-08-13, and said
+# 39,134 INTENDED and 2,291 UNEXPLAINED before that, which had already been
 # stale since the +proj=tmerc +zone re-pin. The figures that are actually asserted live in
 # golden/baseline/1.4.3/golden-expect.txt; this copy is prose and will go stale again, so read it as
 # a description of the shape of the outcome and not as the assertion.)
@@ -44,11 +46,12 @@ name: Golden Master
 # committed baseline. GoldenMasterTest itself fails on any UNEXPLAINED row or on DEAD_RULE /
 # PENDING_RULE_FIRED / EXPIRED_RULE / COUNT_MISMATCH. Since the test is already red on the backlog,
 # its pass/fail bit carries no information about a change - which is why the figure check reports a
-# separate, named, greppable failure rather than relying on the exit code. rules.yaml carries 48
+# separate, named, greppable failure rather than relying on the exit code. rules.yaml carries 49
 # rules, all `status: active` and all with a pinned integer `expected_rows` - count them rather than
-# quoting a number from prose, which has been stale more than once, including here: this said 44 on
-# 2026-08-13, when `grep -c "^  - id:" golden/rules.yaml` said 48 and `grep -c "    status: active"`
-# said 48 as well.
+# quoting a number from prose, which has now been stale twice in this same sentence: it said 44 on
+# 2026-08-13 when the real count was 48, and it said 48 until 2026-08-14, when this release added
+# NUM-SOMERC-FDLIBM-TRANSCENDENTALS and made it 49. Both `grep -c "^  - id:" golden/rules.yaml` and
+# `grep -c "    status: active" golden/rules.yaml` say 49, and the pinned rows sum to 39149.
 #
 # DO NOT ADD `continue-on-error` TO GET PAST THEM. golden/README.md says so directly, and the
 # reason is that the alternative is strictly better: a `status: pending` rule is visible in the
@@ -65,7 +68,7 @@ name: Golden Master
 # DE-SCOPED FROM PR AND PUSH CHECKS, 2026-08-05. Deliberate decision, recorded here rather than
 # hidden, because the alternatives are worse.
 #
-# This gate is red on the 2,291-row backlog described above and cannot go green without triaging
+# This gate is red on the 2,287-row backlog described above and cannot go green without triaging
 # those rows into rules. That triage is real work and is not being done now. Rather than leave a
 # permanently failing check on every PR, the workflow is now MANUAL AND SCHEDULED ONLY.
 #

@@ -58,7 +58,7 @@ import org.locationtech.proj4j.gie.GieIoUnits;
  *
  * <p>Immutable apart from the overridable unit sides; safe to share.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 final class AffineOperator extends OverridableUnitsOperator {
 

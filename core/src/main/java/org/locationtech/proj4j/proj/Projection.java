@@ -267,7 +267,7 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
      * {@code atan2} is {@code -pi}. That one ulp was the whole of the {@code EPSG:3857} &rarr;
      * {@code EPSG:4055} sign error at the antimeridian.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      */
     private double totalScaleReciprocal = Double.POSITIVE_INFINITY;
 
@@ -314,7 +314,7 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
      * Do not approximate this in degree space and do not widen it: PROJ chose the value so that
      * legitimate rounding noise is absorbed and genuine bad input is not.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public final static double PJ_EPS_LAT = 1e-12;
 
@@ -326,7 +326,7 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
      * [&minus;180, 180]</b>, and neither does Proj4J: a caller legitimately passing 200&deg; or
      * &minus;190&deg; must keep working, so a tighter bound here would be stricter than PROJ.
      *
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public final static double MAX_LAM_RAD = 10.0;
 
@@ -509,7 +509,7 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
         // arithmetic, so adjlon can no longer launder an infinity into a NaN behind the guard's
         // back.
         //
-        // Both steps are unconditional, as upstream's are: fwd_prepare subtracts lam0 at
+        // Neither step is guarded on lam0, as upstream's are not: fwd_prepare subtracts at
         // fwd.cpp:108 and wraps at fwd.cpp:111-112 whenever `+over` is off, and neither line
         // mentions lam0. Both used to sit inside `if (projectionLongitude != 0)`, which meant that
         // with no +lon_0 -- by far the commonest case -- a longitude outside [-180, 180] reached
@@ -518,12 +518,25 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
         // where it is recorded as "the second half of the defect" -- so the forward was the last
         // place the shape survived.
         //
+        // The wrap IS guarded on isPipelineStep(), which is a different question entirely: not
+        // "does fwd_prepare wrap" (it does) but "does PROJ run fwd_prepare for this CRS at all".
+        // For a plain Greenwich geographic CRS it does not -- there is no step to run it in. See
+        // isPipelineStep() for the measurements.
+        //
         // Nothing inside the antimeridian moves, including +/-180 exactly: adjlon returns its
-        // argument untouched while |lon| < pi + 1e-12. The subtraction is a no-op at
-        // projectionLongitude == 0 for every finite x, -0.0 included.
-        x -= projectionLongitude;
-        if ( !over )
+        // argument untouched while |lon| < pi + 1e-12. Both subtractions are no-ops at
+        // projectionLongitude == 0 and offsetFromGreenwich == 0 for every finite x, -0.0 included.
+        //
+        // The prime meridian is subtracted HERE, associated exactly as fwd.cpp:108 associates it --
+        // `(lam - from_greenwich) - lam0`, left to right, one expression, and only then the wrap.
+        // BasicCoordinateTransform used to do it a stage earlier, which for this direction is
+        // bit-identical (the same two subtractions in the same order on the same value); the reason
+        // it moved is the inverse, where the ordering against adjlon is observable. See
+        // inverseProjectRadians.
+        x = (x - primeMeridian.getOffsetFromGreenwich()) - projectionLongitude;
+        if (!over && isPipelineStep()) {
             x = ProjectionMath.normalizeLongitude( x );
+        }
         project(x, y, dst);
         if (!dst.hasValidXandYOrdinates()) {
             throw new ProjectionException(ErrorCause.NUMERICAL_FAILURE, this,
@@ -570,7 +583,7 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
      * @return {@code phi}, clamped into {@code [-pi/2, pi/2]}
      * @throws ProjectionException with {@link ErrorCause#INVALID_COORDINATE} for every input
      *         PROJ answers with {@code PROJ_ERR_COORD_TRANSFM_INVALID_COORD} (2049)
-     * @since 1.5.0
+     * @since 2.0.0
      */
     protected double checkForwardDomain(double lam, double phi) {
         if (Double.isInfinite(lam) || Double.isInfinite(phi)) {
@@ -719,8 +732,19 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
         //     if (0 == P->over)
         //         coo.lpz.lam = adjlon(coo.lpz.lam);
         //
-        // Add the central meridian, then WRAP unless `+over` says not to.
-        // `from_greenwich` is applied separately, by PrimeMeridian in BasicCoordinateTransform.
+        // Add the prime meridian AND the central meridian, then WRAP unless `+over` says not to.
+        //
+        // The order of those two statements is the whole of issue #117. `from_greenwich` used to be
+        // applied a stage later, by PrimeMeridian in BasicCoordinateTransform, i.e. AFTER this
+        // adjlon rather than before it -- so proj4j computed `adjlon(lam + lam0) + from_greenwich`
+        // where inv.cpp:113-117 computes `adjlon((lam + from_greenwich) + lam0)`. Those differ
+        // whenever the sum crosses the antimeridian, which for a +pm CRS is most of the time, and
+        // the visible symptom was that the recovered longitude had to be re-wrapped downstream by
+        // the TARGET's forward funnel to come back inside +/-180 -- which is precisely what
+        // destroyed +over. Measured on `+proj=merc +ellps=bessel +pm=jakarta`, whose inverse of
+        // (0, 0) PROJ answers 106.807719444: `proj -I -f "%.9f" +proj=merc +ellps=bessel
+        // +pm=jakarta`, which is inv_finalize's own output, so from_greenwich is unambiguously
+        // inside this funnel and not after it.
         //
         // This used to CLAMP to +/-pi first --
         //
@@ -755,12 +779,87 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
         // `over` is honoured, so PROJ's else-branch is reachable, and it is now reachable from a
         // proj-string as well: Proj4Parser dispatches +over to setOver. +proj=calcofi still sets
         // the flag from its own initialize(), because calcofi.cpp:141 hard-codes P->over = 1.
-        dst.x = dst.x + projectionLongitude;
-        if (!over) {
+        dst.x = dst.x + primeMeridian.getOffsetFromGreenwich() + projectionLongitude;
+        if (!over && isPipelineStep()) {
             dst.x = ProjectionMath.adjlon(dst.x);
         }
 
         return dst;
+    }
+
+    /**
+     * Whether PROJ's pipeline builder gives this CRS a step of its own &mdash; and therefore whether
+     * {@code fwd_prepare}/{@code inv_finalize} run for it, and its longitude is reduced to
+     * &plusmn;&pi;.
+     *
+     * <p>Every <em>projected</em> CRS gets a step, so this is true for all but a handful of
+     * definitions. The exception is the one that matters: <b>a geographic CRS on Greenwich with no
+     * {@code +lon_0} of its own contributes no step at all</b>, only a {@code unitconvert}. There is
+     * nothing for it to reduce &mdash; it has no central meridian and no prime-meridian offset
+     * &mdash; and PROJ does not manufacture a reduction it has no reason to perform.
+     *
+     * <h4>Why this is not a guess about upstream</h4>
+     *
+     * <p>{@code projinfo} prints the pipeline, and {@code cs2cs} confirms the consequence. PROJ
+     * 9.8.1 as installed, all four with {@code +type=crs} on both sides:
+     *
+     * <table>
+     * <caption>target geographic CRS to pipeline shape</caption>
+     * <tr><th>target</th><th>step emitted for it</th><th>consequence</th></tr>
+     * <tr><td>{@code +proj=longlat +R=6400000}</td><td><b>none</b></td>
+     *     <td>{@code +proj=calcofi +R=6400000} at {@code (-200, 100)} gives
+     *         {@code -207.544906814}: the {@code +over} turn survives</td></tr>
+     * <tr><td>{@code +proj=longlat +R=6400000 +lon_0=0}</td>
+     *     <td>{@code +step +proj=longlat +R=6400000 +lon_0=0}</td>
+     *     <td>the same input gives {@code 152.455093186} &mdash; the turn is wrapped away.
+     *         <b>{@code +lon_0} counts by presence, not by value</b></td></tr>
+     * <tr><td>{@code +proj=longlat +ellps=bessel +pm=jakarta}</td>
+     *     <td>{@code +step +proj=longlat +ellps=bessel +pm=jakarta}</td>
+     *     <td>{@code -170} from Greenwich gives {@code 83.192280555555556}, not
+     *         {@code 253.19...}: it wraps</td></tr>
+     * <tr><td>{@code +proj=longlat +ellps=GRS80}, from a spherical source</td>
+     *     <td><b>none</b> (a ballpark geographic offset, which is a no-op)</td>
+     *     <td>a differing ellipsoid does not create a step</td></tr>
+     * </table>
+     *
+     * <p>It is a property of the CRS in question and not of what it is paired with:
+     * {@code +proj=merc +pm=jakarta} &rarr; {@code +proj=longlat +pm=jakarta} still emits the
+     * geographic step even though the two prime meridians agree and PROJ labels the whole operation
+     * a pure "Inverse of unknown". The step is there to express the longitude relative to Jakarta.
+     *
+     * <h4>Two deliberate approximations, both unobservable in the shipped corpus</h4>
+     *
+     * <ul>
+     * <li><b>{@code +lon_0} is tested by value, not by presence.</b> {@code +lon_0=0} written out
+     *     explicitly earns a step in PROJ and does not here, because {@link #projectionLongitude}
+     *     defaults to 0 and nothing records whether the parser saw the parameter. <b>Zero</b> of
+     *     the geographic definitions in {@code epsg/src/main/resources/proj4/nad/} carry
+     *     {@code +lon_0}, so no shipped definition can tell the difference; a hand-written
+     *     {@code +proj=longlat +lon_0=0} can, and it is the sole known divergence here.</li>
+     * <li><b>An explicit {@code +over} on the SOURCE is not reproduced.</b>
+     *     {@code +proj=merc +R=6400000 +over} &rarr; {@code +proj=longlat +R=6400000} does get a
+     *     geographic step in PROJ, and PROJ therefore wraps 200&deg; back to
+     *     {@code -160.000000000} &mdash; discarding the turn the user asked for. That is an artefact
+     *     of {@code +over} not surviving PROJ's round trip through a CRS description (the operation
+     *     stops being recognisable as a pure inverse conversion), not of any rule about geographic
+     *     CRSs, and {@code +proj=calcofi} does not trip it because its {@code over} comes from
+     *     {@code calcofi.cpp:141} rather than from the string. Reproducing it would mean throwing
+     *     away a turn on purpose in the one case where the user spelled out that they wanted it
+     *     kept, so proj4j keeps it.</li>
+     * </ul>
+     *
+     * @return true when the longitude is reduced to &plusmn;&pi; (subject to {@code +over}); false
+     *         only for a geographic CRS on Greenwich with no central meridian
+     * @see #setOver(boolean)
+     * @since 2.1.0
+     */
+    public boolean isPipelineStep() {
+        // The DEGREES test is this class's existing "is my output angular", the same one the two
+        // funnels use to choose between RTD/DTR and totalScale; it is what makes this true for every
+        // projected CRS without enumerating them.
+        return !(unit != null && unit.equals(Units.DEGREES))
+                || projectionLongitude != 0.0
+                || primeMeridian.getOffsetFromGreenwich() != 0.0;
     }
 
     /**
@@ -861,6 +960,95 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
      * @return true if this projection has an inverse
      */
     public boolean hasInverse() {
+        return false;
+    }
+
+    /**
+     * Whether inverse-projecting through this projection actually computes something —
+     * upstream's {@code pj_has_inverse(P)}, i.e. {@code P->inv != nullptr}, asked of a class
+     * hierarchy instead of a function pointer.
+     *
+     * <h4>Why this is not {@link #hasInverse()}</h4>
+     *
+     * <p>{@code hasInverse()} is a hand-maintained <em>declaration</em>. It was read nowhere in
+     * {@code core/src/main} before 1.5.0, an unread boolean declared 66 times across 102 classes
+     * drifts, and it is wrong in <b>both</b> directions:
+     *
+     * <table>
+     * <caption>where {@code hasInverse()} disagrees with reality</caption>
+     * <tr><th>class</th><th>{@code hasInverse()}</th><th>{@code projectInverse} override</th>
+     *     <th>truth</th></tr>
+     * <tr><td>{@link KrovakProjection}</td><td>absent, so {@code false}</td><td>yes, at
+     *     {@code KrovakProjection:284}</td>
+     *     <td>invertible — {@code krovak_e_inverse} is assigned unconditionally at
+     *     {@code 9.8.1:src/projections/krovak.cpp:329}</td></tr>
+     * <tr><td>{@link NewZealandMapGridProjection}</td><td>absent, so {@code false}</td>
+     *     <td>yes</td><td>invertible — {@code nzmg.cpp:123}</td></tr>
+     * <tr><td>{@code LandsatProjection}</td><td>{@code true}</td>
+     *     <td>used to be no: its method took {@code Point2D.Double} and overrode nothing</td>
+     *     <td>invertible, and now really implemented</td></tr>
+     * <tr><td>{@code LongLatProjection}</td><td>absent, so {@code false}</td><td>no</td>
+     *     <td>invertible — its inverse is the {@code DTR} multiply in
+     *         {@link #inverseProjectRadians(ProjCoordinate, ProjCoordinate)}, which is why
+     *         {@link #isGeographic()} is a second affirmative shortcut and not redundant</td></tr>
+     * <tr><td>{@code PlateCarreeProjection}, {@code LinearProjection}</td><td>{@code true}</td>
+     *     <td>no</td><td>invertible — the base identity really is their inverse, because their
+     *         forward is the base identity too</td></tr>
+     * </table>
+     *
+     * <p>So the question asked here is "is there an implementation", answered against the class
+     * hierarchy, with {@code hasInverse()} and {@link #isGeographic()} kept as the affirmative
+     * shortcuts they are reliable for. The walk stops <em>below</em> {@code Projection}, because
+     * reaching {@code Projection.projectInverse} means there is no override and the answer is the
+     * two booleans alone — which is exactly the gate that method applies.
+     *
+     * <h4>Every caller must ask this, not the boolean</h4>
+     *
+     * <p>Both engines do. {@code BasicCoordinateTransform} has since 1.5.0; the pipeline engine's
+     * {@code Cs2csOperator} did not, and asked {@code hasInverse()} instead — so
+     * {@code +proj=krovak … +pm=ferro}, which {@code +pm} routes through the pipeline engine
+     * rather than through {@code BasicCoordinateTransform}, was declared "pipeline is not
+     * invertible" while the identical definition without {@code +pm} round-tripped. That was the
+     * only regression against 1.4.3 in the whole gie corpus, and it was a routing accident: the
+     * two engines disagreed about a projection neither of them had changed.
+     *
+     * <p>Reflection, so call it once per construction and cache the answer — never per coordinate.
+     *
+     * <h4>When overriding is allowed</h4>
+     *
+     * <p>This method used to be {@code final}, to stop a class re-declaring its own capability and
+     * reintroducing the drift that {@code hasInverse()} suffers. That is still the rule for an
+     * ordinary projection: <b>do not override this to announce something about yourself.</b> The
+     * hierarchy walk already knows whether you implement {@code projectInverse}, and it cannot go
+     * stale.
+     *
+     * <p>The one legitimate reason to override is that you are a <em>wrapper</em> whose real
+     * inverse belongs to a child chosen at runtime. Then the walk answers about the wrapper's own
+     * {@code projectInverse}, which exists unconditionally, when the honest answer is the child's.
+     * {@link ObliqueTransformationProjection} is the only such class today, and it overrides this
+     * for exactly that reason: {@code +proj=ob_tran +o_proj=guyou} has no inverse and
+     * {@code +o_proj=merc} does, and no reflection over {@code ObliqueTransformationProjection}
+     * can tell those apart. An override of that shape must forward to the child's
+     * {@code hasInverseImplementation()} and nothing else.
+     *
+     * @return true if inverse-projecting through this projection computes a result rather than
+     *         raising {@link org.locationtech.proj4j.ErrorCause#NO_INVERSE_AVAILABLE}
+     * @since 2.1.0
+     */
+    public boolean hasInverseImplementation() {
+        if (hasInverse() || isGeographic()) {
+            return true;
+        }
+        for (Class<?> c = getClass(); c != null && c != Projection.class;
+                c = c.getSuperclass()) {
+            try {
+                c.getDeclaredMethod("projectInverse",
+                        double.class, double.class, ProjCoordinate.class);
+                return true;
+            } catch (NoSuchMethodException notHere) {
+                // keep walking up
+            }
+        }
         return false;
     }
 
@@ -1314,35 +1502,48 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
      * PROJ's {@code +over}: suppress the &plusmn;&pi; reduction of the inverse's longitude.
      * <p>
      * {@code inv_finalize} ({@code 9.8.1:src/inv.cpp:113-117}) is
-     * {@code lam += lam0; if (0 == P->over) lam = adjlon(lam);}, so {@code +over} is the only
-     * escape from the wrap and it lets an inverse return a longitude outside
-     * &plusmn;180&deg; &mdash; which is the point: on a map drawn past the antimeridian, 200&deg;E
-     * and 160&deg;W are different places on the page.
+     * {@code lam = lam + from_greenwich + lam0; if (0 == P->over) lam = adjlon(lam);}, so
+     * {@code +over} is the only escape from the wrap and it lets an inverse return a longitude
+     * outside &plusmn;180&deg; &mdash; which is the point: on a map drawn past the antimeridian,
+     * 200&deg;E and 160&deg;W are different places on the page.
      *
-     * <h4>What this does NOT yet cover</h4>
+     * <h4>Honouring the flag takes two things, not one</h4>
      *
-     * <p>Two deliberate gaps, both outside this class:
-     * <ul>
-     * <li><b>The forward still under-wraps.</b> {@code fwd_prepare}
-     *     ({@code 9.8.1:src/fwd.cpp:82-83, :109-111}) calls {@code adjlon} <em>twice</em> when
-     *     {@code over} is off — once on the raw longitude and once after subtracting
-     *     {@code lam0} — whereas {@link #project(ProjCoordinate, ProjCoordinate)} normalises
-     *     once and only when {@code lon_0 != 0}. Both of this class's forward funnels now skip
-     *     that normalisation under {@code +over}, so the flag is honoured in the direction it
-     *     is asked for; making the wrap unconditional in the {@code !over} case is a
-     *     corpus-wide change and is tracked separately. It is what the single
-     *     {@code +proj=vandg} row at {@code accept 180.1 50} — the block <em>without</em>
-     *     {@code +over} — needs.</li>
-     * </ul>
+     * <p>Suppressing the wrap in the inverse funnel is necessary and <b>was not sufficient</b>, and
+     * the gap was a live wrong answer rather than a theoretical one. A composed transform runs the
+     * source's inverse and then the <em>target's</em> forward, and {@code over} on that second leg
+     * is read off the target. For {@code +proj=calcofi +R=6400000} &rarr;
+     * {@code +proj=longlat +R=6400000} at {@code (-200, 100)} the inverse correctly produced
+     * {@code -207.544906813814521} and {@code longlat}'s forward, whose own {@code over} is false,
+     * then wrapped it to {@code 152.4550931861857} &mdash; a full turn wrong, silently. What closes
+     * it is {@link #isPipelineStep()}: PROJ emits no step for a plain Greenwich geographic target,
+     * so there is no {@code fwd_prepare} to do the wrapping. Issue #117.
+     *
+     * <h4>What this still does not cover</h4>
+     *
+     * <p>One gap, and it is in the forward direction: {@code fwd_prepare} calls {@code adjlon}
+     * <b>twice</b> when {@code over} is off &mdash; once on the raw longitude
+     * ({@code 9.8.1:src/fwd.cpp:85}, before the datum and grid stages) and once after subtracting
+     * {@code from_greenwich} and {@code lam0} ({@code :112}). This class's forward funnel performs
+     * only the second. The first is observable only for an input already outside
+     * &plusmn;180&deg; whose reduction changes which grid cell or Helmert frame it lands in, and
+     * adding it is a corpus-wide change tracked separately.
      *
      * <h4>Reachable from a proj-string since 1.5.0</h4>
      *
      * <p>{@code Proj4Parser} dispatches {@code +over} here, read with {@code pj_param}'s
      * {@code b} sigil ({@code init.cpp:601}) so that {@code +over=f} is explicitly off. It used
      * to be reachable only from {@code +proj=calcofi}, which sets it from its own
-     * {@code initialize()} because {@code calcofi.cpp:141} hard-codes {@code P->over = 1};
-     * {@code calcofi} also forces {@code lam0 = 0}, which is why widening the forward guard
-     * above cannot move it.
+     * {@code initialize()} because {@code calcofi.cpp:141} hard-codes {@code P->over = 1}.
+     * {@code calcofi} also forces {@code lam0 = 0} ({@code calcofi.cpp:136}) &mdash; that much is
+     * true, but the conclusion once drawn from it here, that widening the forward guard therefore
+     * could not move {@code calcofi}, was <b>wrong</b>, and wrong in the direction that made a
+     * regression look impossible. Widening the guard did move it, by way of the target's forward
+     * funnel rather than its own: {@code lam0 == 0} makes the <em>subtraction</em> a no-op and says
+     * nothing about the {@code adjlon} beside it, which is unguarded. The four
+     * {@code builtins.gie} rows at {@code :807-808} and {@code :830-831} are the witnesses &mdash;
+     * the two {@code accept -200 100} lines and the {@code expect} beneath each, which read
+     * {@code -207.447024504} before the prime meridian and {@code -207.544906814} after it.
      *
      * @param over true to keep the inverse's longitude unwrapped
      */

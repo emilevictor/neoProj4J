@@ -35,7 +35,7 @@ import java.util.Optional;
  *
  * @see Proj#projections()
  * @see org.locationtech.proj4j.ErrorCause#PROJECTION_NOT_IMPLEMENTED
- * @since 1.5.0
+ * @since 2.0.0
  */
 public final class ProjectionInfo implements Comparable<ProjectionInfo> {
 

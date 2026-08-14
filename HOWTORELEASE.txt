@@ -1,6 +1,35 @@
 Releasing neoProj4J
 ==============================================================================
 
+THE ORDER, AND WHY IT IS FIRST IN THIS FILE
+------------------------------------------------------------------------------
+
+Read this list before you run anything. The tag command appears early below because that is
+where the version rules are explained, not because it is the first thing to do. Everything in
+steps 1-7 must be finished before you type it. A publish to Maven Central cannot be undone,
+and a tag on the wrong commit or the wrong branch cannot be quietly replaced once CI, another
+machine or a consumer has fetched it.
+
+  1. Update the release notes and docs, and commit them.       "Docs that ship with a release"
+       CHANGELOG.md, RELEASE-NOTES.md, README.md.
+  2. Check the signing key's expiry. It is already published   "The signing key"
+     and must NOT be re-published.
+  3. Confirm ~/.m2/settings.xml has the Central token.         "settings.xml"
+  4. Run the four gates locally, from a clean tree.            "The four local gates"
+  5. Read the golden report and confirm the failure is the     "Reading the golden report"
+     expected one, with no rule-level failure.
+  6. Push the release commit to master. NOT the tag yet.       "Push the commit, then wait for CI"
+  7. Wait for CI on that pushed commit and read the required   "Push the commit, then wait for CI"
+     checks. Four jobs are red by design; do not read the
+     workflow-level verdict.
+  8. Tag it. On master, clean tree, annotated, signed.         "The version comes from the git tag"
+  9. Push the tag.                                             "The version comes from the git tag"
+ 10. Deploy. It stages; it does not publish.                   "Publishing to Maven Central"
+ 11. Press Publish in the Portal, then verify on repo1.        "After the deploy"
+
+Steps 1-7 are the preconditions. Steps 8-11 are irreversible in the order given.
+
+
 Coordinates
 ------------------------------------------------------------------------------
 
@@ -12,10 +41,23 @@ Coordinates
                 neoproj4j-grids-us-legacy  (optional CTABLE V2 grids: conus, alaska)
                 neoproj4j-modules          (the parent pom - required)
 
-    NOT published: conformance, golden, benchmark, benchmark-ab. Each sets its own
-    maven.deploy.skip=true. Every published module states maven.deploy.skip=false
-    explicitly rather than inheriting it -- inheritance is what previously made
-    `mvn deploy` publish zero artifacts while reporting success.
+    NOT published: conformance, golden, benchmark, benchmark-ab. Every published module
+    states maven.deploy.skip=false explicitly rather than inheriting it -- inheritance is
+    what previously made `mvn deploy` publish zero artifacts while reporting success.
+
+    All four unpublished modules do set maven.deploy.skip=true, but that property is NOT
+    what keeps golden, benchmark and benchmark-ab out of Central. By this file's own
+    reasoning under `-pl '!conformance'` below, the publishing plugin is a build EXTENSION
+    and its publish goal is injected regardless of maven.deploy.skip. What actually keeps
+    those three unpublished is that they are not in <modules> at all -- each lives in its
+    own profile (pom.xml:306-335), so a normal reactor never contains them. conformance IS
+    in <modules>, which is exactly why it needs the -pl exclusion and they do not.
+
+    The consequence, which is worse than a build error: a deploy run that also activates one
+    of those profiles -- `-Pcentral,golden` or `-Pcentral,bench` -- puts the module into the
+    reactor, and the injected publish goal attaches and stages its jar. Nothing fails. You
+    get a silent publish of an artifact that was never meant to exist, under coordinates
+    nobody will think to check. NEVER combine -Pcentral with golden, bench or bench-ab.
 
 
 The version comes from the git tag, not from pom.xml
@@ -24,14 +66,78 @@ The version comes from the git tag, not from pom.xml
 pom.xml says 1.3.1-SNAPSHOT. That literal is DEAD in a normal build: the jgitver
 Maven extension (.mvn/extensions.xml, .mvn/jgitver.config.xml) rewrites it from git.
 
-    HEAD is exactly an annotated tag vX.Y.Z  ->  X.Y.Z
-    anything else                            ->  X.Y.(Z+1)-SNAPSHOT, with the branch
-                                                 name included unless the branch is
-                                                 listed in nonQualifierBranches
+BEING EXACTLY ON THE ANNOTATED TAG IS NECESSARY BUT NOT SUFFICIENT. Four separate things
+decide the version: whether you are in a linked git worktree, the nearest reachable annotated
+tag, whether the working tree is dirty, and which branch HEAD is on. Getting three of the four
+right still gives you a version you did not want.
 
-So: TAG FIRST, THEN DEPLOY. There is no other way to get a clean release version.
+    in a linked git worktree, ANY tag/branch/state    ->  0.0.0-NO_WORKTREE_AND_INDEX
+    on master, exactly at annotated vX.Y.Z, clean     ->  X.Y.Z              <- the goal
+    on master, exactly at the tag, tree DIRTY         ->  X.Y.(Z+1)-SNAPSHOT
+    on master, any commit past the tag                ->  X.Y.(Z+1)-SNAPSHOT
+    on another branch, exactly at the tag, clean      ->  X.Y.Z-<branch name>
+    detached at the tag, tree dirty                   ->  X.Y.Z
 
-    git tag -a v2.0.0 -m "neoProj4J 2.0.0"
+Measured 2026-08-14 by driving jgitver 0.14.0's own Java API in a scratch clone, with the
+settings in .mvn/jgitver.config.xml, against the existing annotated v2.0.0 tag. No tag was
+created for these:
+
+    master, at the tag, clean                       2.0.0
+    master, one commit past the tag                 2.0.1-SNAPSHOT
+    master, at the tag, one tracked file modified   2.0.1-SNAPSHOT
+    master, at the tag, one UNTRACKED file only     2.0.1-SNAPSHOT
+    detached at the tag, one tracked file modified  2.0.0
+    release/2.1.0-combined, at the tag, clean       2.0.0-release_2.1.0_combined
+    master tip, 26 commits past the tag             2.0.1-SNAPSHOT
+
+And measured the same day with `mvn help:evaluate` in two real trees of this repository, which
+is where the worktree row above comes from:
+
+    /Volumes/git/proj4j              (.git is a directory)   2.0.1-SNAPSHOT
+    .claude/worktrees/combined-210   (.git is a FILE)        0.0.0-NO_WORKTREE_AND_INDEX
+
+THE WORKTREE TRAP, WHICH OVERRIDES ALL THREE OF THE OTHERS. In a linked git worktree -- the
+kind `git worktree add` creates, where `.git` is a file holding a `gitdir:` pointer rather than
+a directory -- jgitver 0.14.0 does not compute a version at all. It reports the literal
+0.0.0-NO_WORKTREE_AND_INDEX, and it does so no matter what the tag, branch or dirtiness is,
+because it never reaches the history: the name says it could not resolve a worktree and an
+index. This repository had 24 worktrees when that was measured, so a release run started in
+the wrong directory is not a remote possibility.
+
+What that means for a deploy: `mvn -Pcentral deploy` from a worktree would try to publish
+0.0.0-NO_WORKTREE_AND_INDEX. The version check further down this file does catch it, because
+that string is not "2.1.0" -- but it is the ONLY thing that catches it. `git status
+--porcelain`, `git describe --tags --exact-match` and `git rev-parse --abbrev-ref HEAD` all
+answer correctly inside a worktree, so all three pre-deploy checks pass. Run the deploy from
+the primary clone. The measured case above was a dirty tree on a branch; the failure is
+structural rather than state-dependent, so do not expect a clean worktree at a tag to behave
+differently.
+
+So: TAG FIRST, THEN DEPLOY -- on master, with a clean tree. There is no other way to get a
+clean release version.
+
+    git checkout master                             # see the branch trap below
+    git status --porcelain                          # must print NOTHING, including untracked
+    git tag -a vX.Y.Z -m "neoProj4J X.Y.Z"          # substitute the real version
+
+Do not run that until steps 1-7 of the checklist at the top of this file have all passed. It
+is the last reversible moment.
+
+THE BRANCH TRAP, WHICH IS WHY THERE IS A THIRD PRE-DEPLOY CHECK. jgitver appends the branch
+name whenever HEAD is not detached and the branch is not listed in nonQualifierBranches -- and
+it does that to a RELEASE version, not only to a snapshot. Reading jgitver's bytecode:
+VersionStrategy.enhanceVersionWithBranch is called unconditionally on a non-detached HEAD.
+.mvn/jgitver.config.xml lists main,master and nothing else, so master and main escape only
+because they are on that list.
+
+This tree is on release/2.1.0-combined right now. Tagging v2.1.0 here with a perfectly clean
+tree computes 2.1.0-release_2.1.0_combined -- that is the release/2.1.0-combined line in the
+measurements above, taken against v2.0.0 on this exact branch. The two checks this file used to
+give before a deploy both pass while it happens: `git status --porcelain` is empty and `git
+describe --tags --exact-match` names the tag. Neither looks at the branch, which is why `git
+rev-parse --abbrev-ref HEAD` was added as a third check -- see the pre-deploy block further
+down. The tag must sit on master, or HEAD must be detached. Nothing else produces a clean
+X.Y.Z.
 
 Ask the build what it resolved rather than assuming:
 
@@ -60,7 +166,29 @@ Traps:
     tag explicitly rather than relying on it being carried along:
 
         git ls-remote --tags origin
-        git push origin v2.0.0        # or --follow-tags on the next push
+        git push origin vX.Y.Z        # or --follow-tags on the next push
+
+  - THE COMMIT MUST BE PUSHED BEFORE THE TAG, not with it. Pushing only the tag is not
+    enough and is a step this file used to leave out entirely. See "Push the commit, then
+    wait for CI" at the end of this file: no workflow in this repository triggers on a tag,
+    and none of them triggers on a push to a branch other than master or main, so the only
+    way to get CI to run on the exact commit you are about to tag is to push that commit to
+    master and let it build there.
+
+
+Docs that ship with a release
+------------------------------------------------------------------------------
+
+These are part of cutting a release, not paperwork to do afterwards, and this file did not
+name them before. Update and commit them in the release commit, so the commit the tag points
+at is the one that describes the release:
+
+    CHANGELOG.md        the entry for the version being cut
+    RELEASE-NOTES.md    the same release, written for a consumer
+    README.md           any version number, coordinate or dependency snippet it quotes
+
+All three are among the modified files in this tree right now, so assume they are mid-edit and
+read them before you commit rather than after.
 
 
 Publishing to Maven Central
@@ -73,19 +201,41 @@ Prerequisites, in the order they will block you:
      `emilevictor`. This is why the groupId is shaped that way -- an io.github.<user>
      namespace is verified by the matching GitHub account and needs no DNS record.
   3. A GPG key whose PUBLIC half is published to a keyserver -- not merely a key you can
-     sign with. See "The signing key" below. This is the most likely thing to stop you, and
-     it fails with a message that does not name the cause.
+     sign with. This is the most likely thing to stop a FIRST release, and it fails with a
+     message that does not name the cause. It is ALREADY SATISFIED for this key, and the
+     publish step must not be re-run -- read "The signing key" below before touching it.
+     What still has to be checked every time is the expiry.
   4. ~/.m2/settings.xml with a <server> block. See "settings.xml" below.
 
-Then, with HEAD on the release tag and the working tree clean:
+Then, with HEAD on master, exactly on the release tag, and the working tree clean -- all three,
+for the reasons under "The version comes from the git tag" above:
 
-    mvn -Pcentral deploy -DskipTests -pl '!conformance'
+    mvn -B -Pcentral clean deploy -DskipTests -pl '!conformance'
 
 Every flag there is load-bearing.
 
+  -B
+      Batch mode, as in every other Maven command in this file. Without it Maven may stop to
+      prompt, and the progress spam makes the one line that matters -- the computed version --
+      hard to find in a log you will want to keep.
+
+  clean
+      A release must not be assembled partly from stale target/ output left by a gate run at a
+      different version. jgitver rewrites the version at build time, so target/ can easily hold
+      jars named for the previous computation. Start empty.
+
   -Pcentral
-      Carries central-publishing-maven-plugin and maven-gpg-plugin. Sources and javadoc
-      jars are produced unconditionally by the root build, so that part needs no flags.
+      Carries central-publishing-maven-plugin and maven-gpg-plugin.
+
+      This file used to say sources and javadoc jars are produced unconditionally by the root
+      build. That is wrong, measured against what 2.0.0 actually published to repo1:
+      neoproj4j-grids-us-legacy-2.0.0-javadoc.jar is a 404 -- there is no javadoc jar for that
+      module at all -- and neoproj4j-epsg's is a 317-byte manifest-only shell. Central accepted
+      the bundle anyway, so this is NOT a blocker and does not need fixing before a release;
+      the claim was simply untrue. Both modules contain zero .java files. grids-us-legacy sets
+      maven.compiler.skip and maven.test.skip (grids-us-legacy/pom.xml:49-50) and epsg does
+      not, which is the likeliest reason one produced nothing and the other produced an empty
+      jar -- UNCONFIRMED, not reproduced locally. Do not repeat it as fact.
 
   -pl '!conformance'
       The publishing plugin is a build EXTENSION, so its publish goal is injected into
@@ -109,6 +259,18 @@ First released from this tree: 2.0.0, on 2026-08-06.
 
 The signing key
 ------------------------------------------------------------------------------
+
+FOR THIS KEY, THIS STEP IS ALREADY DONE AND MUST NOT BE REDONE. The public half is already on
+keyserver.ubuntu.com, carrying only the gmail user ID -- checked, not assumed. Prerequisite 3
+needs no action. In particular DO NOT RUN `gpg --send-keys`, not even to be sure: this key
+carries a second user ID that must not become public, a plain send from the local keyring
+publishes every user ID on the key, and keyservers have no delete. Read the state instead:
+
+    gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys "$FPR"   # or the curl lookup below
+
+The rest of this section is how the key got published and how to re-publish it if the expiry
+has to be extended. Read it before you run any of it. The expiry check at the end of the
+section applies every release.
 
 Central does not merely check that the .asc files are well-formed. It resolves your public
 key BY FINGERPRINT from a public keyserver, querying from its own infrastructure. If that
@@ -179,11 +341,16 @@ make public. Two things to understand first:
 CHECK THE EXPIRY BEFORE YOU TAG. An expired key fails validation exactly like an
 unpublished one. `gpg --list-keys` shows the date; `gpg --edit-key "$FPR"` then `expire`
 extends it. An extended key must then be re-published -- the keyserver copy does not
-update itself.
+update itself -- and re-publishing means the filtered export above, not a plain --send-keys.
 
-maven-gpg-plugin is wired into the `central` profile with an empty <configuration>, so the
-key comes from the gpg agent rather than from Maven. Export GPG_TTY=$(tty) so pinentry has
-somewhere to prompt.
+The current key expires 2026-11-22. Read that off the keyring rather than trusting this line;
+if a release is being cut close to or after that date, extend it first.
+
+maven-gpg-plugin is wired into the `central` profile with no <configuration> element at all --
+just a version and one execution binding the sign goal to verify (pom.xml:283-296). Same
+effect as the empty block this file used to describe: nothing tells the plugin which key to
+use, so the key comes from the gpg agent rather than from Maven. Export GPG_TTY=$(tty) so
+pinentry has somewhere to prompt.
 
 
 settings.xml
@@ -230,11 +397,12 @@ without dropping it first. A FAILED one does not, and can be left alone.
 After you press Publish, the Portal says PUBLISHED quickly, repo1 lags by up to about 30
 minutes, and search.maven.org can take hours. The only check that means anything is repo1:
 
+    V=2.1.0        # the version you just released -- the ONLY place this file names it
     for a in neoproj4j neoproj4j-epsg neoproj4j-geoapi neoproj4j-db \
              neoproj4j-grids-us-legacy neoproj4j-modules; do
       printf '%s ' "$a"
       curl -s -o /dev/null -w '%{http_code}\n' \
-        "https://repo1.maven.org/maven2/io/github/emilevictor/neoproj4j/$a/2.0.0/$a-2.0.0.pom"
+        "https://repo1.maven.org/maven2/io/github/emilevictor/neoproj4j/$a/$V/$a-$V.pom"
     done
 
 All six must return 200.
@@ -243,9 +411,58 @@ A BUILD FAILURE AT THE VERY END IS NOT NECESSARILY A PUBLISHING FAILURE. The upl
 at the last module in the reactor, so a plugin that crashes after uploading still leaves a
 valid deployment behind -- central-publishing-maven-plugin 0.7.0 did exactly that, failing
 on a field it did not recognise in Central's reply. Check the Portal before re-running
-anything. In particular, do NOT edit a file to fix it and retry immediately: any edit
-dirties the working tree, jgitver then computes X.Y.(Z+1)-SNAPSHOT instead of the tagged
-version, and the retry publishes the wrong coordinates.
+anything. In particular, do NOT edit a file to fix it and retry immediately.
+
+WHY NOT, AND A CORRECTION TO WHAT THIS FILE SAID LAST TIME. A dirty tree DOES change the
+computed version on a branch. An earlier version of this section claimed the opposite -- that
+useDirty is off, so the version comes from commits and tags alone and an edited file cannot
+move it. That claim is wrong, and the paragraph it deleted as "false" was right.
+
+What went wrong: the measurement behind it was taken in a scratch clone DETACHED at v2.0.0.
+Detached HEAD is the one configuration in which dirtiness is ignored, so the one case measured
+was the only case where the rule does not apply, and the result was generalised from it. Do not
+restore that text.
+
+What is actually true, measured 2026-08-14 by driving jgitver 0.14.0's Java API directly with
+the settings in .mvn/jgitver.config.xml, against the existing v2.0.0 tag:
+
+    on master, at the tag, one tracked file modified   ->  2.0.1-SNAPSHOT
+    on master, at the tag, one UNTRACKED file only     ->  2.0.1-SNAPSHOT
+    detached at the tag, one tracked file modified     ->  2.0.0
+
+An untracked file is enough. jgitver asks jgit for Status.isClean(), which counts untracked
+files, so a stray scratch file you never added moves the version exactly like an edit does.
+
+The mechanism, read out of jgitver's bytecode with `javap -c -p` rather than assumed. useDirty
+is genuinely not set in .mvn/jgitver.config.xml and its default is genuinely false -- that part
+of the old text was correct. But useDirty only controls whether the literal qualifier `dirty`
+gets appended to the version string (MavenVersionStrategy.build, offsets 302-321). Dirtiness is
+consulted a SECOND time, separately and unconditionally, in the decision to bump the patch and
+add -SNAPSHOT (offsets 53-80, 114-162, 164-226). That second use does not look at useDirty at
+all. It is suppressed only when HEAD is detached. So useDirty=false buys you nothing except the
+absence of the word `dirty`, which is why the version that comes out looks entirely ordinary.
+
+Both hazards are therefore real, and the second is the worse one:
+
+  - On a branch, a dirty tree at the tag publishes X.Y.(Z+1)-SNAPSHOT -- visibly wrong
+    coordinates. Central will not accept a -SNAPSHOT bundle, so this one stops itself.
+  - Detached at the tag, a dirty tree publishes the RIGHT version number built from bytes the
+    tag does not point at. The artifact in Central is then something no checkout of that tag
+    reproduces, nothing in the build output says so, and the version string gives no hint.
+
+If you must change a file, commit it, put the release tag on the new commit, and start again
+from step 1 of the checklist at the top of this file.
+
+Two checks before every deploy. Both must pass:
+
+    git status --porcelain              # must print nothing at all, untracked files included
+    git describe --tags --exact-match   # must name the release tag
+
+Neither of those two checks looks at the branch, and a wrong branch silently appends a branch
+qualifier to a release version -- see "The branch trap" under "The version comes from the git
+tag". Check that as well:
+
+    git rev-parse --abbrev-ref HEAD     # must print master (or HEAD, if deliberately detached)
 
 
 Installing locally (for a downstream consumer to test against)
@@ -262,6 +479,13 @@ src/main and therefore attaches no jar. Exclude it:
         -Dmaven.install.skip=false -pl '!conformance' install
 
 That installs the parent pom plus all five published modules, each with a -sources jar.
+Verified 2026-08-14 by running the same command with `package` instead of `install`: five
+-sources jars were built, for core, epsg, geoapi, grids-us-legacy and db. Two of those modules
+contain no .java files at all -- epsg has 18 resource files and grids-us-legacy has 3 -- and
+they still get a -sources jar, because maven-source-plugin packages the resource roots as well
+as the source roots. Do not "fix" a sources jar that looks empty of code; for those two modules
+that is what it is supposed to contain. conformance is the one module with nothing under
+src/main, which is why it is excluded.
 
 
 Build environment
@@ -275,7 +499,133 @@ Build environment
     META-INF/BenchmarkList and makes benchmark/run-gate.sh look broken for no visible
     reason.
 
-Before tagging a release, the four gates should be green:
+
+The four local gates
+------------------------------------------------------------------------------
+
+Checklist step 4. Run them before you tag, from a clean tree:
 
     ./docker/run.sh          # ci + conformance + golden + determinism
     ./docker/run.sh bench    # opt-in, ~20 min
+
+`golden` is listed as FAIL(expected) in the run's summary table and that is the intended state
+-- it does not set the exit code. Do not wait for it to go green and do not "fix" it before a
+release.
+
+
+Reading the golden report
+------------------------------------------------------------------------------
+
+Checklist step 5. What golden must show is the SAME failure as the branch you are releasing
+from: the pinned data line reproduced byte-identically, every rule carrying a pinned
+expected_rows, and no hit for FIGURES_MOVED, COUNT_MISMATCH, DEAD_RULE, EXPIRED_RULE or
+PENDING_RULE_FIRED.
+
+DOCKER/RUN.SH ALREADY CHECKS ALL FIVE FOR YOU, which this file never said. It greps those exact
+five names out of golden's surefire XML and, on a hit, refuses to record golden as an expected
+failure -- it records a real FAIL and prints which ones fired (docker/run.sh:704-719; the header
+at docker/run.sh:26-36 explains why the figure check has to be a separately named failure rather
+than folded into the expected one). So the thing to read is the run's own verdict, not a grep:
+
+    /tmp/neoproj4j-docker-out/summary.txt
+
+That is the default output directory on the HOST; run.sh mounts it into the container as /out,
+and `--out <dir>` moves it. In the summary table:
+
+    golden  FAIL(expected)   ...no FIGURES_MOVED/COUNT_MISMATCH/DEAD_RULE/EXPIRED_RULE/PENDING_RULE_FIRED
+        all five were absent. This is the state you want before a release.
+
+    golden  FAIL             ...UNEXPLAINED plus FIGURES_MOVED(n) ...
+        one or more of the five fired, and the detail column names which and how many.
+        Do not release over this.
+
+What the run leaves on the host:
+
+    /tmp/neoproj4j-docker-out/summary.txt                  the per-check verdicts and details
+    /tmp/neoproj4j-docker-out/golden.log                   golden's full Maven output
+    /tmp/neoproj4j-docker-out/reports/golden-summary.txt   the report itself, copied out of
+                                                           golden/target/golden/golden-summary.txt
+
+THE SUREFIRE XML IS NOT AMONG THEM. The five names appear in
+golden/target/surefire-reports/TEST-org.locationtech.proj4j.golden.GoldenMasterTest.xml, which
+lives in the container's private copy of the tree and is NOT copied out (run.sh copies the three
+files listed above and nothing else). So after a container run there is nothing on the host to
+grep, which is why the previous version of this section -- grep these five names, no path given
+-- was not a runnable instruction. Read summary.txt and golden.log instead.
+
+If you want the XML itself, run golden outside the container in your own tree, where the path
+above is real, and grep it one name at a time. Use `grep -nE`, never `grep -c`: all five names
+also appear on the summary line, so a count cannot tell a real hit from that line.
+
+    grep -nE 'FIGURES_MOVED' golden/target/surefire-reports/TEST-*GoldenMasterTest.xml
+    # and the same for COUNT_MISMATCH, DEAD_RULE, EXPIRED_RULE, PENDING_RULE_FIRED
+
+
+Push the commit, then wait for CI
+------------------------------------------------------------------------------
+
+Checklist steps 6 and 7.
+
+A LOCAL RUN IS NOT SUFFICIENT, AND THIS IS NOT A FORMALITY. The local container runs on one
+architecture -- this tree was developed on arm64 -- and CI also runs x86-64. Those are not the
+same test. During 2.1.0, SwissObliqueMercatorProjection passed every local gate on arm64 while
+failing on x86-64, because it reached asin() with an argument that rounds to exactly 1.0 on one
+architecture and not the other, and HotSpot substitutes a per-architecture routine for
+Math.sin/cos/tan/log/exp. The local gates cannot see that class of defect at all.
+
+To get CI to run on the commit you are about to tag, you have to push that commit -- to master,
+or as the head of a pull request. ci.yaml, conformance.yaml, determinism.yaml and bench.yaml all
+trigger on `push: branches: [master, main]` and on `pull_request`, and none of them has a tag
+trigger. A commit pushed to any other branch, and a pushed tag, run nothing at all. This tree is
+on release/2.1.0-combined, so the work has to reach master before CI will look at it -- which it
+has to do regardless, because a tag on any other branch gets a branch qualifier. So:
+
+    git push origin master        # the release commit, WITHOUT the tag
+    # wait for the run to finish, read the checks below, and only then tag
+
+DO NOT READ THE WORKFLOW-LEVEL VERDICT. `gh run list --commit` reports one conclusion per
+workflow, and a workflow's conclusion folds in its `continue-on-error` jobs. Four jobs in this
+repository are red BY DESIGN -- Build (JDK EA) (ci.yaml:143), Java 8 runtime compatibility
+(ci.yaml:188), and the tr_TR and de_DE determinism legs (ci.yaml:352, via `matrix.advisory`) --
+so the CI workflow reads `failure` on a commit that is perfectly releasable. Told "the checks
+must be green" and handed a workflow verdict, you will either block a good release or learn to
+ignore a red line, and both are worse than not looking. "Do not tag over a red required job"
+simply cannot be evaluated from `gh run list`.
+
+If the release commit came in through a pull request, ask for the required checks only:
+
+    gh pr checks <n> --required
+
+`--required` restricts the list to checks required by branch protection, which is what excludes
+the advisory jobs. The flag is present in `gh pr checks --help` on gh 2.97.0.
+
+If the commit was pushed straight to master there is no pull request, and therefore no
+required-checks list to ask for. Read the JOB conclusions rather than the run's:
+
+    gh run list --branch master --limit 5          # find the run id for your commit
+    gh run view <run-id>                           # lists each job with its own conclusion
+
+The header line of that output will still say the run failed. Ignore it and read the jobs,
+skipping the four named above. Anything else red is a real failure.
+
+GOLDEN WILL NOT APPEAR IN EITHER LIST, AND IT IS NOT MISSING. golden.yaml is `schedule` (weekly)
+plus `workflow_dispatch` only -- golden.yaml:93-97, with its push and pull_request triggers
+deliberately removed while the backlog is triaged. It therefore never runs for a pushed commit.
+Do not go looking for a fifth workflow; run it deliberately if you want it:
+
+    gh workflow run golden.yaml
+
+Do not tag over a red required check, and do not tag a commit CI has not yet run.
+
+The tag is signed. Global git config sets tag.gpgsign and tag.forcesignannotated, so
+`git tag -a` needs the signing key present and will prompt -- have the hardware token in and
+GPG_TTY exported before you start.
+
+REASONED FROM THE DOCUMENTATION, NOT MEASURED: `git tag` without -m should abort rather than
+quietly create an unsigned lightweight tag, which is the behaviour you want. This has not been
+tested here, deliberately -- exercising a signing path costs a PIN retry on the token if it goes
+wrong, and the card locks at zero. Git's documented behaviour under tag.gpgSign is consistent
+with it. Treat it as an expectation, not a verified guarantee: after tagging, confirm what you
+actually got.
+
+    git tag -v vX.Y.Z            # read-only; must report a good signature

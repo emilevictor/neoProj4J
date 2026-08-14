@@ -27,7 +27,7 @@ import org.locationtech.proj4j.util.Complex;
  * {@link ModifiedStereographicProjection}'s class comment for why that is reproduced rather
  * than tidied.
  *
- * @since 1.5.0
+ * @since 2.0.0
  */
 public class MillerOblatedStereographicProjection extends ModifiedStereographicProjection {
 

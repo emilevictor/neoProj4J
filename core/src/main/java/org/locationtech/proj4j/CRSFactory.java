@@ -133,7 +133,7 @@ public class CRSFactory {
      *                                                                   is unknown
      * @throws org.locationtech.proj4j.vertical.UnknownVerticalCrsException if the vertical half
      *                                                                   is unknown
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public CompoundCrs createCompound(String name) {
         CompoundCrsName parts = CompoundCrsName.parse(name);
@@ -151,7 +151,7 @@ public class CRSFactory {
      * @return true for a compound CRS reference such as <code>EPSG:4326+5773</code>; false for
      *         a plain <code>authority:code</code> and false for every PROJ.4 parameter string,
      *         including the many that contain a <code>'+'</code>
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public static boolean isCompoundName(String name) {
         return CompoundCrsName.looksLikeCompound(name);

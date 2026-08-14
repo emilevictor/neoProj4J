@@ -91,7 +91,7 @@ public final class PrimeMeridian implements Serializable {
      * prime meridian from one {@code Projection} to another has to be able to see the value.
      *
      * @return the offset from Greenwich, radians, positive east
-     * @since 1.5.0
+     * @since 2.0.0
      */
     public double getOffsetFromGreenwich() {
         return offsetFromGreenwich;

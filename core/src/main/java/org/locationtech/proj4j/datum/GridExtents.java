@@ -67,7 +67,7 @@ import java.io.IOException;
  * silently shrinking a declared grid would produce a smaller grid that still answers, which is the
  * failure mode this project exists to eliminate.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 public final class GridExtents {
 

@@ -117,7 +117,7 @@ import org.locationtech.proj4j.resource.ResourceResolvers;
  * @see CrsOperation
  * @see ProjContext
  * @see LegacyAdapters
- * @since 1.5.0
+ * @since 2.0.0
  */
 public final class Proj {
 

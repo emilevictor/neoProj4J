@@ -49,7 +49,7 @@ import org.locationtech.proj4j.util.ProjectionMath;
  * refusing an unset path is upstream's own behaviour, not a divergence.
  *
  * @see SpaceObliqueMercatorProjection
- * @since 1.5.0
+ * @since 2.0.0
  */
 public class MisrSpaceObliqueMercatorProjection extends SpaceObliqueMercatorProjection {
 

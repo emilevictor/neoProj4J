@@ -53,7 +53,7 @@ import org.locationtech.proj4j.ProjCoordinate;
  * 1, 5 to 2 and 6 to <b>3</b> — so lobe 6 depends on lobe 3, which depends on lobe 2. Reordering
  * them silently shifts a lobe by the width of an ocean.
  *
- * @since 1.5.0
+ * @since 2.0.0
  */
 public class InterruptedMollweideOceanicProjection extends InterruptedProjection {
 

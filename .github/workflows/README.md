@@ -31,7 +31,7 @@ Five workflows:
 > Both jobs were **blocking and red** when added, on real findings, and that was the intended state.
 > They have since gone different ways. **`bench` / `gate` is GREEN and still blocking** — the
 > baselines were captured and committed, and the job was re-run to confirm it. **`golden` was
-> de-scoped from the PR and push checks** in commit `052e627`: it is red on a real 2,291-row triage
+> de-scoped from the PR and push checks** in commit `052e627`: it is red on a real 2,287-row triage
 > backlog that nobody is working through right now, so rather than leave a permanently failing check
 > on every pull request, its triggers are `schedule` (weekly) and `workflow_dispatch` only. The job
 > itself is unchanged and still fails on the backlog when invoked.
@@ -51,15 +51,15 @@ Five workflows:
 | `ci.yaml` | `jdk-ea` | advisory | push, PR | The next JDK line (27-ea) still accepts `<release>8</release>` and the felix bundle plugin still works. Early warning, months ahead of anyone using that JDK. | ~5 min |
 | `ci.yaml` | `jdk8-runtime` | advisory | push, PR | Jars built on JDK 21 actually *run* on a real JDK 8, and every emitted class file is class-file major version 52. Keeps `<release>8</release>` from being an unverified promise. | ~5 min |
 | `ci.yaml` | `determinism` — `en_US/UTF-8/UTC/x64` | **blocking** | push, PR | `core` passes in the reference environment. | ~3 min |
-| `ci.yaml` | `determinism` — `tr_TR/UTF-8/Europe-Istanbul/x64` | advisory — **fails today** | push, PR | No result depends on the default `Locale`. Currently red, see below. | ~3 min |
+| `ci.yaml` | `determinism` — `tr_TR/UTF-8/Europe-Istanbul/x64` | advisory — the defect it was added for is **fixed**; kept advisory until a run shows it green | push, PR | No result depends on the default `Locale`. See below. | ~3 min |
 | `ci.yaml` | `determinism` — `de_DE/ISO-8859-1/Asia-Kolkata/x64` | advisory | push, PR | No result depends on the default charset, decimal separator, or a half-hour UTC offset. | ~3 min |
 | `ci.yaml` | `determinism` — `en_US/UTF-8/UTC/arm64` | advisory | push, PR | Cross-architecture *smoke*: `core`'s suite still passes on AArch64. **Superseded for the `StrictMath` claim** by `determinism.yaml`, which compares bits rather than pass/fail. | ~4 min |
 | `determinism.yaml` | `bits` (6 legs: x86-64 × aarch64, JDK 11/17/21) | **blocking** | push, PR | Each leg asserts the committed 54,265-result raw-bit golden for `StrictMath` and `FastStrictTrig`. Six green legs = six architecture/JDK combinations produced identical bits. | ~3–5 min per leg |
 | `determinism.yaml` | `cross-arch` | **blocking** | push, PR | (a) every leg reported; (b) **at least one leg shows `Math` diverging** from the golden — the non-vacuity check, which cannot be made inside a leg; (c) reports the NaN-payload carve-out across architectures. | ~1 min |
-| `conformance.yaml` | `corpus` | **blocking** — green today | push, PR | `mvn -Pconformance -pl conformance -am verify` with `-Dtest='…conformance.**.*Test'`: the full vendored gie/GIGS sweep (**7,441 / 7,900**, `regressed 0`), diffed against the checked-in expected-outcome manifest. Catches any pass→fail regression. | sweep itself **0.7 s**, whole reactor **8 s** warm; the 90-min timeout is all cold cache, untuned |
+| `conformance.yaml` | `corpus` | **blocking** — green today | push, PR | `mvn -Pconformance -pl conformance -am verify` with `-Dtest='…conformance.**.*Test'`: the full vendored gie/GIGS sweep (**7,449 / 7,902**, `regressed 0`), diffed against the checked-in expected-outcome manifest. Catches any pass→fail regression. | sweep itself **0.7 s**, whole reactor **8 s** warm; the 90-min timeout is all cold cache, untuned |
 | `conformance.yaml` | `vendored-corpus-matches-upstream` | **blocking** | push, PR | The vendored corpus is byte-for-byte what PROJ `9.8.1` (`f08fa86…`) produces: manifest verified with `shasum -a 256 -c`, `sync-upstream.sh` re-run against a real PROJ checkout, then `git diff --exit-code`. | ~4–6 min (a full PROJ clone dominates) |
 | `conformance.yaml` | `upstream-drift` | advisory | weekly cron (Mon 04:17 UTC), `workflow_dispatch` | What syncing from PROJ **`master`** instead of the pin would change. A news feed, so upstream corpus changes are known before re-pin time. Never fails the build. | ~4–6 min |
-| `golden.yaml` | `golden` | **not a PR or push check** — de-scoped in `052e627`; runs weekly and on demand, and is **expected to fail** on the 2,291-row backlog | `schedule` (weekly), `workflow_dispatch` | `mvn -Pgolden -pl golden -am verify`: generate the table from the working tree, merge-join against `baseline/1.4.3`, apply `rules.yaml`. Fails on any `UNEXPLAINED` row, `DEAD_RULE`, `PENDING_RULE_FIRED`, `EXPIRED_RULE` or `COUNT_MISMATCH`. | ~20 s of sweep on top of the reactor build |
+| `golden.yaml` | `golden` | **not a PR or push check** — de-scoped in `052e627`; runs weekly and on demand, and is **expected to fail** on the 2,287-row backlog | `schedule` (weekly), `workflow_dispatch` | `mvn -Pgolden -pl golden -am verify`: generate the table from the working tree, merge-join against `baseline/1.4.3`, apply `rules.yaml`. Fails on any `UNEXPLAINED` row, `FIGURES_MOVED`, `DEAD_RULE`, `PENDING_RULE_FIRED`, `EXPIRED_RULE` or `COUNT_MISMATCH`. | ~20 s of sweep on top of the reactor build |
 | `bench.yaml` | `gate` | **blocking** — **green today** | push, PR, `workflow_dispatch` | `run-gate.sh --quick --require-baseline`: Tier 1 allocation bytes/op and Tier 2 deterministic transcendental call counts, over **245 arms** in 10 shards, **245 gated, 0 EXCLUDED**. | **21.4 min** measured for `--quick` (Temurin 21 / aarch64, in the container, 2026-08-03; was 15.8 min at 181 arms); a full run is ~90 min. Still never timed on a runner |
 
 ## Jobs expected to fail today, and why
@@ -71,10 +71,19 @@ Five workflows:
 
 - **~~`build-and-test` / the JDK 17 leg~~ — FIXED. The three tests now SKIP, with the reason
   printed, and a skip is reported as a skip.** `mvn -B clean install` exits **0** with javadoc
-  enabled across the whole default reactor. Per-module surefire counts on the current tree: `core`
-  **2,141** with **zero skipped**, `db` **75**, `geoapi` **12**, `grids-us-legacy` 0, and
-  `conformance` only its unit tests — the corpus sweep is behind `-Pconformance` and is
-  `conformance.yaml`'s business, not this job's.
+  enabled across the whole default reactor. Per-module surefire counts measured 2026-08-14 on the
+  2.1.0 release branch with `./docker/run.sh ci`, which runs the job's exact command: `core`
+  **2,234** with 2 skipped, `db` **75**, `geoapi` **13**, `epsg` and `grids-us-legacy` 0 (no test
+  sources), and `conformance` **345** with 1 skipped — only its unit tests, because the corpus sweep
+  is behind `-Pconformance` and is `conformance.yaml`'s business, not this job's. The run reports
+  **2,667** in total with **3** skipped, across 251 report files — read that total off the run rather
+  than adding the modules up — and `docker/run.sh`'s `CI_MIN_TESTS` floor of
+  2,600 is set against it. Master at `2fc5989`, measured the same way, is **2,640**.
+
+  The 3 skips are not the three tests this bullet is about, which now run: 2 are
+  `NoGeoApiInCoreTest`'s assumptions that `geoapi` is compiled and `core` is packaged, neither of
+  which is true when surefire runs on a clean first build, and 1 is `GieConformanceTest` aborting
+  because the corpus profile is off.
 
   The finding as recorded was: the JDK **17** leg failed on three `core` tests that have nothing to
   do with the build — `FastStrictTrigAllocationTest.directCallsAllocateNothing`,
@@ -113,43 +122,69 @@ Five workflows:
   `<excludePackageNames>org.locationtech.proj4j.db.gen</excludePackageNames>` — the same pattern
   `geoapi/pom.xml` already uses for `…geoapi.spi`. This was structurally unreachable until the
   reactor first got as far as `db`, which is why it appears only now.
-- **`determinism` / `tr_TR`.** `core/src/main/java/org/locationtech/proj4j/io/Proj4FileReader.java:41`
-  calls `authorityCode.toLowerCase()` with no `Locale`. Under `tr_TR` the Turkish casing rule maps
-  `I` to dotless `ı`, so `"ESRI"` becomes `"esrı"`, the resource `proj4/nad/esri` is never found, and
-  all 2,954 ESRI codes are unreachable. The leg is `continue-on-error: true` so it is a
-  green-when-fixed signal rather than a permanent red. **Remove `advisory: true` from that matrix
-  entry when the `toLowerCase(Locale.ROOT)` fix lands.**
+- **`determinism` / `tr_TR` — FIXED. The leg is still advisory, because no run has shown it green
+  yet.** `core/src/main/java/org/locationtech/proj4j/io/Proj4FileReader.java:76` now reads
+  `authorityCode.toLowerCase(Locale.ROOT)`. It was a bare `toLowerCase()` at `:41`. The fix landed in
+  `6d5e9af` (2026-08-05), which is an ancestor of this branch.
+
+  **Why the fix passes `Locale.ROOT`.** That string is a classpath resource name, not text for a
+  reader, so it has to fold the same way in every locale. Under `tr_TR` the Turkish casing rule maps
+  `I` to the dotless `ı` (U+0131), so `"ESRI"` lowercases to `"esrı"`, the lookup for
+  `proj4/nad/esri` never resolves, and every ESRI definition becomes unreachable — **2,954 of them**,
+  counted 2026-08-14 as the code entries in `epsg/src/main/resources/proj4/nad/esri`. That is the
+  reason for the argument, and it is why the argument must not be dropped again.
+  `NoAmbientLocaleInCoreTest` scans `core` for the whole class of defect, and
+  `theFixedSitesStayFixedUnderATurkishDefaultLocale` pins this site. There are no bare
+  `toLowerCase()` or `toUpperCase()` calls left anywhere in `core/src/main/java`.
+
+  **`advisory: true` stays on that matrix entry — `ci.yaml:389`.** The defect is fixed, but no job in
+  this directory has executed on a runner (see the note at the end of this file), so nothing has
+  shown this leg green. Removing the marker now would assert a pass nobody has observed, which is the
+  failure this file exists to prevent. **One green run of that leg is what justifies removing it.**
 - **`conformance` / `corpus`** is no longer in this list. The job's exact command has been run
-  locally and is green — **7,441 / 7,900 genuine passes with `regressed 0`**, re-measured
-  2026-08-02 (it read 7,378 / 7,895 on 2026-08-01; both the numerator and the denominator have
-  moved, so quote the pair, never one of them). It has been shown to go red both on an injected
+  locally and is green — **7,449 / 7,902 genuine passes with `regressed 0`**, re-measured
+  2026-08-14 on the 2.1.0 release branch with `./docker/run.sh conformance` (master at `2fc5989`
+  reads 7,448 / 7,902; it read 7,378 / 7,895 on 2026-08-01 and
+  7,441 / 7,900 on 2026-08-02; both the numerator and the denominator have moved every time, so
+  quote the pair, never one of them). It has been shown to go red both on an injected
   regression and on an absent baseline. See the section at the end of this file. The *YAML* has
   still never executed on a runner; treat the first run as its first test.
 - **`jdk-ea`** goes yellow rather than red whenever Adoptium has no `27-ea` build. That is the
   correct outcome for an advisory signal; bump the version each time a JDK GAs.
 
 - **`golden` / `golden`.** Not a PR or push check any more — see the de-scope note at the top of this
-  file — but when it is run, weekly or on demand, it is **expected to fail**, on **2,291
+  file — but when it is run, weekly or on demand, it is **expected to fail**, on **2,287
   `UNEXPLAINED` rows**. The gate is that the golden *report* is unchanged against the baseline, not
   that the test passes; a doc that implies `golden` should be green is wrong. Its current assertion
-  reads (exit 1):
+  reads (exit 1), measured 2026-08-14 on the 2.1.0 release branch with `./docker/run.sh golden`:
 
   ```
-  12,005 UNCHANGED · 41,425 CHANGED · 0 ADDED · 0 REMOVED · 39,134 INTENDED · 2,291 UNEXPLAINED
+  11,994 UNCHANGED · 41,436 CHANGED · 0 ADDED · 0 REMOVED · 39,149 INTENDED · 2,287 UNEXPLAINED
   ```
 
-  **The headline has now held at 2,291 across four readings while the line underneath it moved every
-  time**, and that is the reusable point, not a coincidence:
+  **The headline held at 2,291 across four readings while the line underneath it moved every time,
+  and then it moved too** — which is the reusable point in both halves: a stable headline was never
+  evidence of a stable measurement, and it was never evidence the headline was pinned either.
 
   | reading | UNCHANGED | CHANGED | INTENDED | UNEXPLAINED |
   |---|---:|---:|---:|---:|
   | 2026-08-01 | 12,023 | 41,407 | 39,116 | **2,291** |
   | 2026-08-02 | 12,014 | 41,416 | 39,125 | **2,291** |
   | 2026-08-03 | 12,012 | 41,418 | 39,127 | **2,291** |
-  | current | 12,005 | 41,425 | 39,134 | **2,291** |
+  | 2026-08-11 | 12,005 | 41,425 | 39,134 | **2,291** |
+  | 2026-08-14 | 12,002 | 41,428 | 39,141 | **2,287** |
+  | 2026-08-14 (2.1.0 branch, before the somerc rule) | 11,996 | 41,434 | 39,147 | **2,287** |
+  | 2026-08-14 (2.1.0 branch, after it) | 11,994 | 41,436 | 39,149 | **2,287** |
 
-  Each time, rows moved from UNCHANGED into CHANGED and were **all** absorbed by rules. Two of them
-  are `LambertAzimuthalEqualAreaProjection`'s `Math.hypot` → `MathHelpers.norm2` conversion, claimed
+  For the first four readings, rows moved from UNCHANGED into CHANGED and were **all** absorbed by
+  rules; on the fifth, 3 more moved and 7 were newly claimed, so 4 came out of the backlog. On the
+  sixth — the 2.1.0 release branch — 6 more moved from UNCHANGED into CHANGED and a single rule,
+  `NUM-KARNEY-LATITUDE-CORE`, claimed all 6, so INTENDED gained exactly 6 and the backlog did not
+  move in either direction. The seventh is the same shape at smaller scale: the somerc transcendental
+  change moved 2 rows out of UNCHANGED, `NUM-SOMERC-FDLIBM-TRANSCENDENTALS` claimed both by name with
+  `expected_rows: 2`, and INTENDED gained exactly 2 while the backlog again stayed put. Two of
+  the earlier ones are `LambertAzimuthalEqualAreaProjection`'s `Math.hypot` → `MathHelpers.norm2`
+  conversion, claimed
   by the rule `NUM-LAEA-HYPOT-TO-NORM2` with `expected_rows: 2` and both keys **enumerated** —
   `proj4-epsg.csv:00619` (EPSG:4326→2163) and `proj4-epsg.csv:01495` (EPSG:4326→3409). **A stable
   headline is not a stable measurement — check the whole line.**
@@ -161,11 +196,13 @@ Five workflows:
 
   The backlog is other streams' changes that no rule has claimed yet, and it belongs to those streams,
   not to this workflow. `golden/README.md`'s triage sections break it down by owner. **No
-  `COUNT_MISMATCH`, no `DEAD_RULE`, no `EXPIRED_RULE`, no `PENDING_RULE_FIRED`** in the same run.
-  There are **44 rules** — this file has said 38, 41 and 42 at various points, so count rather than
-  quote. All 44 are `status: active` and all 44 carry a pinned integer `expected_rows`, counted two
-  ways (`grep -c '^  - id:'` and a YAML parse, which agree), with the gate's own
-  `rules.yaml: 44/44 rules carry a pinned expected_rows` line as a third. The job goes green when
+  `FIGURES_MOVED`, no `COUNT_MISMATCH`, no `DEAD_RULE`, no `EXPIRED_RULE`, no `PENDING_RULE_FIRED`**
+  in the same run.
+  There are **49 rules** as of 2026-08-14 — this file has said 38, 41, 42, 44 and 48 at various
+  points, so count rather than quote. All 49 are `status: active` and all 49 carry a pinned integer
+  `expected_rows` summing to 39,149, counted with anchored patterns (`grep -cE '^  - id:'`,
+  `grep -cE '^    status: active'`, `grep -cE '^    expected_rows: [0-9]+'`, which agree), with the
+  gate's own `rules.yaml: 49/49 rules carry a pinned expected_rows` line as a third. The job goes green when
   the backlog is claimed, one rule at a time.
 
 - **`bench` / `gate` is no longer in this list — it is GREEN.** Re-derived 2026-08-03 in the container
@@ -190,8 +227,15 @@ Five workflows:
 
   | | rules / pairs | `ratchets` | `TBD` leaves |
   |---|---|---|---|
-  | `allocation-baseline.json` | 25 rules | **171** | **2** |
+  | `allocation-baseline.json` | 25 rules | **170** | **2** |
   | `op-counts.json` | 8 pairs / 160 leaves | — | **0** |
+
+  **Count the numeric entries, not the keys, and this figure stops moving.** Re-counted 2026-08-14:
+  the `ratchets` block has **171** keys, of which **170** are per-benchmark ratchets and one is
+  `_note`, the block's prose. `171` is what `GateChecker`'s `--record` line prints, because it counts
+  `_note` too, so a figure copied from that log reads one too high. `op-counts.json` is the same
+  shape: its `160` counts each pair's `_crs` label alongside that pair's **19** pinned op counts, so
+  **152** op counts are pinned across 8 pairs.
 
   The 2 remaining `TBD`s are not unpinned thresholds: both are a `targetBytesPerOp` on a rule whose
   `maxBytesPerOp` is a real number — `transform-cache-miss` (1136) and `crs-parse` (4112) — i.e. the
@@ -450,7 +494,7 @@ Proj4J PROJ Conformance Suite . SKIPPED
 
 *(Quoted verbatim. The pom `<name>` is now `neoProj4J`, so the same failure prints `neoProj4J …`
 today; the transcript is left unedited because it is a measurement, not an example.
-`docker/run.sh:370`, which greps reactor output for that name, **was** updated.)*
+`docker/run.sh:445`, which greps reactor output for that name, **was** updated.)*
 
 The section that stood here said the fix was being left alone because it could not be verified. It
 now can: the baseline is on disk, so the job was fixed with `golden.yaml`'s `-Dtest=` narrowing plus
@@ -460,7 +504,7 @@ exact YAML text:
 
 | control | result |
 |---|---|
-| unmodified | exit 0, `7378/7895 genuine passes`, `diff.regressed = 0` — **re-run 2026-08-02: exit 0, `7441/7900 genuine passes`, `regressed 0`** |
+| unmodified | exit 0, `7378/7895 genuine passes`, `diff.regressed = 0` — **re-run 2026-08-14 on the 2.1.0 release branch: exit 0, `7449/7902 genuine passes`, `regressed 0`** |
 | one manifest row removed | exit 1, naming `gie/4D-API_cs2cs-style.gie#11:0@c4fe674b` as `REGRESSED` |
 | baseline file absent | exit 1, naming *"CONFORMANCE BASELINE INCOMPLETE … NOTHING HAS REGRESSED"* |
 

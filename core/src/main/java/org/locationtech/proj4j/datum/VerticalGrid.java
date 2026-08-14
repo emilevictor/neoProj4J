@@ -32,7 +32,8 @@ import org.locationtech.proj4j.resource.ResourceResolvers;
 import org.locationtech.proj4j.resource.Resources;
 
 /**
- * A vertical shift grid: a geoid model or height correction surface, read from a GTX file.
+ * A vertical shift grid: a geoid model or height correction surface, read from a GTX or a vertical
+ * GeoTIFF. Both formats are handled here; see the two sections below.
  *
  * <p>This is what {@code +geoidgrids=} needs. It is deliberately independent of {@link Grid}: a
  * vertical grid holds one scalar per node, not a (&Delta;&lambda;, &Delta;&phi;) pair, and PROJ models

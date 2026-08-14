@@ -55,7 +55,7 @@ import org.locationtech.proj4j.gie.GieIoUnits;
  *
  * <p>Not thread-safe when it holds a stack — see {@link CoordinateStack}.
  *
- * @since 1.5
+ * @since 2.0.0
  */
 final class PushPopOperator extends OverridableUnitsOperator {
 

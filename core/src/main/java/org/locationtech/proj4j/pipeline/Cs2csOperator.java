@@ -75,14 +75,19 @@ import org.locationtech.proj4j.vertical.VGridShiftOperator;
  *
  * <h2>What is delegated to proj4j and what is not</h2>
  *
- * <p>{@code Projection.projectRadians} already bundles steps 1(e)-{@code lam0} and
- * all of step 2 and 3-except-{@code +axis}: it subtracts {@code lon_0}, normalises,
- * runs the formula, then applies {@code a}, the false easting/northing and
- * {@code +units}. So this class subtracts only {@code from_greenwich} and lets
- * proj4j do the rest, which keeps one implementation of the affine post-multiply
- * rather than two. The one gap is that proj4j skips its longitude normalisation
- * when {@code lon_0 == 0} while PROJ always normalises, so that case is handled
- * here.
+ * <p>{@code Projection.projectRadians} already bundles <b>all</b> of step 1(e) and
+ * all of step 2 and 3-except-{@code +axis}: it subtracts {@code from_greenwich} and
+ * {@code lon_0} in {@code fwd.cpp:108}'s own association, normalises unless
+ * {@code +over}, runs the formula, then applies {@code a}, the false easting/northing
+ * and {@code +units}. So for a classic projection this class contributes nothing to
+ * step 1(e) at all, which keeps one implementation of the affine post-multiply rather
+ * than two. It used to subtract {@code from_greenwich} itself and to patch in the
+ * normalisation proj4j skipped when {@code lon_0 == 0}; neither is true any more, and
+ * doing either now would double-count the prime meridian.
+ *
+ * <p>{@code +over} is read from the string <em>or</em> from the projection, because
+ * {@code +proj=calcofi} sets it from {@code calcofi.cpp:141} with the flag nowhere in
+ * the proj-string.
  *
  * <p><b>{@code +proj=longlat} and {@code +proj=geocent} bypass proj4j entirely.</b>
  * {@code LongLatProjection} installs {@code Units.DEGREES}, so
@@ -197,6 +202,24 @@ final class Cs2csOperator extends OverridableUnitsOperator {
     private final String description;
     private final Kernel kernel;
     private final Projection projection;
+    /**
+     * {@code pj_has_inverse} for {@link #projection}, i.e. whether {@code P->inv} exists —
+     * {@link Projection#hasInverseImplementation()}, computed once here because that method
+     * reflects and {@link #inverse(double[])} runs per coordinate.
+     *
+     * <p>This used to be {@code projection.hasInverse()}, read at both call sites, and that was
+     * the {@code +pm} regression. {@code hasInverse()} is a hand-maintained declaration that
+     * {@code KrovakProjection} and {@code NewZealandMapGridProjection} never make even though both
+     * implement {@code projectInverse} and both are assigned a {@code P->inv} unconditionally
+     * upstream ({@code 9.8.1:src/projections/krovak.cpp:329}, {@code nzmg.cpp:123}). So
+     * {@code +proj=krovak … +pm=ferro} — which {@code +pm} routes here rather than to
+     * {@code BasicCoordinateTransform}, because {@code +pm} needs the cs2cs-emulation steps —
+     * reported "pipeline is not invertible" for a projection whose inverse works and which the
+     * other engine had been inverting all along. {@code BasicCoordinateTransform} already asked
+     * the sound question; this operator did not, and the disagreement was invisible because the
+     * two engines are reached by different definitions.
+     */
+    private final boolean projectionInvertible;
     private final double lam0;
     private final double fromGreenwich;
     private final boolean over;
@@ -244,6 +267,7 @@ final class Cs2csOperator extends OverridableUnitsOperator {
                     "proj4j produced no projection for " + params);
         }
         this.projection = crs.getProjection();
+        this.projectionInvertible = projection.hasInverseImplementation();
 
         // Never WHATEVER on both sides, so the inherited overrideUnits is unreachable for
         // this operator: pipeline.cpp only offers the override to a step that declared
@@ -263,7 +287,12 @@ final class Cs2csOperator extends OverridableUnitsOperator {
 
         this.lam0 = projection.getProjectionLongitude();
         this.fromGreenwich = offsetFromGreenwich(projection.getPrimeMeridian());
-        this.over = params.booleanValue("over");
+        // `+over` from the string, OR from the projection's own initialize(): calcofi.cpp:141
+        // hard-codes P->over = 1, so `+proj=calcofi` is over-enabled with the flag nowhere in the
+        // proj-string. Reading only params left the two engines disagreeing -- the projection's
+        // inverse kept the turn and finalizeAngular below wrapped it straight back off -- which is
+        // the pipeline-engine half of issue #117.
+        this.over = params.booleanValue("over") || projection.isOver();
         this.frMeter = projection.getFromMetres();
         this.toMeter = 1.0 / frMeter;
 
@@ -723,16 +752,17 @@ final class Cs2csOperator extends OverridableUnitsOperator {
 
         // PROJ: lam = (lam - from_greenwich) - lam0, then adjlon.
         //
-        // For Kernel.PROJECTION the "- lam0, then normalise" half belongs to
-        // Projection.projectRadians, which does it iff lon_0 != 0. So only the
-        // prime-meridian subtraction happens here, plus the normalisation proj4j
-        // would otherwise skip when lon_0 == 0.
-        coord[0] -= fromGreenwich;
+        // For Kernel.PROJECTION all three of those belong to Projection.projectRadians, which
+        // performs them unguarded and in fwd.cpp:108's own association. Nothing is left to do here,
+        // and doing any of it anyway would double-count: from_greenwich would be subtracted twice.
+        // This used to subtract from_greenwich unconditionally and add a normalisation "proj4j
+        // would otherwise skip when lon_0 == 0" -- proj4j no longer skips it, and the prime
+        // meridian moved inside the funnel for the reason issue #117 records.
         if (kernel != Kernel.PROJECTION) {
-            coord[0] -= lam0;
-        }
-        if (!over && (kernel != Kernel.PROJECTION || lam0 == 0.0)) {
-            coord[0] = adjlon(coord[0]);
+            coord[0] = (coord[0] - fromGreenwich) - lam0;
+            if (!over) {
+                coord[0] = adjlon(coord[0]);
+            }
         }
     }
 
@@ -773,7 +803,7 @@ final class Cs2csOperator extends OverridableUnitsOperator {
     }
 
     private void projectInverse(final double[] coord) {
-        if (!projection.hasInverse()) {
+        if (!projectionInvertible) {
             throw new PipelineDefinitionException(PipelineErrorCode.NO_INVERSE_OP,
                     "+proj=" + description + " has no inverse in proj4j");
         }
@@ -786,12 +816,15 @@ final class Cs2csOperator extends OverridableUnitsOperator {
 
     /** {@code inv_finalize}'s {@code PJ_IO_UNITS_RADIANS} branch ({@code inv.cpp:102-140}). */
     private void finalizeAngular(final double[] coord) {
-        coord[0] += fromGreenwich;
+        // inv.cpp:113-117, and for Kernel.PROJECTION every line of it is already done, inside
+        // Projection.inverseProjectRadians: `lam + from_greenwich + lam0`, then adjlon unless
+        // +over. Re-applying from_greenwich here would double it, and re-applying the adjlon is
+        // what wrapped calcofi's +over turn back off -- see issue #117.
         if (kernel != Kernel.PROJECTION) {
-            coord[0] += lam0;
-        }
-        if (!over) {
-            coord[0] = adjlon(coord[0]);
+            coord[0] = coord[0] + fromGreenwich + lam0;
+            if (!over) {
+                coord[0] = adjlon(coord[0]);
+            }
         }
         // inv.cpp:117-119, "Go geometric from orthometric": the exact mirror, so the vertical
         // shift is undone *before* the datum shift rather than after it.
@@ -847,7 +880,7 @@ final class Cs2csOperator extends OverridableUnitsOperator {
 
     @Override
     public boolean hasInverse() {
-        return kernel != Kernel.PROJECTION || projection.hasInverse();
+        return kernel != Kernel.PROJECTION || projectionInvertible;
     }
 
     @Override

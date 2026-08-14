@@ -90,7 +90,7 @@ public class GoldenMasterTest {
         System.out.println("full report: " + report);
 
         // A moved figure is reported ALONGSIDE the rule-level failures, never instead of them. Today
-        // this run is red on 2,291 UNEXPLAINED rows; if the figure check short-circuited, fixing the
+        // this run is red on 2,287 UNEXPLAINED rows; if the figure check short-circuited, fixing the
         // pin would look like fixing the backlog.
         String figures = GoldenDiff.Expectation.load(expectFile).mismatch(r);
         if (figures != null) System.out.println(figures);

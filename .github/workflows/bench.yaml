@@ -13,7 +13,7 @@ name: Performance Gate
 # with the allocation profiler attached and checks two tiers against the committed baselines in
 # benchmark/src/main/resources/baseline/. Finally, assert that the run measured something at all.
 #
-#   Tier 1 (allocation, bytes/op) against allocation-baseline.json: 25 rules and 171 ratchets.
+#   Tier 1 (allocation, bytes/op) against allocation-baseline.json: 25 rules and 170 ratchets.
 #   `required: true` on a rule is load-bearing independently of any threshold - a benchmark that
 #   was renamed or excluded fails the gate even where no number would have rejected it.
 #

@@ -82,7 +82,7 @@ package org.locationtech.proj4j;
  *
  * @see Proj4jException#cause()
  * @see CrsTransformException
- * @since 1.5.0
+ * @since 2.0.0
  */
 public enum ErrorCause {
 

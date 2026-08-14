@@ -48,7 +48,7 @@ package org.locationtech.proj4j.api;
  *
  * <p>Immutable and safe to share between threads.
  *
- * @since 1.5.0
+ * @since 2.0.0
  */
 public final class AreaOfUse {
 
