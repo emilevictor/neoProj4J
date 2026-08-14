@@ -191,13 +191,17 @@ final class ProjOperatorSetup {
     // --------------------------------------------------------------- conics
 
     /**
-     * {@code lcc.cpp:88-113}. {@code lat_2} defaults to {@code lat_1} rather than to
+     * {@code lcc.cpp:88-141}. {@code lat_2} defaults to {@code lat_1} rather than to
      * zero, which is why {@code +proj=lcc +ellps=GRS80} with no parallels at all is
      * rejected: both are 0 and the sum guard fires.
      *
-     * <p>The two eccentricity guards further down ({@code :123-141}, {@code n == 0} on
-     * a secant cone) need {@code pj_msfn}/{@code pj_tsfn} and are <b>not</b> ported;
-     * {@code builtins.gie:3862} and {@code :3869} stay unmeasured because of it.
+     * <p>The two secant-cone eccentricity guards at {@code :126-131} and
+     * {@code :134-139} are ported. Both are pure closed form — {@code pj_msfn} is one
+     * expression and {@code pj_tsfn} is two — so unlike {@code eqdc}'s they can be
+     * evaluated exactly rather than through a series; see {@link #msfn} and
+     * {@link #tsfn}. They fire only when {@code es} is so close to 1 that the two
+     * {@code msfn}, or the two {@code tsfn}, values are indistinguishable, which is
+     * what {@code builtins.gie} block 166 ({@code +a=9999999 +b=.9}) asserts.
      */
     private static GieFailure lcc(GieProjArgs a) {
         double phi1 = radians(a, "lat_1", 0.0);
@@ -211,6 +215,28 @@ final class ProjOperatorSetup {
         }
         if (Math.abs(Math.cos(phi2)) < EPS10 || Math.abs(phi2) >= HALF_PI) {
             return invalid("lcc", "|lat_2| should be < 90 degrees (lcc.cpp:110-114)");
+        }
+
+        // lcc.cpp:117-141. Only the secant branch has the guards, and only on an
+        // ellipsoid; shape() declining costs the check rather than guessing at one.
+        boolean secant = Math.abs(phi1 - phi2) >= EPS10;
+        double[] ell = shape(a);
+        if (!secant || ell == null || ell[1] == 0.0) {
+            return null;
+        }
+        double es = ell[1];
+        double e = Math.sqrt(es);
+        double sinphi1 = Math.sin(phi1);
+        double sinphi2 = Math.sin(phi2);
+        double m1 = msfn(sinphi1, Math.cos(phi1), es);
+        if (Math.log(m1 / msfn(sinphi2, Math.cos(phi2), es)) == 0.0) {
+            return invalid("lcc", "eccentricity is indistinguishable from 1, so the two "
+                    + "msfn values are equal and the cone constant is 0 (lcc.cpp:125-131)");
+        }
+        if (Math.log(tsfn(phi1, sinphi1, e) / tsfn(phi2, sinphi2, e)) == 0.0) {
+            return invalid("lcc", "eccentricity is indistinguishable from 1, so the two "
+                    + "tsfn values are equal and the cone constant divides by 0 "
+                    + "(lcc.cpp:132-139)");
         }
         return null;
     }
@@ -250,9 +276,35 @@ final class ProjOperatorSetup {
     }
 
     /**
-     * {@code eqdc.cpp:85-101}. The spherical {@code n == 0} guard at {@code :137-143}
-     * and the {@code ml1 == ml2} guard at {@code :119-124} need {@code pj_mlfn} and
-     * are not ported, so {@code builtins.gie:1865} stays unmeasured.
+     * {@code eqdc.cpp:84-102}. The spherical {@code n == 0} guard at {@code :137-143},
+     * the {@code ml1 == ml2} guard at {@code :121-125} and the ellipsoidal
+     * {@code n == 0} guard at {@code :127-132} all need {@code pj_mlfn}, and are
+     * <b>not</b> ported. {@code builtins.gie} block 84
+     * ({@code +proj=eqdc +lat_1=1 +ellps=GRS80 +b=.1}) stays unmeasured because of it.
+     *
+     * <h2>Why this one cannot be ported the way {@code lcc}'s and {@code omerc}'s were</h2>
+     *
+     * <p>It is tempting to note that at {@code :126} the <em>numerator</em>
+     * {@code m1 - pj_msfn(...)} is pure closed form, so an exactly-zero numerator looks
+     * like it must give {@code Q->n == 0} and a rejection either way — the
+     * {@code ml1 == ml2} guard above it raises the same
+     * {@code PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE}. <b>That argument is wrong, and in
+     * the direction that manufactures false passes.</b> The denominator is
+     * {@code ml2 - ml1}, and {@code pj_mlfn} is a 6th-order expansion in the third
+     * flattening documented as accurate only for {@code |f| <= 1/150}
+     * ({@code mlfn.cpp:5-7}); at the eccentricities these rows use it is far outside
+     * that domain. If it returns a non-finite value, {@code ml1 == ml2} is false,
+     * {@code Q->n} is {@code NaN}, {@code NaN == 0} is false — and PROJ <em>builds the
+     * operation</em>. So "numerator is zero" does not imply "PROJ rejects", and a guard
+     * asserting it would reject definitions PROJ accepts.
+     *
+     * <p>Deciding this guard therefore needs a bit-faithful transcription of
+     * {@code pj_enfn}/{@code pj_mlfn} and the {@code AuxLat} coefficient machinery they
+     * call, evaluated outside its stated convergence domain against an exact
+     * {@code == 0}. That is a much larger and far less certain change than one assertion
+     * justifies, so the check is declined. Note also that block 84 is blocked twice
+     * over: it names {@code +ellps=GRS80}, and {@link #shape} declines on any named
+     * ellipsoid, so the guard would have no {@code es} to work from even if it existed.
      */
     private static GieFailure eqdc(GieProjArgs a) {
         double phi1 = radians(a, "lat_1", 0.0);
@@ -331,22 +383,122 @@ final class ProjOperatorSetup {
                 }
             }
         }
+
+        // omerc.cpp:252-275, the two-point branch only - the +alpha/+gamma branch at
+        // :222-250 has no such guard. Both are pure closed form (pj_tsfn plus pow), so
+        // unlike eqdc's they can be evaluated exactly. They fire when es is
+        // indistinguishable from 1, which is what builtins.gie block 241
+        // (+lat_1=0.8 +a=6400000 +b=.4) asserts.
+        if (!alp && !gam) {
+            double[] ell = shape(a);
+            if (ell != null) {
+                double es = ell[1];
+                double e = Math.sqrt(es);
+                double[] be = omercConstants(es, phi0);
+                double bl = be[0];
+                double el = be[1];
+                double phi1 = radians(a, "lat_1", 0.0);
+                double phi2 = radians(a, "lat_2", 0.0);
+                double h = Math.pow(tsfn(phi1, Math.sin(phi1), e), bl);
+                double l = Math.pow(tsfn(phi2, Math.sin(phi2), e), bl);
+                if ((l - h) / (l + h) == 0.0) {
+                    return invalid("omerc", "eccentricity is indistinguishable from 1, so "
+                            + "the two-point centre line is undefined (omerc.cpp:255-261)");
+                }
+                double f = el / h;
+                if (f - 1.0 / f == 0.0) {
+                    return invalid("omerc", "eccentricity is indistinguishable from 1, so "
+                            + "the two-point centre line azimuth is undefined "
+                            + "(omerc.cpp:270-275)");
+                }
+            }
+        }
         return null;
     }
 
-    /** {@code omerc.cpp:199-221} — {@code D}, which is what bounds {@code +gamma}. */
-    private static double omercD(double es, double phi0) {
+    /**
+     * {@code omerc.cpp:199-221} — {@code Q->B}, {@code Q->E} and {@code D}, in that
+     * order. {@code Q->A} is omitted: it is the only one that reads {@code +k_0}, and no
+     * guard depends on it.
+     *
+     * @param es the resolved squared eccentricity
+     * @param phi0 {@code +lat_0} in radians
+     * @return {@code {B, E, D}}
+     */
+    private static double[] omercConstants(double es, double phi0) {
         double oneEs = 1.0 - es;
         double com = Math.sqrt(oneEs);
         if (Math.abs(phi0) <= OMERC_EPS) {
-            return 1.0;
+            // :217-221 - B is 1/com and E, D and F are all exactly 1.
+            return new double[] {1.0 / com, 1.0, 1.0};
         }
         double sinph0 = Math.sin(phi0);
         double cosph0 = Math.cos(phi0);
         double con = 1.0 - es * sinph0 * sinph0;
         double b = cosph0 * cosph0;
         b = Math.sqrt(1.0 + es * b * b / oneEs);
-        return b * com / (cosph0 * Math.sqrt(con));
+        double d = b * com / (cosph0 * Math.sqrt(con));
+        double f = d * d - 1.0;
+        if (f <= 0.0) {
+            f = 0.0;
+        } else {
+            f = Math.sqrt(f);
+            if (phi0 < 0.0) {
+                f = -f;
+            }
+        }
+        f += d;
+        double el = f * Math.pow(tsfn(phi0, sinph0, Math.sqrt(es)), b);
+        return new double[] {b, el, d};
+    }
+
+    /** {@code omerc.cpp:199-221} — {@code D}, which is what bounds {@code +gamma}. */
+    private static double omercD(double es, double phi0) {
+        return omercConstants(es, phi0)[2];
+    }
+
+    // ------------------------------------------------ PROJ's closed-form helpers
+
+    /**
+     * {@code msfn.cpp:5-7} — {@code pj_msfn}, verbatim.
+     *
+     * @param sinphi {@code sin(phi)}
+     * @param cosphi {@code cos(phi)}
+     * @param es squared eccentricity
+     * @return {@code m(phi)}
+     */
+    private static double msfn(double sinphi, double cosphi, double es) {
+        return cosphi / Math.sqrt(1.0 - es * sinphi * sinphi);
+    }
+
+    /**
+     * {@code tsfn.cpp:6-35} — {@code pj_tsfn}, verbatim, including the branch on the
+     * sign of {@code sinphi} that keeps the {@code cos/(1+sin)} form well conditioned.
+     *
+     * @param phi latitude in radians
+     * @param sinphi {@code sin(phi)}
+     * @param e eccentricity
+     * @return {@code exp(-psi)}, {@code psi} being the isometric latitude
+     */
+    private static double tsfn(double phi, double sinphi, double e) {
+        double cosphi = Math.cos(phi);
+        return Math.exp(e * atanh(e * sinphi))
+                * (sinphi > 0 ? cosphi / (1 + sinphi) : (1 - sinphi) / cosphi);
+    }
+
+    /**
+     * {@code atanh}, which {@code java.lang.Math} has no form of.
+     *
+     * <p>Written as {@code 0.5 * log1p(2x / (1 - x))} rather than the algebraically
+     * equal {@code 0.5 * log((1 + x) / (1 - x))}: the latter loses the whole result to
+     * cancellation as {@code x} approaches 0, and {@code +lat_2} defaulting to 0 makes
+     * {@code x == 0} the single most common argument here.
+     *
+     * @param x the argument
+     * @return {@code atanh(x)}
+     */
+    private static double atanh(double x) {
+        return 0.5 * Math.log1p(2.0 * x / (1.0 - x));
     }
 
     // ------------------------------------------------- single-guard operators
