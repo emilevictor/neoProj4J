@@ -2964,7 +2964,7 @@
 # Kertau / UTM zone 48N
 <24548> +proj=utm +zone=48 +a=6377304.063 +b=6356103.038993155 +towgs84=-11,851,5,0,0,0,0 +units=m +no_defs  no_defs <>
 # Kertau / R.S.O. Malaya (ch)
-<24571> +proj=omerc +lat_0=4 +lonc=102.25 +alpha=323.0257905 +k=0.99984 +x_0=804671.2997750348 +y_0=0 +a=6377304.063 +b=6356103.038993155 +towgs84=-11,851,5,0,0,0,0 +to_meter=20.11678249437587 +no_defs  no_defs <>
+<24571> +proj=omerc +lat_0=4 +lonc=102.25 +alpha=323.0257905 +k=0.99984 +x_0=804671.2997750348 +y_0=0 +no_uoff +gamma=323.1301023611111 +a=6377304.063 +b=6356103.038993155 +towgs84=-11,851,5,0,0,0,0 +to_meter=20.11678249437587 +no_defs  no_defs <>
 # KOC Lambert
 <24600> +proj=lcc +lat_1=32.5 +lat_0=32.5 +lon_0=45 +k_0=0.9987864078000001 +x_0=1500000 +y_0=1166200 +ellps=clrk80 +units=m +no_defs  no_defs <>
 # La Canoa / UTM zone 18N
@@ -3112,7 +3112,7 @@
 # NAD27 / Alabama West
 <26730> +proj=tmerc +lat_0=30 +lon_0=-87.5 +k=0.999933 +x_0=152400.3048006096 +y_0=0 +ellps=clrk66 +datum=NAD27 +to_meter=0.3048006096012192 +no_defs  no_defs <>
 # NAD27 / Alaska zone 1
-<26731> +proj=omerc +lat_0=57 +lonc=-133.6666666666667 +alpha=323.1301023611111 +k=0.9999 +x_0=5000000.001016002 +y_0=-5000000.001016002 +ellps=clrk66 +datum=NAD27 +to_meter=0.3048006096012192 +no_defs  no_defs <>
+<26731> +proj=omerc +lat_0=57 +lonc=-133.6666666666667 +alpha=323.1301023611111 +k=0.9999 +x_0=5000000.001016002 +y_0=-5000000.001016002 +no_uoff +gamma=323.1301023611111 +ellps=clrk66 +datum=NAD27 +to_meter=0.3048006096012192 +no_defs  no_defs <>
 # NAD27 / Alaska zone 2
 <26732> +proj=tmerc +lat_0=54 +lon_0=-142 +k=0.999900 +x_0=152400.3048006096 +y_0=0 +ellps=clrk66 +datum=NAD27 +to_meter=0.3048006096012192 +no_defs  no_defs <>
 # NAD27 / Alaska zone 3
@@ -3290,7 +3290,7 @@
 # NAD83 / Alabama West
 <26930> +proj=tmerc +lat_0=30 +lon_0=-87.5 +k=0.999933 +x_0=600000 +y_0=0 +ellps=GRS80 +datum=NAD83 +units=m +no_defs  no_defs <>
 # NAD83 / Alaska zone 1
-<26931> +proj=omerc +lat_0=57 +lonc=-133.6666666666667 +alpha=323.1301023611111 +k=0.9999 +x_0=5000000 +y_0=-5000000 +ellps=GRS80 +datum=NAD83 +units=m +no_defs  no_defs <>
+<26931> +proj=omerc +lat_0=57 +lonc=-133.6666666666667 +alpha=323.1301023611111 +k=0.9999 +x_0=5000000 +y_0=-5000000 +no_uoff +gamma=323.1301023611111 +ellps=GRS80 +datum=NAD83 +units=m +no_defs  no_defs <>
 # NAD83 / Alaska zone 2
 <26932> +proj=tmerc +lat_0=54 +lon_0=-142 +k=0.999900 +x_0=500000 +y_0=0 +ellps=GRS80 +datum=NAD83 +units=m +no_defs  no_defs <>
 # NAD83 / Alaska zone 3
@@ -5246,13 +5246,13 @@
 # Old Hawaiian UTM Zone 5N
 <102115> +proj=utm +zone=5 +ellps=clrk66 +units=m  no_defs <>
 # NAD 1927 Michigan GeoRef Feet US
-<102120> +proj=omerc +lat_0=45.30916666666666 +lonc=-86 +alpha=337.255555555556 +k=0.9996 +x_0=2546731.495961392 +y_0=-4354009.816002033 +ellps=clrk66 +datum=NAD27 +to_meter=0.3048006096012192  no_defs <>
+<102120> +proj=omerc +lat_0=45.30916666666666 +lonc=-86 +alpha=337.255555555556 +k=0.9996 +x_0=2546731.495961392 +y_0=-4354009.816002033 +no_uoff +gamma=337.255555555556 +ellps=clrk66 +datum=NAD27 +to_meter=0.3048006096012192  no_defs <>
 # NAD 1983 Michigan GeoRef Feet US
-<102121> +proj=omerc +lat_0=45.30916666666666 +lonc=-86 +alpha=337.255555555556 +k=0.9996 +x_0=2546731.495961392 +y_0=-4354009.816002033 +ellps=GRS80 +datum=NAD83 +to_meter=0.3048006096012192  no_defs <>
+<102121> +proj=omerc +lat_0=45.30916666666666 +lonc=-86 +alpha=337.255555555556 +k=0.9996 +x_0=2546731.495961392 +y_0=-4354009.816002033 +no_uoff +gamma=337.255555555556 +ellps=GRS80 +datum=NAD83 +to_meter=0.3048006096012192  no_defs <>
 # NAD 1927 Michigan GeoRef Meters
-<102122> +proj=omerc +lat_0=45.30916666666666 +lonc=-86 +alpha=337.255555555556 +k=0.9996 +x_0=2546731.496 +y_0=-4354009.816 +ellps=clrk66 +datum=NAD27 +units=m  no_defs <>
+<102122> +proj=omerc +lat_0=45.30916666666666 +lonc=-86 +alpha=337.255555555556 +k=0.9996 +x_0=2546731.496 +y_0=-4354009.816 +no_uoff +gamma=337.255555555556 +ellps=clrk66 +datum=NAD27 +units=m  no_defs <>
 # NAD 1983 Michigan GeoRef Meters
-<102123> +proj=omerc +lat_0=45.30916666666666 +lonc=-86 +alpha=337.255555555556 +k=0.9996 +x_0=2546731.496 +y_0=-4354009.816 +ellps=GRS80 +datum=NAD83 +units=m  no_defs <>
+<102123> +proj=omerc +lat_0=45.30916666666666 +lonc=-86 +alpha=337.255555555556 +k=0.9996 +x_0=2546731.496 +y_0=-4354009.816 +no_uoff +gamma=337.255555555556 +ellps=GRS80 +datum=NAD83 +units=m  no_defs <>
 # NGO 1948 UTM Zone 32N
 <102132> +proj=utm +zone=32 +a=6377492.018 +b=6356173.508712696 +units=m  no_defs <>
 # NGO 1948 UTM Zone 33N
@@ -5538,7 +5538,7 @@
 # NAD 1983 StatePlane Alabama West FIPS 0102 Feet
 <102630> +proj=tmerc +lat_0=30 +lon_0=-87.5 +k=0.999933 +x_0=600000.0000000001 +y_0=0 +ellps=GRS80 +datum=NAD83 +to_meter=0.3048006096012192  no_defs <>
 # NAD 1983 StatePlane Alaska 1 FIPS 5001 Feet
-<102631> +proj=omerc +lat_0=57 +lonc=-133.6666666666667 +alpha=-36.86989764583333 +k=0.9999 +x_0=4999999.999999999 +y_0=-4999999.999999999 +ellps=GRS80 +datum=NAD83 +to_meter=0.3048006096012192  no_defs <>
+<102631> +proj=omerc +lat_0=57 +lonc=-133.6666666666667 +alpha=-36.86989764583333 +k=0.9999 +x_0=4999999.999999999 +y_0=-4999999.999999999 +no_uoff +gamma=-36.86989764583333 +ellps=GRS80 +datum=NAD83 +to_meter=0.3048006096012192  no_defs <>
 # NAD 1983 StatePlane Alaska 2 FIPS 5002 Feet
 <102632> +proj=tmerc +lat_0=54 +lon_0=-142 +k=0.999900 +x_0=500000.0000000002 +y_0=0 +ellps=GRS80 +datum=NAD83 +to_meter=0.3048006096012192  no_defs <>
 # NAD 1983 StatePlane Alaska 3 FIPS 5003 Feet
