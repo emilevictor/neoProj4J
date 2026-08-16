@@ -68,7 +68,8 @@ mkdir -p "$(dirname "$OUT")"
         grid_alternatives \
         alias_name \
         supersession \
-        deprecation
+        deprecation \
+        authority_to_authority_preference
     do
         echo ".print #TABLE $t"
         echo "select * from $t;"
