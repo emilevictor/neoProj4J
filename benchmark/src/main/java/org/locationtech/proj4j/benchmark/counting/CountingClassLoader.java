@@ -30,7 +30,8 @@ import java.io.InputStream;
  *   <li><b>A facade in {@code core}</b> would put a counter increment on the hot path of a published
  *       library. Non-starter: the counting facade is test-only by policy, for exactly that reason.</li>
  *   <li><b>A {@code java.lang.instrument} agent or an ASM transformer</b> would work, but adds a
- *       bytecode-library dependency and an agent-attach step to a gate that has to run on every PR.</li>
+ *       bytecode-library dependency and an agent-attach step to a gate that has to run unattended
+ *       on a CI runner and on any developer's machine.</li>
  *   <li><b>Source-level counting</b> (a script that greps for {@code Math.} calls) counts <i>call
  *       sites</i>, not <i>calls</i>. The interesting regressions are extra <i>iterations</i>, which no
  *       static count can see.</li>

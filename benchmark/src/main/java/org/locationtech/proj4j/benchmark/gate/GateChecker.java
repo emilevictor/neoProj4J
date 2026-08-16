@@ -35,11 +35,16 @@ import org.locationtech.proj4j.benchmark.counting.OpCountRecorder;
 import org.locationtech.proj4j.benchmark.counting.OpCounters;
 
 /**
- * The blocking performance gate: Tier 1 (allocation bytes per operation) and Tier 2 (deterministic
+ * The performance gate: Tier 1 (allocation bytes per operation) and Tier 2 (deterministic
  * transcendental-call counts). Exits non-zero on breach with a message naming the offending benchmark
  * and the before/after figures.
  *
- * <h2>Why these two tiers block and ns/op does not</h2>
+ * <p><b>Where this runs, since 2026-08-14.</b> Only when someone asks for it:
+ * {@code .github/workflows/bench.yaml} is {@code workflow_dispatch} only - no push trigger, no
+ * pull-request trigger and no schedule - and {@code ./docker/run.sh bench} is opt-in. The gate
+ * blocks no merge. It still fails the run it is in, and that has not been softened.
+ *
+ * <h2>Why these two tiers are safe to fail a run on, and ns/op is not</h2>
  *
  * <p><b>Tier 1 - allocation.</b> {@code -prof gc}'s {@code gc.alloc.rate.norm} is bytes per operation:
  * total bytes allocated divided by operations performed. It is a property of the <b>bytecode</b>, not

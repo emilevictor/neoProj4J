@@ -18,9 +18,11 @@
     <!-- ================================================================================
          WHY THIS IS A SEPARATE MODULE FROM benchmark/
 
-         benchmark/ carries the Tier 1 allocation gate and Tier 2 op-count gate: 245 arms,
-         25 allocation rules, 171 ratchets, with the baselines read from inside the shaded
-         jar. Parameterising its coordinates so it could also build against 1.4.3 would put
+         benchmark/ carries the Tier 1 allocation gate and Tier 2 op-count gate: 245 individual
+         benchmarks, 25 allocation rules, and 170 saved per-benchmark byte counts that a run is
+         only allowed to come in at or under, with the baselines read from inside the shaded
+         jar. (170, not 171: the 171st key in the `ratchets` block is `_note`, prose that gates
+         nothing.) Parameterising its coordinates so it could also build against 1.4.3 would put
          all of that behind a profile switch, and a gate that can be silently pointed at a
          different library is not a gate. This module is additive and gates nothing.
 

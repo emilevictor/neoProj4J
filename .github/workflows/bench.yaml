@@ -1,12 +1,13 @@
 name: Performance Gate
 
-# TIERS 1 AND 2 OF THE PERFORMANCE REGRESSION GATE.
+# TIERS 1 AND 2 OF THE PERFORMANCE REGRESSION GATE. TURNED OFF FOR NOW - IT RUNS ONLY WHEN A
+# HUMAN ASKS FOR IT.
 #
-# benchmark/pom.xml calls these "blocking PR gates". Until this file existed, NO JOB ANYWHERE
-# INVOKED GateChecker - the module is not in the root pom's default <modules> (deliberately: a
-# plain build must neither compile it nor download JMH, so `core` stays dependency-free) and no
-# workflow passed `-Pbench`. The description was accurate about intent and false about fact. This
-# file is what makes it true about fact.
+# Until this file existed, NO JOB ANYWHERE INVOKED GateChecker - the module is not in the root
+# pom's default <modules> (deliberately: a plain build must neither compile it nor download JMH,
+# so `core` stays dependency-free) and no workflow passed `-Pbench`. This file is what makes the
+# gate runnable in CI at all. It ran on push and pull_request from 2026-08-01 until 2026-08-14;
+# see the block below for why it no longer does.
 #
 # WHAT THE JOB DOES. Build the shaded benchmarks jar under `-Pbench`, run GateChecker's own
 # self-test, then run `benchmark/run-gate.sh --quick --require-baseline`, which runs the JMH suite
@@ -51,16 +52,45 @@ name: Performance Gate
 # delta +62.4 B/op" naming the benchmark and the rule, while the otherwise-identical clean fixture
 # did not. The YAML itself has never executed on a runner; treat the first run as its first test.
 
-# The push trigger is filtered to the long-lived branches: an unfiltered push trigger
-# alongside pull_request fires this workflow twice for every commit on a PR branch, and
-# `concurrency` cannot dedupe them because github.ref differs between the two events.
-# See the same note in ci.yaml.
+# ============================================================================================
+# TURNED OFF, 2026-08-14. Temporary, and deliberate. Recorded here rather than hidden.
+#
+# The job is green and the gate works. It was taken off push and pull_request because it costs
+# about 21 minutes of measurement on every commit, and nobody is willing to wait on it. There is
+# no schedule either: this workflow now runs ONLY when someone starts it by hand.
+#
+# What was NOT done, and why:
+#   - `continue-on-error`: it would report success while seeing nothing. Removing a trigger makes
+#     the gate absent, which is honest. Softening the job makes it lie. Do not add it.
+#   - loosening the saved numbers in benchmark/src/main/resources/baseline/ to make the job
+#     cheaper: it would not make it faster, and it would weaken the only measurement of how much
+#     memory the library allocates per operation.
+#
+# WHAT THIS COSTS, STATED PLAINLY, BECAUSE IT IS NOT SMALL. Nothing automatic runs this any more.
+# An increase in memory allocated per operation - a reintroduced output array, a boxed cache key,
+# a lost fast path - and a change in the number of sin/cos/log calls a transform makes will BOTH
+# go unnoticed until a human asks for a run. Not on the next commit, not overnight, not next week.
+# The only remaining cover is somebody running it: `./docker/run.sh bench` locally, which
+# HOWTORELEASE.txt's release checklist calls for, or a manual run of this workflow.
+#
+# Run it by hand:  gh workflow run bench.yaml
+# or the Actions tab -> Performance Gate -> "Run workflow".
+#
+# TO TURN IT BACK ON: restore `push: branches: [master, main]` and `pull_request:` below, and put
+# the word "blocking" back in the job name in the SAME COMMIT. If it is coming back only as a
+# periodic run, add a `schedule:` instead and rename the job to match. golden.yaml carries the
+# same rule about the name.
+# ============================================================================================
 on:
-  push:
-    branches: [master, main]
-  pull_request:
   workflow_dispatch:
 
+# KEPT, AND THE REASONING CHANGED WITH THE TRIGGERS. `cancel-in-progress` was earning its keep on
+# pull requests: a second commit superseded the first and there was no point measuring the old one.
+# With `workflow_dispatch` only, two runs can share a group only when both were started by hand on
+# the same ref. In that case the later run measures the same branch at the same or a newer commit,
+# so it supersedes the earlier one and cancelling is still the right answer; the alternative is two
+# 21-minute JMH runs producing one useful number. A run started on some other ref lands in a
+# different group and is unaffected. Same block, same values, as golden.yaml.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -70,10 +100,17 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # BLOCKING. Build the shaded benchmarks jar, run the live benchmarks with the allocation
-  # profiler, then check Tiers 1 and 2.
+  # NOT A PR OR PUSH CHECK, AND NOT A PERIODIC ONE EITHER - it cannot block a merge, because
+  # nothing here triggers on one; see the block above. Within its own run it is uncompromising:
+  # build the shaded benchmarks jar, run the live benchmarks with the allocation profiler, then
+  # check Tiers 1 and 2 and fail on any breach. There is no `continue-on-error` and there must not
+  # be one.
+  #
+  # The `name:` below deliberately does not say "blocking", because the triggers do not make it so.
+  # PUT THE WORD BACK IN THE SAME COMMIT that restores a push or pull_request trigger, and take it
+  # out again in the same commit that removes one. golden.yaml carries the same instruction.
   gate:
-    name: Allocation and op-count gate (blocking)
+    name: Allocation and op-count gate (manual only)
     runs-on: ubuntu-latest
     # A full JMH run of this module is roughly 90 minutes; --quick drops to 1 fork and 2+3
     # one-second iterations and has been measured at about 21 minutes in the project's Docker

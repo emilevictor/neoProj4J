@@ -21,7 +21,8 @@ name: CI
 # The push trigger is restricted to the long-lived branches on purpose. Unfiltered
 # `on: [push, pull_request]` fires TWICE for every commit on a PR branch - once as a push
 # to that branch and once as a pull_request against its base - so one commit costs two
-# full runs of this workflow, and ten across the five workflows in this directory. With
+# full runs of this workflow, and six across the three workflows in this directory that
+# trigger on a pull request at all (golden.yaml and bench.yaml do not). With
 # the filter, a topic branch is covered by the pull_request trigger alone and master/main
 # are covered by the push trigger alone. Note that the `concurrency` block below cannot
 # dedupe these two: github.ref differs between them (refs/heads/<branch> vs

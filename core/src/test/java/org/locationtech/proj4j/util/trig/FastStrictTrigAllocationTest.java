@@ -843,9 +843,23 @@ public class FastStrictTrigAllocationTest {
      *
      * <p>Bounds are deliberately loose. The expected figure is 32 B per array -- a 16-byte array
      * header plus two doubles -- but header layout is a VM detail (compact object headers, compressed
-     * class pointers), so the assertion is a floor of 16 B/op and a requirement that four arrays cost
-     * at least three times one. Both are far below any plausible layout and far above the 0.01 B/op
-     * that counts as zero, so the control discriminates without pinning a VM's object model.
+     * class pointers), so the assertions are a floor of 16 B/op for one array, and a requirement that
+     * four arrays cost at least three more arrays' worth than one does. Both are far below any
+     * plausible layout and far above the 0.01 B/op that counts as zero, so the control discriminates
+     * without pinning a VM's object model.
+     *
+     * <p><strong>The scaling check subtracts rather than divides, and that is not a style choice.</strong>
+     * It used to require {@code four >= 3.0 * one}, which fails whenever the run allocates anything
+     * that is not one of these arrays -- a class being loaded, a counter being boxed, the test
+     * framework doing its own work. Such memory lands in both figures, but as a share of the smaller
+     * one it is larger, so it only ever drags the ratio down. That is a check biased towards failing.
+     * It did fail, on the Java 8 job of pull request 24 on 2026-08-14: four arrays measured exactly
+     * 128.00 B/op, which is 4 x 32 and clean, while one measured 44.67 B/op against a true 32 -- about
+     * 12.7 B/op of unrelated memory -- and 128.00 / 44.67 is 2.87, under the required 3. The same job
+     * had passed on the previous commit with the same code. Subtracting cancels anything present in
+     * both figures, so the check now measures what it is named after: whether the counter grows by
+     * three arrays' worth when three more arrays are allocated. The ratio is still printed, because it
+     * is a useful thing to read; it is just no longer the thing that fails.
      */
     @Test
     public void theInstrumentCanSeeAllocation() {
@@ -888,11 +902,17 @@ public class FastStrictTrigAllocationTest {
                         + "reported by this class would be an artefact of a blind instrument "
                         + "rather than a property of the code",
                 one >= 16.0);
-        assertTrue("the allocation counter is not quantitative: four arrays per op measured "
-                        + four + " B/op against " + one + " B/op for one, and must measure at "
-                        + "least three times as much", four >= 3.0 * one);
+        assertTrue("the allocation counter does not scale with allocation: four arrays per op "
+                        + "measured " + four + " B/op and one measured " + one + " B/op, a "
+                        + "difference of " + (four - one) + " B/op for three extra arrays, which "
+                        + "must be at least " + (3.0 * 16.0) + " B/op. The difference is used rather "
+                        + "than the ratio because memory allocated by neither workload appears in "
+                        + "both figures and would only ever shrink a ratio",
+                four - one >= 3.0 * 16.0);
         System.out.printf("  => the counter resolves %.2f B/op for one carrier and %.2f for four, "
-                + "against a %.2f B/op zero threshold.%n", one, four, ZERO_TOLERANCE);
+                + "a difference of %.2f for three extra arrays (ratio %.2f, reported not asserted), "
+                + "against a %.2f B/op zero threshold.%n",
+                one, four, four - one, four / one, ZERO_TOLERANCE);
     }
 
     /** The instrument itself must not allocate, or every figure above is inflated. */

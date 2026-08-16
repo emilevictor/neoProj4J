@@ -15,7 +15,8 @@ machine or a consumer has fetched it.
   2. Check the signing key's expiry. It is already published   "The signing key"
      and must NOT be re-published.
   3. Confirm ~/.m2/settings.xml has the Central token.         "settings.xml"
-  4. Run the four gates locally, from a clean tree.            "The four local gates"
+  4. Run the four gates locally, from a clean tree, and       "The four local gates"
+     bench as well: CI no longer runs it at all.
   5. Read the golden report and confirm the failure is the     "Reading the golden report"
      expected one, with no rule-level failure.
   6. Push the release commit to master. NOT the tag yet.       "Push the commit, then wait for CI"
@@ -512,6 +513,15 @@ Checklist step 4. Run them before you tag, from a clean tree:
 -- it does not set the exit code. Do not wait for it to go green and do not "fix" it before a
 release.
 
+DO NOT SKIP `bench`, AND THAT CHANGED ON 2026-08-14. bench.yaml is turned off for the time being:
+its only trigger is workflow_dispatch, so no push, no pull request and no schedule starts it. This
+local run is therefore the only thing standing between a release and an unnoticed rise in memory
+allocated per operation, or an unnoticed change in how many sin/cos/log calls a transform makes.
+It costs about 20 minutes on a quiet machine. The alternative is a manual CI run, which measures
+the same thing on x86-64 rather than on this laptop:
+
+    gh workflow run bench.yaml       # then watch it in the Actions tab
+
 
 Reading the golden report
 ------------------------------------------------------------------------------
@@ -574,9 +584,10 @@ architecture and not the other, and HotSpot substitutes a per-architecture routi
 Math.sin/cos/tan/log/exp. The local gates cannot see that class of defect at all.
 
 To get CI to run on the commit you are about to tag, you have to push that commit -- to master,
-or as the head of a pull request. ci.yaml, conformance.yaml, determinism.yaml and bench.yaml all
-trigger on `push: branches: [master, main]` and on `pull_request`, and none of them has a tag
-trigger. A commit pushed to any other branch, and a pushed tag, run nothing at all. This tree is
+or as the head of a pull request. ci.yaml, conformance.yaml and determinism.yaml trigger on
+`push: branches: [master, main]` and on `pull_request`, and none of them has a tag trigger.
+golden.yaml and bench.yaml trigger on neither, so they will not run for your commit; see the
+paragraph below. A commit pushed to any other branch, and a pushed tag, run nothing at all. This tree is
 on release/2.1.0-combined, so the work has to reach master before CI will look at it -- which it
 has to do regardless, because a tag on any other branch gets a branch qualifier. So:
 
@@ -585,8 +596,8 @@ has to do regardless, because a tag on any other branch gets a branch qualifier.
 
 DO NOT READ THE WORKFLOW-LEVEL VERDICT. `gh run list --commit` reports one conclusion per
 workflow, and a workflow's conclusion folds in its `continue-on-error` jobs. Four jobs in this
-repository are red BY DESIGN -- Build (JDK EA) (ci.yaml:143), Java 8 runtime compatibility
-(ci.yaml:188), and the tr_TR and de_DE determinism legs (ci.yaml:352, via `matrix.advisory`) --
+repository are red BY DESIGN -- Build (JDK EA) (ci.yaml:144), Java 8 runtime compatibility
+(ci.yaml:189), and the tr_TR and de_DE determinism legs (ci.yaml:353, via `matrix.advisory`) --
 so the CI workflow reads `failure` on a commit that is perfectly releasable. Told "the checks
 must be green" and handed a workflow verdict, you will either block a good release or learn to
 ignore a red line, and both are worse than not looking. "Do not tag over a red required job"
@@ -601,18 +612,31 @@ and ignore every line whose name ends in `(advisory)`. Those are the jobs allowe
 DO NOT USE `--required` HERE, EVEN THOUGH IT SOUNDS LIKE THE RIGHT FLAG. It restricts the list
 to checks required by BRANCH PROTECTION, and this repository has none configured, so it filters
 out everything and prints "no required checks reported on the '<branch>' branch". Measured on
-pull request 24 on 2026-08-14, with all 18 checks pending. An empty list reads as "nothing is
+pull request 24 on 2026-08-14. An empty list reads as "nothing is
 red", which is the same mistake as reading the workflow verdict, one flag further along. The
 flag is real and is documented in `gh pr checks --help` on gh 2.97.0; it just answers a question
 nobody has configured an answer to. If branch protection is ever set up, `--required` becomes
 the better form -- check that it returns a non-empty list before trusting it.
 
-The `(advisory)` suffix is a reliable filter because the workflows put it in the job name
-themselves, at ci.yaml:140, ci.yaml:185, ci.yaml:349 (which appends it from `matrix.advisory`,
-so every advisory determinism leg gets it) and conformance.yaml:429. On pull request 24 that
-split 18 checks into 6 advisory and 12 not. Note that "advisory" means allowed to fail, not
-observed to fail: six jobs carry the suffix, and the four named in the paragraph above are the
-ones that actually do go red.
+The word "advisory" in a job name is a reliable filter because the workflows put it there
+themselves, at ci.yaml:141, ci.yaml:186, ci.yaml:350 (which appends it from `matrix.advisory`,
+so every advisory determinism leg gets it) and conformance.yaml:429. COUNT THE LINES, DO NOT
+`grep '(advisory)'`: one of the six reads "Build (JDK EA, advisory)", inside the same brackets as
+the JDK, so a search for the literal string "(advisory)" finds five of the six and silently drops
+the one job in the set that has actually gone red in the past. Search for the word alone.
+
+RE-MEASURE THE COUNT, NEVER SUBTRACT FROM IT. Measured with `gh pr checks 24` on 2026-08-14,
+BEFORE the change below: 19 checks, 6 carrying "advisory" and 13 not. One of the 19 was
+`Upstream corpus drift vs PROJ master (advisory)`, which is listed as "skipping" -- its job
+carries `if: github.event_name == 'schedule' || ...`, and GitHub reports a skipped job as a
+check. That is why the total is not the number of jobs that ran.
+
+On the same day bench.yaml was turned off, so `Allocation and op-count gate` leaves the list
+entirely: 18 checks, 6 advisory and 12 not. Re-run `gh pr checks` rather than trusting either
+figure -- this line has been wrong before.
+
+Note that "advisory" means allowed to fail, not observed to fail: six jobs carry the word, and
+the four named in the paragraph above are the ones that actually do go red.
 
 If the commit was pushed straight to master there is no pull request, and therefore no
 required-checks list to ask for. Read the JOB conclusions rather than the run's:
@@ -623,12 +647,24 @@ required-checks list to ask for. Read the JOB conclusions rather than the run's:
 The header line of that output will still say the run failed. Ignore it and read the jobs,
 skipping the four named above. Anything else red is a real failure.
 
-GOLDEN WILL NOT APPEAR IN EITHER LIST, AND IT IS NOT MISSING. golden.yaml is `schedule` (weekly)
-plus `workflow_dispatch` only -- golden.yaml:93-97, with its push and pull_request triggers
-deliberately removed while the backlog is triaged. It therefore never runs for a pushed commit.
-Do not go looking for a fifth workflow; run it deliberately if you want it:
+GOLDEN AND BENCH WILL NOT APPEAR IN EITHER LIST, AND THEY ARE NOT MISSING. Neither triggers on a
+push or a pull request.
+
+golden.yaml is `schedule` (weekly) plus `workflow_dispatch` only -- golden.yaml:93-97, with its
+push and pull_request triggers deliberately removed while the backlog is triaged.
+
+bench.yaml is `workflow_dispatch` only -- no push, no pull request, and no schedule either. It was
+turned off on 2026-08-14 because 21 minutes of measurement per commit was more than anyone was
+willing to wait for, and that is meant to be temporary. Nothing starts it automatically, so
+between now and whenever it is turned back on, a rise in memory allocated per operation or a
+change in the number of sin/cos/log calls a transform makes will not be caught by CI at all. The
+local `./docker/run.sh bench` in checklist step 4 is the cover, which is why that step is not
+optional before a tag.
+
+Do not go looking for two missing workflows; run either one deliberately if you want it:
 
     gh workflow run golden.yaml
+    gh workflow run bench.yaml
 
 Do not tag over a red required check, and do not tag a commit CI has not yet run.
 
