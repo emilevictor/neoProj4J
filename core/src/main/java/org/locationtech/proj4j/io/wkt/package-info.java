@@ -56,10 +56,7 @@
  * throws {@link org.locationtech.proj4j.io.wkt.WktParseException} rather than returning a plausible
  * coordinate. Mercator variant B's standard parallel is converted to the equivalent scale factor,
  * the same value proj4j's Mercator derives from {@code +lat_ts} itself, because that is what PROJ's
- * own export of the method emits. Equidistant Cylindrical with a non-zero standard parallel or
- * latitude of natural origin is refused as well, and that refusal is <em>not</em> an instance of
- * the rule above: {@code PlateCarreeProjection} reads both parameters. The refusal is left as it
- * stands rather than re-argued here; only its message changed. A vertical-only CRS is refused rather
+ * own export of the method emits. A vertical-only CRS is refused rather
  * than becoming a horizontal one, and a compound CRS yields its horizontal component with the
  * height left untransformed.
  *
