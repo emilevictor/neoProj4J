@@ -1,6 +1,8 @@
 conus
 ntv2_0_downsampled.gsb
 egm96_15_downsampled.gtx
+subset_of_gr3df97a.tif
+nkgrf03vel_realigned_extract.tif
 test_hgrid_degree.tif
 test_hgrid_extra_ifd_with_other_info.tif
 test_hgrid_lon_shift_first.tif

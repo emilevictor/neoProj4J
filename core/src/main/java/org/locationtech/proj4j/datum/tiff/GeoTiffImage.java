@@ -18,6 +18,7 @@ package org.locationtech.proj4j.datum.tiff;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Map;
 
 import org.locationtech.proj4j.datum.GridExtents;
 
@@ -576,6 +577,33 @@ public final class GeoTiffImage {
     public String metadataItem(String key) {
         return metadata.item(key, GdalMetadata.GRID_LEVEL);
     }
+
+    /**
+     * The whole {@code GDAL_METADATA} block of this IFD, keyed by {@link #metadataKey}.
+     *
+     * <p>Unmodifiable, and it retains nothing but the parsed strings — no file bytes — so a grid
+     * object may hold onto it for the lifetime of the cache entry. That is what
+     * {@code GTiffGenericGrid}'s cross-IFD fallback needs: a subgrid with no {@code TYPE} of its
+     * own consults IFD 0 for <em>every</em> key, so the keys cannot be enumerated up front.
+     *
+     * @return the items of this IFD alone; the fallback is the caller's to apply
+     */
+    public Map<String, String> metadataSnapshot() {
+        return metadata.items();
+    }
+
+    /**
+     * The key {@link #metadataSnapshot} is indexed by.
+     *
+     * @param key    the {@code name} attribute
+     * @param sample the band index, or {@code -1} for a grid-level item
+     */
+    public static String metadataKey(String key, int sample) {
+        return GdalMetadata.key(sample, key);
+    }
+
+    /** The sample index meaning "applies to the whole grid, not to one band". */
+    public static final int GRID_LEVEL = GdalMetadata.GRID_LEVEL;
 
     /** {@code GTiffGrid::isNodata}: the declared sentinel, or any NaN. */
     public boolean isNodata(float value) {
