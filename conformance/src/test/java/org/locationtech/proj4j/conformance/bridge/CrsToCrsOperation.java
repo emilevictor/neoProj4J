@@ -99,10 +99,12 @@ final class CrsToCrsOperation implements GieOperation {
 
     @Override
     public boolean crsDstIsLatLonOrYX() {
-        // See GieOperation#crsDstIsLatLonOrYX. This is the case where the
-        // limitation actually costs assertions: EPSG:2393 ("Finland YKJ Northing,
-        // Easting") and the other latitude-first targets in epsg_no_grid.gie need
-        // the swap, and proj4j exposes no axis metadata to detect them with.
+        // See GieOperation#crsDstIsLatLonOrYX, which now records what this costs and
+        // what it does not. Short version: proj4j exposes no axis metadata to detect
+        // latitude-first targets with, but returning the right answer here would not
+        // move EPSG:2393 ("Finland YKJ Northing, Easting") -- that row is compared in
+        // metres, where the swap is a no-op, and its error is axis order on both
+        // sides. Do not treat this method as the fix for it.
         return false;
     }
 
