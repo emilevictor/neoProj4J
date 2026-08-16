@@ -396,7 +396,12 @@ class Proj4jGieOperationFactoryTest {
         assertTrue(op("proj=axisswap axis=neu").isUsable(), "axisswap routes to the pipeline engine");
         assertTrue(op("proj=unitconvert xy_in=m xy_out=km").isUsable(), "unitconvert likewise");
         assertTrue(op("proj=cart ellps=GRS80").isUsable(), "cart likewise");
-        assertKind(GieFailureKind.NOT_IMPLEMENTED, op("proj=helmert x=1"));
+        // helmert joined them in 2.2.0, so the probe moved to horner, which this fork
+        // has in neither the pipeline engine nor the Registry
+        // ({@code 9.8.1:src/transformations/horner.cpp}). Move it again rather than
+        // delete it when horner lands.
+        assertTrue(op("proj=helmert x=1").isUsable(), "helmert likewise, from 2.2.0");
+        assertKind(GieFailureKind.NOT_IMPLEMENTED, op("proj=horner deg=1"));
     }
 
     @Test
@@ -468,10 +473,28 @@ class Proj4jGieOperationFactoryTest {
         // class, base funnels - so it is honoured for every projection, as upstream's is.
         assertTrue(op("proj=merc ellps=GRS80 over").isUsable(),
                 "+over is dispatched to Projection.setOver and guards both funnels now");
-        // STILL CORRECT, and left alone. +lon_wrap is NOT in HONOURED, and PROJ genuinely acts
-        // on it (fwd.cpp:165, adjlon(lam - P->long_wrap_center)) where proj4j has no notion of a
-        // wrap centre at all. Honest NOT_IMPLEMENTED.
-        assertKind(GieFailureKind.NOT_IMPLEMENTED, op("proj=merc ellps=GRS80 lon_wrap=0"));
+        // INVERTED, and the reason is worth stating exactly, because "usable on merc" is not
+        // the same claim as "implemented". +lon_wrap IS in HONOURED now: Proj4Keyword registers
+        // it, Proj4Parser reads it as an angle in radians with upstream's 10*2*pi guard, and
+        // Projection.projectRadians applies ProjectionMath.adjlon about the centre.
+        //
+        // On +proj=merc SPECIFICALLY, neither side acts on it, and that is upstream's own
+        // structure rather than a hole in ours: fwd_finalize applies the wrap in
+        // "case PJ_IO_UNITS_RADIANS" ONLY (fwd.cpp:156-169), so a projection whose forward
+        // output is projected -- merc among them -- ignores +lon_wrap entirely. The two agree by
+        // doing the same nothing, which is the +W situation above and an honest usable operation.
+        assertTrue(op("proj=merc ellps=GRS80 lon_wrap=0").isUsable(),
+                "+lon_wrap is registered, read and applied now; merc ignores it on both sides");
+        // Where it DOES act, it is usable too, and this is the leg that stops the assertion
+        // above from passing merely because the token is being dropped again: +proj=longlat has
+        // an angular forward output, so this is the arm that carries the wrap. The arithmetic
+        // itself is measured against 9.8.1 in core's LongitudeWrapTest.
+        assertTrue(op("proj=longlat ellps=GRS80 lon_wrap=180").isUsable(),
+                "+lon_wrap on an angular output is the case that actually wraps");
+        // Non-vacuity for the pair: the guard still refuses a centre beyond 10*2*pi radians,
+        // measured against 9.8.1, which accepts 3599 and errors 1027 on 3600.
+        assertFalse(op("proj=longlat ellps=GRS80 lon_wrap=3600").isUsable(),
+                "the 10*2*pi radian guard must still fire");
     }
 
     @Test
@@ -570,12 +593,33 @@ class Proj4jGieOperationFactoryTest {
     @Test
     @DisplayName("a value grammar PROJ has and proj4j lacks is NOT_IMPLEMENTED, not a wrong answer")
     void narrowerValueGrammarIsNotImplemented() {
-        // PROJ's +to_meter accepts a num/den ratio; proj4j's Double.parseDouble
-        // would read "1/0.3048" as 1 and scale the whole projection by 1 metre per
-        // unit instead of 3.28.
-        GieOperation ratio = op("proj=merc ellps=GRS80 to_meter=1/0.3048");
-        assertKind(GieFailureKind.NOT_IMPLEMENTED, ratio);
-        assertTrue(ratio.failure().message().contains("ratio"), ratio.failure().message());
+        // INVERTED, and the premise was already false when this was written. The comment said
+        // "proj4j's Double.parseDouble would read 1/0.3048 as 1"; proj4j's parser splits on the
+        // slash and divides, exactly as pj_mkparam_ws/pj_param's "d" reading does, so both sides
+        // read 3.2808398950131235. The veto here was a stale refusal of a grammar the library
+        // has, which is the expensive kind of stale note: it stops the work instead of costing an
+        // experiment. It cost this row (more_builtins.gie:525) a FAIL for nothing.
+        assertTrue(op("proj=merc ellps=GRS80 to_meter=1/0.3048").isUsable(),
+                "+to_meter's num/den ratio is read by both sides");
+        assertTrue(op("proj=merc ellps=GRS80 to_meter=2.0/0.2").isUsable(),
+                "the corpus row's own spelling, more_builtins.gie:525");
+
+        // NON-VACUITY, and it has to be on the same KEY, not merely on the same method: the
+        // to_meter arm is now judged by a projRatio mirror rather than by the DOUBLE_KEYS
+        // fall-through, so a legs-elsewhere control would prove nothing about it. PROJ's
+        // strtod-alike reads "3junk" as 3.0 and stops; proj4j's parser refuses the whole token.
+        // A real divergence, still reported.
+        GieOperation trailingJunk = op("proj=merc ellps=GRS80 to_meter=3junk");
+        assertKind(GieFailureKind.NOT_IMPLEMENTED, trailingJunk);
+        assertTrue(trailingJunk.failure().message().contains("to_meter"),
+                trailingJunk.failure().message());
+
+        // And upstream's OWN rejections must stay with the validator rather than being
+        // reclassified as our gap: PROJ refuses a non-positive scale, so these are
+        // INVALID_DEFINITION and not NOT_IMPLEMENTED. Getting this wrong would have demoted
+        // more_builtins.gie:516 and :521 -- which pass today -- to VACUOUS_EXPECTED_FAILURE.
+        assertFalse(op("proj=merc ellps=GRS80 to_meter=1/0").isUsable());
+        assertFalse(op("proj=merc ellps=GRS80 to_meter=0").isUsable());
     }
 
     @Test
@@ -602,15 +646,37 @@ class Proj4jGieOperationFactoryTest {
     }
 
     @Test
-    @DisplayName("nkg.gie's OGC URN operations are NOT_IMPLEMENTED, not malformed")
-    void ogcUrnIsNotImplemented() {
-        // All 26 operations in nkg.gie are OGC URNs. proj_create() resolves them
-        // through proj.db, so they are perfectly valid upstream and must not be
-        // classified INVALID_DEFINITION - that would make an `expect failure` row
-        // pass for entirely the wrong reason.
+    @DisplayName("nkg.gie's coordinateOperation URNs now resolve through the database and run")
+    void ogcUrnResolvesThroughTheDatabase() {
+        // INVERTED. All 26 operations in nkg.gie are OGC URNs, and proj_create() resolves
+        // them through proj.db - so they are valid upstream and were classified
+        // NOT_IMPLEMENTED here rather than INVALID_DEFINITION, which would have made an
+        // `expect failure` row pass for entirely the wrong reason. Two things changed:
+        // neoproj4j-db is now a test dependency of this module, and core can turn a
+        // database operation into a proj-string (Proj.createOperationDefinition). So the
+        // URN resolves, the pipeline engine runs it, and all 33 nkg.gie assertions pass.
         GieOperation o = op("urn:ogc:def:coordinateOperation:NKG::ITRF2000_TO_DK");
-        assertKind(GieFailureKind.NOT_IMPLEMENTED, o);
-        assertTrue(o.failure().message().contains("proj.db"), o.failure().message());
+        assertTrue(o.isUsable(), () -> "expected a usable operation: "
+                + (o.failure() == null ? "no failure either" : o.failure().message()));
+        // The exact parameter digits are pinned in core, against `projinfo`, by
+        // OperationDefinitionTest; here the claim is only that the URN was routed to the
+        // database and produced the concatenated operation rather than something else.
+        assertTrue(o.toString().contains("+proj=pipeline"), o.toString());
+        assertTrue(o.toString().contains("+proj=helmert"), o.toString());
+        assertTrue(o.toString().contains("+grids=eur_nkg_nkgrf03vel_realigned.tif"), o.toString());
+
+        // An operation the authority does not publish is still a refusal, and it is ours to
+        // own: NOT_IMPLEMENTED, never INVALID_DEFINITION, because the notation is fine.
+        assertKind(GieFailureKind.NOT_IMPLEMENTED,
+                op("urn:ogc:def:coordinateOperation:NKG::NO_SUCH_OPERATION"));
+
+        // The other three non-proj-string shapes are unchanged. A bare AUTHORITY:CODE is
+        // refused ON PURPOSE: upstream resolves the two-token form as a CRS
+        // (9.8.1:src/iso19111/io.cpp:7779), so reading it as an operation would make this
+        // harness accept a notation PROJ does not. nkg.gie spells every URN out in full.
+        GieOperation bare = op("NKG:ITRF2000_TO_DK");
+        assertKind(GieFailureKind.NOT_IMPLEMENTED, bare);
+        assertTrue(bare.failure().message().contains("proj.db"), bare.failure().message());
         assertKind(GieFailureKind.NOT_IMPLEMENTED, op("EPSG:4326"));
         assertKind(GieFailureKind.NOT_IMPLEMENTED,
                 op("PROJCRS[\"foo\",BASEGEOGCRS[\"bar\"]]"));

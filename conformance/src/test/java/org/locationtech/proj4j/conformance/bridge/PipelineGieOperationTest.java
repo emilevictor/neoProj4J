@@ -134,12 +134,18 @@ class PipelineGieOperationTest {
      * {@code INVALID_DEFINITION}: an {@code expect failure} row satisfied by our own
      * capability gap demonstrates nothing, which is the distinction the whole bridge
      * is shaped around.
+     *
+     * <p>The example used to be {@code +proj=helmert}, which stopped being a gap in
+     * 2.2.0. It is now {@code +proj=horner}, PROJ's polynomial transformation
+     * ({@code 9.8.1:src/transformations/horner.cpp}), which this fork does not have in
+     * either the pipeline engine or the {@code Registry}. Whoever implements that will
+     * see this test go red and should move the example on again rather than delete it.
      */
     @Test
     @DisplayName("an unimplemented operator step is NOT_IMPLEMENTED, not INVALID_DEFINITION")
     void anUnimplementedStepIsOurGapNotUpstreams() {
         GieOperation op = factory.create(
-                "+proj=pipeline +step +proj=cart +ellps=GRS80 +step +proj=helmert +x=1");
+                "+proj=pipeline +step +proj=cart +ellps=GRS80 +step +proj=horner +deg=1");
         assertFalse(op.isUsable());
         assertEquals(GieFailureKind.NOT_IMPLEMENTED, op.failure().kind());
     }

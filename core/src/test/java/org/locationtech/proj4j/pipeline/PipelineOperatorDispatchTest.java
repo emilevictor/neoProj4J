@@ -51,8 +51,10 @@ public class PipelineOperatorDispatchTest {
     @Test
     public void everyNonProjectionOperatorIsClaimed() {
         String[] claimed = {
-            "affine", "axisswap", "cart", "deformation", "hgridshift", "pop", "push",
-            "set", "tinshift", "unitconvert", "vgridshift",
+            "affine", "axisswap", "cart", "deformation", "geoc", "geogoffset", "helmert",
+            "hgridshift", "molobadekas", "molodensky", "noop", "pop", "push", "set",
+            "tinshift", "topocentric", "unitconvert", "vertoffset", "vgridshift",
+            "xyzgridshift",
         };
         for (int i = 0; i < claimed.length; i++) {
             assertTrue(claimed[i] + " must route to the pipeline engine",
@@ -70,7 +72,7 @@ public class PipelineOperatorDispatchTest {
     public void noProjectionOrRegistryNameIsClaimed() {
         String[] notClaimed = {
             "longlat", "latlong", "lonlat", "latlon", "geocent", "merc", "utm", "tmerc",
-            "lcc", "stere", "pipeline", "helmert", "gridshift", "defmodel", "noop", "",
+            "lcc", "stere", "pipeline", "gridshift", "defmodel", "horner", "",
         };
         for (int i = 0; i < notClaimed.length; i++) {
             assertFalse("'" + notClaimed[i] + "' must not route to the pipeline engine",
@@ -166,6 +168,8 @@ public class PipelineOperatorDispatchTest {
         assertRejected("+proj=deformation +xy_grids=x +ellps=GRS80 +dt=1",
                 PipelineErrorCode.MISSING_ARG,
                 "Either +grids or (+xy_grids and +z_grids) should be specified.");
+        assertRejected("+proj=xyzgridshift +ellps=GRS80",
+                PipelineErrorCode.MISSING_ARG, "+grids parameter missing.");
     }
 
     @Test
@@ -174,6 +178,8 @@ public class PipelineOperatorDispatchTest {
                 PipelineErrorCode.FILE_NOT_FOUND_OR_INVALID, "could not find required grid(s)");
         assertRejected("+proj=tinshift +file=i_do_not_exist",
                 PipelineErrorCode.FILE_NOT_FOUND_OR_INVALID, "Cannot open i_do_not_exist");
+        assertRejected("+proj=xyzgridshift +grids=i_do_not_exist +ellps=GRS80",
+                PipelineErrorCode.FILE_NOT_FOUND_OR_INVALID, "could not find required grid(s)");
     }
 
     /**
@@ -187,10 +193,10 @@ public class PipelineOperatorDispatchTest {
         assertRejected("+proj=deformation +xy_grids=x +z_grids=y +ellps=GRS80 +t_obs=2000",
                 PipelineErrorCode.FILE_NOT_FOUND_OR_INVALID, "could not find required grid(s)");
         // The grid list is opened first, so the epoch checks are only reachable with a
-        // resolvable grid; what is asserted here is that the +grids= (GeoTIFF) form is
-        // refused with a reason rather than silently treated as the two-grid form.
+        // resolvable grid. Since 2.2.0 the +grids= (GeoTIFF) form is read like any other, so
+        // an unresolvable name is a missing file and not a "not implemented".
         assertRejected("+proj=deformation +grids=some_model.tif +ellps=GRS80 +dt=1",
-                PipelineErrorCode.NOT_IMPLEMENTED_HERE, "no GeoTIFF grid reader");
+                PipelineErrorCode.FILE_NOT_FOUND_OR_INVALID, "could not find required grid(s)");
     }
 
     /** {@code defmodel} and {@code gridshift} are not claimed, so they are not silently run. */

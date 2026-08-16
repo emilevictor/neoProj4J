@@ -68,6 +68,26 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- The operation database. Test scope, because the corpus is the only thing here that
+             needs it and core must keep working without it.
+
+             This is not a convenience. 33 assertions in gie/nkg.gie name their operation as an OGC
+             URN (urn:ogc:def:coordinateOperation:NKG::ITRF2000_TO_DK and 25 siblings) and nothing
+             else - there is no proj-string form of those rows to fall back on. Upstream's `gie`
+             resolves them through proj.db inside proj_create(); the only way to evaluate them at all
+             is to have the database on the classpath. Without this dependency those 33 rows are not
+             failures with a diagnosis, they are 33 rows the runner cannot even attempt, and they sit
+             in the manifest as "proj4j has no operation database" forever.
+
+             It is a ServiceLoader provider (org.locationtech.proj4j.spi.ProjDatabaseProvider), so
+             adding the jar is the whole wiring; no conformance code names it. -->
+        <dependency>
+            <groupId>io.github.emilevictor.neoproj4j</groupId>
+            <artifactId>neoproj4j-db</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
         <!-- JUnit 5. The conformance runner needs @TestFactory: 7923 assertions cannot be modelled
              as static @Test methods, and JUnit 4's Parameterized gives useless failure names.
              junit-vintage is NOT needed here - this module has no JUnit 4 tests. core/ keeps

@@ -369,6 +369,200 @@ public class GeocentProjectionTest {
     }
 
     // -----------------------------------------------------------------------------------------
+    // The linear unit. fwd_finalize's PJ_IO_UNITS_CARTESIAN branch (9.8.1:src/fwd.cpp:133-136)
+    // multiplies ALL THREE ordinates by fr_meter and adds no false easting; inv_prepare
+    // (inv.cpp:67-69) divides all three back. The override used to skip both, so +to_meter and
+    // +units were parsed into `fromMetres` and then never read on this path.
+    //
+    // The witness is conformance/src/test/resources/gie/4D-API_cs2cs-style.gie:488 (block #41),
+    // which expected (0, 1, 0) and got (0, 1000, 0) -- 999 m of deviation on a 1000 m sphere, i.e.
+    // the whole scale factor. Its sibling at :493 is the same test on +proj=cart and always passed,
+    // because `cart` is not in Registry and therefore routes to the pipeline engine, whose
+    // CartOperator already did this.
+    // -----------------------------------------------------------------------------------------
+
+    /**
+     * The gie row itself. {@code +proj=geocent +a=1000 +b=1000 +to_meter=1000} at
+     * {@code (90, 0, 0)}: X is the cosine of a right angle, Y is one thousandth of the radius in
+     * metres, Z is zero.
+     *
+     * <p>Reference is PROJ 9.8.1's own answer, not proj4j's:
+     * {@code echo "90 0 0" | cct -d 18 +proj=geocent +a=1000 +b=1000 +to_meter=1000} prints
+     * {@code 0.000000000000000061  1.000000000000000000  0.000000000000000000}. Asserted through
+     * both entry points because they are separate overrides: {@code project} takes degrees,
+     * {@code projectRadians} radians, and only the second is what {@code fwd.cpp} corresponds to.
+     */
+    @Test
+    public void toMeterScalesAllThreeOrdinatesOnTheForward() {
+        CoordinateReferenceSystem crs = new CRSFactory().createFromParameters("geocent-to-meter",
+                "+proj=geocent +a=1000 +b=1000 +to_meter=1000 +no_defs");
+        Projection p = crs.getProjection();
+        ProjCoordinate radians = new ProjCoordinate();
+        ProjCoordinate degrees = new ProjCoordinate();
+
+        p.projectRadians(new ProjCoordinate(Math.PI / 2.0, 0.0, 0.0), radians);
+        p.project(new ProjCoordinate(90.0, 0.0, 0.0), degrees);
+
+        // gie's tolerance on this row is 0.5 mm, which at this scale is 5e-7 of a unit.
+        assertEquals(6.1e-17, radians.x, 5.0e-7);
+        assertEquals(1.0, radians.y, 5.0e-7);
+        assertEquals(0.0, radians.z, 5.0e-7);
+        assertEquals(degrees.x, radians.x, 0.0);
+        assertEquals(degrees.y, radians.y, 0.0);
+        assertEquals(degrees.z, radians.z, 0.0);
+    }
+
+    /**
+     * The same row's {@code roundtrip 1}, which <b>passed vacuously</b> before the forward was
+     * fixed: forward and inverse were wrong by reciprocal factors, so the round trip closed while
+     * neither direction was right. {@code echo "0 1 0" | cct -I -d 12 +proj=geocent +a=1000
+     * +b=1000 +to_meter=1000} prints {@code 90 0 0}.
+     *
+     * <p>Note {@code fromMetres} holds {@code 1/to_meter} ({@code Proj4Parser:344,349}), so the
+     * inverse's scale is a reciprocal of a reciprocal and getting it backwards is a factor of
+     * {@code to_meter} squared -- 1e6 here, which is why this is asserted against PROJ rather than
+     * against the forward.
+     */
+    @Test
+    public void toMeterScalesAllThreeOrdinatesOnTheInverse() {
+        CoordinateReferenceSystem crs = new CRSFactory().createFromParameters("geocent-to-meter",
+                "+proj=geocent +a=1000 +b=1000 +to_meter=1000 +no_defs");
+        Projection p = crs.getProjection();
+        ProjCoordinate radians = new ProjCoordinate();
+        ProjCoordinate degrees = new ProjCoordinate();
+
+        p.inverseProjectRadians(new ProjCoordinate(0.0, 1.0, 0.0), radians);
+        p.inverseProject(new ProjCoordinate(0.0, 1.0, 0.0), degrees);
+
+        assertEquals(Math.PI / 2.0, radians.x, RAD);
+        assertEquals(0.0, radians.y, RAD);
+        // h is in the CRS's own unit: zero height, so zero either way.
+        assertEquals(0.0, radians.z, 1.0e-9);
+        assertEquals(90.0, degrees.x, 1.0e-9);
+        assertEquals(0.0, degrees.y, 1.0e-9);
+    }
+
+    /**
+     * {@code fromMetres == 1}, which is every one of the 181 {@code +proj=geocent} definitions in
+     * the shipped {@code proj4/nad/epsg} dictionary -- all 181 are {@code +units=m}. This is the
+     * reason the defect moved no golden-master row, and it is asserted with a tolerance of
+     * <b>exactly zero</b> against the same sphere without the {@code +to_meter}, so that a future
+     * change to the scaling cannot perturb the metre case by even one bit.
+     */
+    @Test
+    public void unitsMetreLeavesTheForwardBitIdentical() {
+        CRSFactory factory = new CRSFactory();
+        Projection bare = factory.createFromParameters("geocent-bare",
+                "+proj=geocent +a=1000 +b=1000 +no_defs").getProjection();
+        Projection explicitMetres = factory.createFromParameters("geocent-metres",
+                "+proj=geocent +a=1000 +b=1000 +units=m +no_defs").getProjection();
+        ProjCoordinate fromBare = new ProjCoordinate();
+        ProjCoordinate fromExplicit = new ProjCoordinate();
+
+        ProjCoordinate src = new ProjCoordinate(Math.PI / 2.0, 0.0, 0.0);
+        bare.projectRadians(src, fromBare);
+        explicitMetres.projectRadians(src, fromExplicit);
+
+        // The radius in metres, undivided: the pre-fix answer to the gie row, correct here.
+        assertEquals(1000.0, fromBare.y, MM);
+        assertEquals(fromBare.x, fromExplicit.x, 0.0);
+        assertEquals(fromBare.y, fromExplicit.y, 0.0);
+        assertEquals(fromBare.z, fromExplicit.z, 0.0);
+    }
+
+    /**
+     * A real unit on a real ellipsoid, against PROJ 9.8.1 to twelve places. Note that upstream
+     * gives <b>two different answers</b> for what ought to be the same unit, and that this is
+     * upstream's doing, not proj4j's:
+     *
+     * <pre>
+     * echo "-134 55 0" | cct -d 12 +proj=geocent +ellps=GRS80 +units=us-ft
+     *   -8356380.535945920274  -8653285.358541492373  17064872.441998399794
+     * echo "-134 55 0" | cct -d 12 +proj=geocent +ellps=GRS80 +to_meter=0.3048006096012192
+     *   -8356380.535945915617  -8653285.358541486785  17064872.441998392344
+     * </pre>
+     *
+     * <p>{@code +units=us-ft} and {@code +to_meter=0.3048006096012192} take two different routes
+     * through {@code Proj4Parser} ({@code :344} versus {@code :349}) and <b>do not agree bitwise</b>.
+     * They do not agree in PROJ either, and for the same reason: PROJ's {@code pj_units} row for
+     * {@code us-ft} carries the factor twice and the two copies differ by three ulps
+     * ({@code 9.8.1:src/units.cpp:27}):
+     *
+     * <pre>
+     * {"us-ft", "0.304800609601219", "U.S. Surveyor's Foot", 1200 / 3937.0}
+     * </pre>
+     *
+     * <p><b>{@code +units=} reads the string, not the factor.</b> {@code init.cpp:689} does
+     * {@code s = units[i].to_meter} and hands it to {@code pj_strtod}, so {@code +units=us-ft}
+     * means exactly {@code strtod("0.304800609601219")} -- which is the literal
+     * {@code Units.US_FEET} carries. The {@code 1200 / 3937.0} field is read by
+     * {@code +proj=unitconvert} instead ({@code unitconvert.cpp:411,425}), and proj4j tracks that
+     * one separately in {@code pipeline/PipelineUnits}. So {@code Units.US_FEET} is <b>right</b>,
+     * and it is the {@code +to_meter} spelling that is three ulps off {@code +units=us-ft} --
+     * in PROJ and here alike. Anyone tempted to "round-trip fix" {@code Units.US_FEET} to
+     * {@code 1200 / 3937.0} should read the block comment above the U.S. units there first: it was
+     * measured, and it moves 270 golden rows the wrong way.
+     *
+     * <p>Each leg is therefore asserted against <b>its own</b> {@code cct} reference, which is the
+     * pairing that was wrong here before: the {@code +units=us-ft} reference used to be asserted
+     * against the {@code +to_meter} leg, and passed only because 1e-8 is wider than the 4.7e-9 gap
+     * between them. The 1e-8 band is ordinary double round-off in the geocentric forward, not a
+     * unit discrepancy -- one ulp is 9.3e-10 at 8.4e6 and 3.7e-9 at 1.7e7, and the measured
+     * residual against {@code cct} is at most 4 ulps on x and y and exactly zero on z.
+     *
+     * <p>The 4.7e-9 gap between the two legs is then asserted directly, so the split is pinned as
+     * a fact about PROJ rather than left to be rediscovered as a bug. {@code cct} shows the same
+     * gap: 4.6566e-9 on x and 7.4506e-9 on z, matching this build bit for bit.
+     *
+     * <p>The metre control is asserted alongside so that the 3.2808 factor is visible rather than
+     * baked into one opaque literal.
+     */
+    @Test
+    public void usSurveyFootMatchesProjCct() {
+        CRSFactory factory = new CRSFactory();
+        ProjCoordinate viaUnits = new ProjCoordinate();
+        ProjCoordinate viaToMeter = new ProjCoordinate();
+        ProjCoordinate inMetres = new ProjCoordinate();
+        ProjCoordinate src =
+                new ProjCoordinate(Math.toRadians(-134.0), Math.toRadians(55.0), 0.0);
+
+        factory.createFromParameters("geocent-usft",
+                "+proj=geocent +ellps=GRS80 +units=us-ft +no_defs")
+                .getProjection().projectRadians(src, viaUnits);
+        factory.createFromParameters("geocent-usft-explicit",
+                "+proj=geocent +ellps=GRS80 +to_meter=0.3048006096012192 +no_defs")
+                .getProjection().projectRadians(src, viaToMeter);
+        factory.createFromParameters("geocent-metres",
+                "+proj=geocent +ellps=GRS80 +units=m +no_defs")
+                .getProjection().projectRadians(src, inMetres);
+
+        // +units=us-ft against cct's +units=us-ft: PROJ's string column, which is what
+        // Units.US_FEET carries. Band is geocent's own round-off, ~4 ulps at these magnitudes.
+        assertEquals(-8356380.535945920274, viaUnits.x, 1.0e-8);
+        assertEquals(-8653285.358541492373, viaUnits.y, 1.0e-8);
+        assertEquals(17064872.441998399794, viaUnits.z, 1.0e-8);
+
+        // +to_meter=0.3048006096012192 against cct's OWN answer for that spelling, which is a
+        // different number. Same band, same reason.
+        assertEquals(-8356380.535945915617, viaToMeter.x, 1.0e-8);
+        assertEquals(-8653285.358541486785, viaToMeter.y, 1.0e-8);
+        assertEquals(17064872.441998392344, viaToMeter.z, 1.0e-8);
+
+        // The two legs are deliberately NOT equal, by the 3 ulps between PROJ's two copies of the
+        // factor. Pinned so that collapsing them -- in either direction -- fails here.
+        assertEquals("x gap matches cct's 4.6566e-9",
+                4.6566128730773926E-9, Math.abs(viaUnits.x - viaToMeter.x), 1.0e-9);
+        assertEquals("z gap matches cct's 7.4506e-9",
+                7.450580596923828E-9, Math.abs(viaUnits.z - viaToMeter.z), 1.0e-9);
+        assertTrue("us-ft via +units must be the larger magnitude, dividing by the smaller factor",
+                Math.abs(viaUnits.x) > Math.abs(viaToMeter.x));
+
+        assertEquals(-2547029.881416077726, inMetres.x, 1.0e-6);
+        assertEquals(-2637526.652336749714, inMetres.y, 1.0e-6);
+        assertEquals(5201383.523088155314, inMetres.z, 1.0e-6);
+    }
+
+    // -----------------------------------------------------------------------------------------
     // Contract: hasInverse, the name, and the fail-closed guards.
     // -----------------------------------------------------------------------------------------
 

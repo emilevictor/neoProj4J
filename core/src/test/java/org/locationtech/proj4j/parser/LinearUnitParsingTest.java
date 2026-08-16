@@ -257,6 +257,104 @@ public class LinearUnitParsingTest {
     }
 
     /**
+     * Every one of PROJ's 21 linear factors, <b>bitwise</b>, against the column
+     * {@code +units=} actually reads.
+     *
+     * <h2>Why this exists</h2>
+     *
+     * <p>PROJ's {@code PJ_UNITS} carries the conversion twice ({@code 9.8.1:src/proj.h:258}): a
+     * {@code to_meter} <b>string</b> and a {@code factor} <b>double</b>. For the five U.S. survey
+     * units the two do not agree -- 3 ulps for {@code us-ft} and {@code us-yd}, 1 ulp for
+     * {@code us-in}, {@code us-ch} and {@code us-mi}. {@code +units=} and {@code +vunits=} read
+     * the <b>string</b> ({@code init.cpp:689}, via {@code pj_strtod} plus an optional
+     * {@code /denominator}); {@code +proj=unitconvert} reads the <b>factor</b>
+     * ({@code unitconvert.cpp:411,425}).
+     *
+     * <p>So {@code Units.US_FEET}'s {@code 0.304800609601219} is not a rounded transcription of
+     * {@code 1200/3937} -- it is the correct value for this table, and
+     * {@code PipelineUnits.LINEAR_FACTORS} correctly carries {@code 1200 / 3937.0} for the other
+     * path. The two are pinned apart on purpose. It reads like a typo, it has been reported as one
+     * more than once, and this test is here so that "fixing" it fails loudly with the reason
+     * attached rather than silently moving 270 golden rows away from PROJ.
+     *
+     * <p>The expected values are spelled the way {@code units.cpp} spells them and parsed the way
+     * {@code pj_strtod} parses them, so a wrong constant cannot agree with itself.
+     */
+    @Test
+    public void everyLinearUnitMatchesProjsStringColumnBitwise() {
+        // 9.8.1:src/units.cpp:13-33, field 1 and field 2, in that file's order.
+        String[][] table = {
+                {"km", "1000"}, {"m", "1"}, {"dm", "1/10"}, {"cm", "1/100"}, {"mm", "1/1000"},
+                {"kmi", "1852"}, {"in", "0.0254"}, {"ft", "0.3048"}, {"yd", "0.9144"},
+                {"mi", "1609.344"}, {"fath", "1.8288"}, {"ch", "20.1168"}, {"link", "0.201168"},
+                {"us-in", "1/39.37"}, {"us-ft", "0.304800609601219"},
+                {"us-yd", "0.914401828803658"}, {"us-ch", "20.11684023368047"},
+                {"us-mi", "1609.347218694437"},
+                {"ind-yd", "0.91439523"}, {"ind-ft", "0.30479841"}, {"ind-ch", "20.11669506"},
+        };
+        assertEquals("the table must cover all of PROJ's linear units",
+                Units.LINEAR_UNITS.length, table.length);
+
+        List<String> wrong = new ArrayList<String>();
+        for (String[] row : table) {
+            double expected = projStrtod(row[1]);
+            double actual = Units.findUnits(row[0]).value;
+            if (Double.doubleToLongBits(expected) != Double.doubleToLongBits(actual)) {
+                wrong.add(row[0] + ": +units= means strtod(\"" + row[1] + "\") = " + expected
+                        + " but Units has " + actual + " ("
+                        + (Double.doubleToLongBits(actual) - Double.doubleToLongBits(expected))
+                        + " ulp)");
+            }
+        }
+        assertTrue("linear units that do not match PROJ's to_meter string column: " + wrong,
+                wrong.isEmpty());
+    }
+
+    /**
+     * The 3-ulp split inside PROJ's own {@code us-ft} row, asserted from both sides so that
+     * neither table can be quietly changed to match the other.
+     *
+     * <p>{@code 1200 / 3937.0} is {@code 0.3048006096012192}; the string column is
+     * {@code 0.304800609601219}. Three ulps, 5.46e-16 relative. Both numbers are correct, for
+     * different {@code +units=} / {@code +proj=unitconvert} code paths -- see
+     * {@link #everyLinearUnitMatchesProjsStringColumnBitwise()}.
+     */
+    @Test
+    public void usSurveyFootIsProjsStringColumnNotItsFactor() {
+        double fromString = 0.304800609601219;
+        double fromFactor = 1200 / 3937.0;
+
+        assertEquals("1200/3937.0 must be the double that prints as 0.3048006096012192",
+                0.3048006096012192, fromFactor, 0.0);
+        assertEquals("the two spellings must be exactly 3 ulps apart", 3L,
+                Double.doubleToLongBits(fromFactor) - Double.doubleToLongBits(fromString));
+        assertEquals("relative gap", 5.463685059936552E-16,
+                (fromFactor - fromString) / fromFactor, 1.0e-31);
+
+        // +units=us-ft resolves to the string column, bitwise. This is the assertion that fails
+        // if someone "corrects" Units.US_FEET to 1200/3937.0.
+        assertEquals("Units.US_FEET must be PROJ's to_meter string, not its factor",
+                Double.doubleToLongBits(fromString),
+                Double.doubleToLongBits(Units.findUnits("us-ft").value));
+        assertFalse("Units.US_FEET must NOT be 1200/3937.0 - that is unitconvert's column",
+                Units.findUnits("us-ft").value == fromFactor);
+    }
+
+    /**
+     * {@code pj_strtod} plus {@code init.cpp:691-700}'s {@code /denominator} step: a plain
+     * double, or {@code numerator/denominator} evaluated as two doubles and one divide. The
+     * association matters -- {@code 1/39.37} is 1 ulp from {@code 100/3937.0}.
+     */
+    private static double projStrtod(String s) {
+        int slash = s.indexOf('/');
+        if (slash < 0) {
+            return Double.parseDouble(s);
+        }
+        return Double.parseDouble(s.substring(0, slash))
+                / Double.parseDouble(s.substring(slash + 1));
+    }
+
+    /**
      * The scale each newly reachable unit applies, checked against PROJ rather than
      * against the constant in {@code Units} — otherwise a wrong constant would agree
      * with itself.

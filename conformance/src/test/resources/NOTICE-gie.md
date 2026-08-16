@@ -1,22 +1,27 @@
 # NOTICE — third-party material vendored into `conformance/src/test/resources`
 
-**This file is a licence obligation, not documentation.** Two of the three bodies of vendored
+**This file is a licence obligation, not documentation.** Three of the four bodies of vendored
 material carry conditions that bind anyone who redistributes them: PROJ's MIT/X11 notice must
-travel with the copies, and the IOGP GIGS copyright requires both that the source be acknowledged
-and that *every subsequent recipient be informed of its terms*. Shipping the files without this
-file does not satisfy either. If these resources end up inside a published artifact, this notice
-(or its content) must go with them.
+travel with the copies, the IOGP GIGS copyright requires both that the source be acknowledged
+and that *every subsequent recipient be informed of its terms*, and the three CC-BY-4.0 grids in
+`proj-data-cdn/` require attribution. Shipping the files without this file does not satisfy any of
+the three. If these resources end up inside a published artifact, this notice (or its content) must
+go with them.
 
-Nothing in `gie/`, `gigs/` or `proj-data/` is authored here. Every byte is a verbatim copy of
-[PROJ](https://proj.org) at tag **9.8.1** (`f08fa86c478c4bbbf003b1ec751dd84aa6eca486`, 2026-04-10),
-extracted by `conformance/sync-upstream.sh`. `gie-manifest.sha256` records the SHA-256 of every
-vendored file so that local modification is detectable; re-running the sync script regenerates it.
+Nothing here is authored in this repository. Everything in `gie/`, `gigs/` and `proj-data/` is a
+verbatim copy of [PROJ](https://proj.org) at tag **9.8.1**
+(`f08fa86c478c4bbbf003b1ec751dd84aa6eca486`, 2026-04-10), extracted by
+`conformance/sync-upstream.sh`. `gie-manifest.sha256` records the SHA-256 of every file in those
+three directories so that local modification is detectable; re-running the sync script regenerates
+it. `proj-data-cdn/` comes from a *different* upstream — the OSGeo **PROJ-data** package — and is
+covered by section 4.
 
 | directory | upstream origin | files |
 |---|---|---|
 | `gie/` | `9.8.1:test/gie/` | 22 |
 | `gigs/` | `9.8.1:test/gigs/` | 20 `.gie` + 10 `.gie.failing` |
 | `proj-data/` | `9.8.1:data/` — the `for_tests` whitelist built by `data/CMakeLists.txt` | 96 (82 under `tests/`, plus promoted copies) |
+| `proj-data-cdn/` | OSGeo [PROJ-data](https://github.com/OSGeo/PROJ-data) / `https://cdn.proj.org/` | 3 GeoTIFF grids, CC-BY-4.0 |
 
 `test/gie/tinshift_gpkg.gie` and `test/gie/tinshift_gpkg_network.gie` are **not** vendored: they do
 not exist at 9.8.1, having been added to PROJ `master` afterwards.
@@ -235,6 +240,66 @@ different terms, and proj4j's existing `LICENSE.EPSG` covers only the EPSG porti
 
 ---
 
+## 4. `proj-data-cdn/**` — three production grids from OSGeo PROJ-data
+
+### What is here, and why it is not in `proj-data/`
+
+| file | bytes | SHA-256 | copyright holder |
+|---|---:|---|---|
+| `eur_nkg_nkgrf03vel_realigned.tif` | 362,495 | `a646bd863c427c7623eb2b365878351bab9a0a9b67aa6792b2dd31c3ef58e0b9` | Nordic Geodetic Commission |
+| `eur_nkg_nkgrf17vel.tif` | 715,692 | `515f68aeb59f659a3f3c340626cd060f58de6f93b4546df67732b906949e0d66` | Nordic Geodetic Commission |
+| `no_kv_NKGETRF14_EPSG7922_2000.tif` | 2,026,550 | `4f198074a4940171e130edbd7ec59cb1a3ba024c39f18a94404a13f285ef35c6` | Kartverket (SK), the Norwegian Mapping Authority |
+
+These three are needed by `gie/nkg.gie`, whose 33 assertions name their operation as an OGC URN and
+resolve, through the operation database, to pipelines whose second or third step is
+`+proj=deformation +grids=…` or `+proj=xyzgridshift +grids=…`. Without the grids the pipelines build
+and then cannot run.
+
+They are **deliberately not** under `proj-data/`, for two reasons, and moving them there will break
+the build:
+
+1. `conformance/sync-upstream.sh` begins its second phase with `rm -rf proj-data`, so anything put
+   there is deleted on the next re-sync.
+2. `gie-manifest.sha256` is generated over `find gie gigs proj-data -type f` and its header says
+   *"SHA-256 of every file vendored from PROJ 9.8.1"*. These files are not from PROJ 9.8.1; they are
+   from the separate PROJ-data package, under a different licence. Listing them there would make the
+   manifest header a false statement.
+
+`proj-data/tests/` does contain `nkgrf03vel_realigned_extract.tif` and
+`nkgrf03vel_realigned_extract_tiled_256x256.tif`, which are small **extracts** of the first grid
+above, taken into the PROJ repository as format fixtures. They cover a few cells and cannot satisfy
+`gie/nkg.gie`, which probes points across seven countries. They are not substitutes.
+
+### Licence — CC-BY-4.0, verified four ways
+
+| evidence | what it says |
+|---|---|
+| The files' own embedded GDAL metadata, read out of the vendored bytes | `The Nordic Geodetic Commission. Creative Commons Attribution 4.0 https://creativecommons.org/licenses/by/4.0/` for the two `eur_nkg_*` grids; `Kartverket (Norwegian Mapping Authority). Creative Commons Attribution 4.0 https://creativecommons.org/licenses/by/4.0/` for `no_kv_NKGETRF14_EPSG7922_2000.tif` |
+| PROJ-data's `copyright_and_licenses.csv` | `eur_nkg_nkgrf03vel_realigned.tif,Nordic Geodetic Commission,CC-BY-4.0`; `eur_nkg_nkgrf17vel.tif,Nordic Geodetic Commission,CC-BY-4.0`; `no_kv_NKGETRF14_EPSG7922_2000.tif,Kartverket (SK),CC-BY-4.0` |
+| PROJ-data's `README.DATA` | PROJ-data accepts a grid only under a licence compatible with the Open Source Definition, and lists CC-BY v3.0-or-later as suitable |
+| `proj.db`'s `grid_alternatives` table | all three carry `direct_download = 1` and `open_license = 1` against a `https://cdn.proj.org/` URL. A CHECK constraint (`9.8.1:data/sql/proj_db_table_defs.sql:915`) makes a CDN row structurally impossible without both flags, so this is PROJ's own assertion that the CDN copy may be freely redistributed |
+
+Note that the licence-status caveat in section 3 — *"assumed, not verified"* — does **not** apply
+here. Section 3 falls back on PROJ's umbrella MIT/X11 notice for legacy grids that carry no
+per-file statement. These three carry the statement in the file.
+
+### What CC-BY-4.0 requires of us
+
+Attribution, and an indication of any changes. So:
+
+- **Attribution** is the table above, and it must travel with any redistribution of these bytes.
+- **No changes.** The files are byte-identical to the PROJ-data release; the SHA-256 column is how
+  that is checked. They are not resampled, recompressed or cropped.
+
+### Chain of custody
+
+Copied from an installed PROJ 9.8.1 data directory (`share/proj/`), which is the unpacked PROJ-data
+package — the same artifact `https://cdn.proj.org/` serves and the same one
+`copyright_and_licenses.csv` and `README.DATA` sit beside. Byte counts and hashes are recorded above
+rather than described, so a future copy can be compared rather than trusted.
+
+---
+
 ## Refreshing
 
 ```sh
@@ -245,3 +310,8 @@ The script fails loudly if `9.8.1^{commit}` in the given checkout is not
 `f08fa86c478c4bbbf003b1ec751dd84aa6eca486`. Re-pinning to a different PROJ release means editing
 `PROJ_REV`/`PROJ_REV_SHA` at the top of the script — and re-checking this notice, since a new
 release can change what third-party data is in `data/tests/`.
+
+The script does **not** touch `proj-data-cdn/`, and must not be made to: those files come from
+PROJ-data, not from a PROJ checkout, and they are not in `gie-manifest.sha256`. To refresh them,
+replace the three files from an installed `share/proj/` of the pinned PROJ release and update the
+byte counts and hashes in section 4.

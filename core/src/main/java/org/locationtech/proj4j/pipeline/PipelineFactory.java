@@ -68,23 +68,53 @@ import org.locationtech.proj4j.vertical.VGridShiftOperator;
  *
  * <p>The operator set is {@code longlat} (and its three aliases), {@code geocent},
  * {@code unitconvert}, {@code axisswap}, {@code cart}, {@code vgridshift},
- * {@code hgridshift}, {@code deformation}, {@code tinshift}, {@code affine},
- * {@code push}, {@code pop}, {@code set}, and every projection in {@link Registry}.
- * The eleven that are not projections are named by {@link #handlesOperator}, which is
+ * {@code hgridshift}, {@code deformation}, {@code xyzgridshift}, {@code tinshift},
+ * {@code affine}, {@code geogoffset}, {@code geoc}, {@code noop}, {@code push},
+ * {@code pop}, {@code set}, {@code vertoffset}, {@code topocentric},
+ * {@code molodensky}, {@code helmert}, {@code molobadekas}, and every projection in
+ * {@link Registry}.
+ * The twenty that are not projections are named by {@link #handlesOperator}, which is
  * how a caller knows that {@code +proj=axisswap order=2,1} — a complete operation with
  * no {@code +step} and no {@code +init=} — belongs here rather than on the
  * {@code CRSFactory} path.
  *
+ * <p>{@code geoc} is on that list for a reason worth stating: it converts geographic
+ * latitude to geocentric and back, so it is lat/lon in and lat/lon out, and a
+ * {@code proj.Projection}'s contract is lon/lat to linear {@code x}/{@code y}. There is
+ * no shape of {@link Registry} entry that could hold it. The same is true of
+ * {@code geogoffset} and {@code noop}: upstream declares all three
+ * {@code PJ_CONVERSION}/{@code PJ_TRANSFORMATION}, never {@code PJ_PROJECTION}.
+ *
+ * <p>{@code helmert} and {@code molobadekas} used to be on the absent list, on the
+ * grounds that {@link Cs2csOperator}'s hidden helper covers only the {@code +exact
+ * +convention=position_vector} static form and that a partial user-facing operator
+ * would silently ignore tokens PROJ acts on. {@link HelmertOperator} now implements the
+ * whole of {@code helmert.cpp}: both conventions, both rotation matrices,
+ * {@code +theta}, the reference point, and <b>eight</b> rates of change rather than the
+ * seven this paragraph used to claim ({@code dx dy dz drx dry drz dtheta ds}, plus
+ * {@code +t_epoch}). {@code +transpose} is still refused, because upstream refuses it.
+ * The one gap is deliberate and loud: the projected-side scaling keys under
+ * {@code +theta} throw rather than being ignored, which {@link HelmertOperator}
+ * explains.
+ *
  * <p>Deliberately absent, each a refusal rather than a silent omission:
- * {@code helmert} as a <em>user-facing</em> operator (it exists only as the hidden
- * helper {@link Cs2csOperator} builds, which is the {@code +exact
- * +convention=position_vector} static form; the user-facing operator additionally has
- * {@code convention=coordinate_frame}, {@code transpose} and the seven time-dependent
- * rates, and implementing a subset of those would silently ignore a token PROJ acts
- * on); {@code gridshift} and {@code defmodel}, both of which need the GeoTIFF grid
- * reader to be wired into the pipeline layer; and {@code +proj=deformation +grids=},
- * the single-file three-channel Geodetic TIFF Grid form of an operator whose two-grid
- * form works.
+ * {@code gridshift} and {@code defmodel}, neither of which is written yet.
+ *
+ * <p>Both refusals used to give their reason as the absent GeoTIFF grid reader, and both
+ * reasons were false. The reader landed in 2.1.0 and the generic N-sample grid layer
+ * ({@code datum.GenericGrid}, {@code datum.GenericGridSet}) in 2.2.0. What is missing is
+ * each operator's own body, and nothing in the grid layer: {@code gridshift} needs its
+ * sample-role vocabulary — {@code latitude_offset}/{@code longitude_offset} for a
+ * geographic grid, {@code easting_offset}/{@code northing_offset} for a projected one,
+ * with a positional fallback that swaps the first two bands between those two cases
+ * ({@code gridshift.cpp:257-315}) — plus its projected-grid handling and its biquadratic
+ * NADCON5 interpolation; {@code defmodel} needs a JSON deformation-model reader.
+ * The reasons are recorded rather than deleted, because a stale "we already decided
+ * against that" stops the work instead of costing an experiment.
+ *
+ * <p>{@code +proj=deformation +grids=} was on that absent list for the same false reason
+ * and is <b>no longer</b>: {@link DeformationOperator} reads the single-file three-channel
+ * Geodetic TIFF Grid form as of 2.2.0, on the same layer {@code xyzgridshift} runs on.
  *
  * <p>{@code +t_epoch}/{@code +t_final} on {@code hgridshift} and {@code vgridshift} are
  * honoured through {@link TimeGatedOperator}. The time <em>dimension</em> is still not
@@ -127,12 +157,15 @@ public final class PipelineFactory {
      * aliases, {@code geocent}, and the projections), because those two paths must keep
      * agreeing about who owns a projection.
      *
-     * <p>Sorted, so {@link #handlesOperator} can binary-search and so a reader can see
-     * at a glance what is claimed.
+     * <p>Sorted, so a reader can see at a glance what is claimed. {@link #handlesOperator}
+     * scans it linearly: twenty string comparisons once per step is not worth a binary
+     * search, and the sort is for the reader.
      */
     private static final String[] PIPELINE_ONLY_OPERATORS = {
-        "affine", "axisswap", "cart", "deformation", "hgridshift", "pop", "push", "set",
-        "tinshift", "unitconvert", "vgridshift",
+        "affine", "axisswap", "cart", "deformation", "geoc", "geogoffset", "helmert",
+        "hgridshift", "molobadekas", "molodensky", "noop", "pop", "push", "set",
+        "tinshift", "topocentric", "unitconvert", "vertoffset", "vgridshift",
+        "xyzgridshift",
     };
 
     /**
@@ -398,6 +431,8 @@ public final class PipelineFactory {
                     HGridShiftOperator.fromGrids(expanded.value("grids")), expanded);
         } else if ("deformation".equals(projName)) {
             operator = new DeformationOperator(registry, expanded);
+        } else if ("xyzgridshift".equals(projName)) {
+            operator = new XyzGridShiftOperator(registry, expanded);
         } else if ("cart".equals(projName)) {
             operator = new CartOperator(registry, expanded);
         } else if ("tinshift".equals(projName)) {
@@ -408,6 +443,22 @@ public final class PipelineFactory {
             operator = new SetOperator(expanded);
         } else if ("push".equals(projName) || "pop".equals(projName)) {
             operator = new PushPopOperator("push".equals(projName), expanded, stack);
+        } else if ("geoc".equals(projName)) {
+            operator = new GeocOperator(registry, expanded);
+        } else if ("geogoffset".equals(projName)) {
+            operator = new GeogOffsetOperator(expanded);
+        } else if ("noop".equals(projName)) {
+            operator = new NoopOperator();
+        } else if ("vertoffset".equals(projName)) {
+            operator = new VertoffsetOperator(registry, expanded);
+        } else if ("topocentric".equals(projName)) {
+            operator = new TopocentricOperator(registry, expanded);
+        } else if ("molodensky".equals(projName)) {
+            operator = new MolodenskyOperator(registry, expanded);
+        } else if ("helmert".equals(projName)) {
+            operator = HelmertOperator.helmert(expanded);
+        } else if ("molobadekas".equals(projName)) {
+            operator = HelmertOperator.molobadekas(expanded);
         } else {
             operator = new Cs2csOperator(registry, expanded);
         }

@@ -47,10 +47,11 @@ import static org.locationtech.proj4j.conformance.bridge.ProjDefinitionValidator
  * </ol>
  *
  * <p>Where a guard needs the resolved ellipsoid, {@link #shape} answers only when the
- * definition determines it without a named {@code +ellps}/{@code +datum}, an
- * {@code +init=} or a spherification flag, and returns {@code null} otherwise. Every
- * dependent check is then skipped. That is deliberately fail-open: a skipped check
- * costs an assertion, and a wrong one manufactures a false pass.
+ * definition determines it without a named {@code +datum}, an {@code +init=} or a
+ * spherification flag — and, for a named {@code +ellps}, only when an explicit shape
+ * parameter is overriding it. It returns {@code null} otherwise and every dependent
+ * check is then skipped. That is deliberately fail-open: a skipped check costs an
+ * assertion, and a wrong one manufactures a false pass.
  */
 final class ProjOperatorSetup {
 
@@ -77,6 +78,9 @@ final class ProjOperatorSetup {
 
     /** {@code imw_p.cpp:13}. */
     private static final double IMW_P_EPS = 1.e-10;
+
+    /** {@code chamb.cpp:31} — below this a side of the control triangle counts as zero. */
+    private static final double CHAMB_TOL = 1.e-9;
 
     /** {@code krovak.cpp:293} — 49d30'N, used when {@code +lat_0} is absent. */
     private static final double KROVAK_DEFAULT_PHI0 = 0.863937979737193;
@@ -146,14 +150,26 @@ final class ProjOperatorSetup {
         if ("gn_sinu".equals(name)) {
             return gnSinu(a);
         }
+        if ("oea".equals(name)) {
+            return oea(a);
+        }
+        if ("chamb".equals(name)) {
+            return chamb(a);
+        }
         if ("imw_p".equals(name)) {
             return imwP(a);
         }
         if ("s2".equals(name)) {
             return s2(a);
         }
+        if ("rhealpix".equals(name)) {
+            return rhealpix(a);
+        }
         if ("isea".equals(name)) {
             return isea(a);
+        }
+        if ("airocean".equals(name)) {
+            return airocean(a);
         }
         if ("ob_tran".equals(name)) {
             return obTran(a);
@@ -175,6 +191,9 @@ final class ProjOperatorSetup {
         }
         if ("gridshift".equals(name)) {
             return gridshift(a);
+        }
+        if ("xyzgridshift".equals(name)) {
+            return xyzgridshift(a);
         }
         if ("ups".equals(name)) {
             return ups(a);
@@ -276,35 +295,49 @@ final class ProjOperatorSetup {
     }
 
     /**
-     * {@code eqdc.cpp:84-102}. The spherical {@code n == 0} guard at {@code :137-143},
-     * the {@code ml1 == ml2} guard at {@code :121-125} and the ellipsoidal
-     * {@code n == 0} guard at {@code :127-132} all need {@code pj_mlfn}, and are
-     * <b>not</b> ported. {@code builtins.gie} block 84
-     * ({@code +proj=eqdc +lat_1=1 +ellps=GRS80 +b=.1}) stays unmeasured because of it.
+     * {@code eqdc.cpp:84-102} (the three latitude guards) and {@code :127-132} (the
+     * ellipsoidal secant cone constant).
      *
-     * <h2>Why this one cannot be ported the way {@code lcc}'s and {@code omerc}'s were</h2>
+     * <h2>The cone constant guard, and the argument that used to decline it</h2>
      *
-     * <p>It is tempting to note that at {@code :126} the <em>numerator</em>
-     * {@code m1 - pj_msfn(...)} is pure closed form, so an exactly-zero numerator looks
-     * like it must give {@code Q->n == 0} and a rejection either way — the
-     * {@code ml1 == ml2} guard above it raises the same
-     * {@code PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE}. <b>That argument is wrong, and in
-     * the direction that manufactures false passes.</b> The denominator is
-     * {@code ml2 - ml1}, and {@code pj_mlfn} is a 6th-order expansion in the third
-     * flattening documented as accurate only for {@code |f| <= 1/150}
-     * ({@code mlfn.cpp:5-7}); at the eccentricities these rows use it is far outside
-     * that domain. If it returns a non-finite value, {@code ml1 == ml2} is false,
-     * {@code Q->n} is {@code NaN}, {@code NaN == 0} is false — and PROJ <em>builds the
-     * operation</em>. So "numerator is zero" does not imply "PROJ rejects", and a guard
-     * asserting it would reject definitions PROJ accepts.
+     * <p>Upstream computes {@code Q->n = (m1 - pj_msfn(sinphi2, cosphi2, es)) / (ml2 -
+     * ml1)} and rejects {@code Q->n == 0}. The numerator is closed form —
+     * {@code pj_msfn}, already here as {@link #msfn} — but the denominator is a
+     * difference of {@code pj_mlfn} values, and {@code pj_mlfn} is a 6th-order
+     * expansion in the third flattening documented as accurate only for
+     * {@code |f| <= 1/150} ({@code mlfn.cpp:5-7}), which the rows that reach this guard
+     * are far outside.
      *
-     * <p>Deciding this guard therefore needs a bit-faithful transcription of
-     * {@code pj_enfn}/{@code pj_mlfn} and the {@code AuxLat} coefficient machinery they
-     * call, evaluated outside its stated convergence domain against an exact
-     * {@code == 0}. That is a much larger and far less certain change than one assertion
-     * justifies, so the check is declined. Note also that block 84 is blocked twice
-     * over: it names {@code +ellps=GRS80}, and {@link #shape} declines on any named
-     * ellipsoid, so the guard would have no {@code es} to work from even if it existed.
+     * <p>This method used to decline the guard on that basis, arguing that if
+     * {@code pj_mlfn} returned a non-finite value then {@code Q->n} would be
+     * {@code NaN}, {@code NaN == 0} would be false, and PROJ would <em>build</em> the
+     * operation — so an exactly-zero numerator would not imply a rejection.
+     * <b>That argument does not hold.</b> Enumerate what a zero numerator can divide
+     * by: a finite non-zero denominator gives {@code ±0.0}, which is
+     * {@code == 0}; {@code ±inf} also gives {@code ±0.0}; and a zero denominator is
+     * {@code ml1 == ml2}, which the guard immediately above at {@code :121-125} has
+     * already refused with the same {@code PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE}. The
+     * only escape really is a {@code NaN} denominator, and {@code pj_mlfn} cannot
+     * produce one here: it is {@code pj_rectifying_radius(n) * pj_auxlat_convert(...)}
+     * ({@code mlfn.cpp:9-26}), a ratio of polynomials in {@code n} over {@code 1 + n}
+     * ({@code latitudes.cpp:415-420}) composed with {@code sin}/{@code cos}, and
+     * {@code n = f / (2 - f)} is in {@code [0, 1]} for every {@code f} that
+     * {@code pj_calc_ellipsoid_params} lets through. Inaccurate is not the same as
+     * non-finite, and only non-finite would have saved the old argument.
+     *
+     * <p>So the guard is decided from the numerator alone. Probed against the installed
+     * 9.8.1 on fourteen definitions, agreeing on all fourteen, including the three that
+     * separate this from "es is close to 1": {@code +a=9999999 +b=.9} is refused at
+     * {@code lat_1=1} and at {@code 0.5/2} but <em>accepted</em> at {@code 30/45}, where
+     * the two {@code msfn} values still differ by 2.8e-15, and accepted at
+     * {@code lat_1=lat_2=1}, where the cone is tangent so upstream never enters the
+     * branch. Both directions are in {@link ProjOperatorSetupTest}.
+     *
+     * <p>The spherical {@code n == 0} guard at {@code :137-143} is <b>not</b> ported,
+     * and needs nothing: {@code n} there is {@code sin(phi1)} when tangent and
+     * {@code (cos phi1 - cos phi2) / (phi2 - phi1)} when secant, and both are zero only
+     * when {@code phi2 == -phi1}, which the {@code |lat_1 + lat_2|} guard above has
+     * already refused. It is unreachable, not skipped.
      */
     private static GieFailure eqdc(GieProjArgs a) {
         double phi1 = radians(a, "lat_1", 0.0);
@@ -317,6 +350,20 @@ final class ProjOperatorSetup {
         }
         if (Math.abs(phi1 + phi2) < EPS10) {
             return invalid("eqdc", "|lat_1 + lat_2| should be > 0 (eqdc.cpp:96-100)");
+        }
+
+        // eqdc.cpp:117 -- only the secant cone reaches the ellipsoidal n == 0 guard.
+        boolean secant = Math.abs(phi1 - phi2) >= EPS10;
+        double[] ell = shape(a);
+        if (!secant || ell == null || ell[1] == 0.0) {
+            return null;
+        }
+        double es = ell[1];
+        double m1 = msfn(Math.sin(phi1), Math.cos(phi1), es);
+        double m2 = msfn(Math.sin(phi2), Math.cos(phi2), es);
+        if (m1 - m2 == 0.0) {
+            return invalid("eqdc", "eccentricity is indistinguishable from 1, so the two "
+                    + "msfn values are equal and the cone constant is 0 (eqdc.cpp:127-132)");
         }
         return null;
     }
@@ -656,6 +703,101 @@ final class ProjOperatorSetup {
     }
 
     /**
+     * {@code oea.cpp:57-88}: {@code +n} then {@code +m}, each rejected at {@code <= 0}
+     * ({@code :64-72}).
+     *
+     * <p>Unlike {@code urmfps} and {@code gn_sinu} there is no separate presence test,
+     * and none is needed: both are read with {@code pj_param}'s {@code d} sigil, which
+     * answers 0 for an absent key, so "not given" and "given as 0" reach the same
+     * comparison and produce the same message. A bare {@code +proj=oea} is therefore
+     * refused for {@code n}, not for {@code m} — the order is observable and is kept.
+     *
+     * <p>{@code +theta} has no test at all ({@code :74} reads it and stores it), so no
+     * value of it can make a definition invalid.
+     */
+    private static GieFailure oea(GieProjArgs a) {
+        if (number(a, "n", 0.0) <= 0.0) {
+            return invalid("oea", "n should be > 0 (oea.cpp:64-67)");
+        }
+        if (number(a, "m", 0.0) <= 0.0) {
+            return invalid("oea", "m should be > 0 (oea.cpp:69-72)");
+        }
+        return null;
+    }
+
+    /**
+     * {@code chamb.cpp:103-151}: the three control points must be pairwise distinct
+     * ({@code :121-134}).
+     *
+     * <p>The test upstream is {@code Q->c[i].v.r == 0.0} on each of the three sides,
+     * where {@code v.r} has already been floored to exactly zero by {@code vect}'s
+     * {@code fabs(v.r) > TOL} guard ({@code chamb.cpp:47-50}). So the real predicate is
+     * "shorter than {@link #CHAMB_TOL} radians", not "bit-identical coordinates", and
+     * two control points a nanoradian apart are refused. That is why this reproduces
+     * {@code vect}'s distance branch rather than comparing the parameters.
+     *
+     * <p><b>Collinear is not rejected.</b> Upstream's own comment at {@code :133} is
+     * "co-linearity problem ignored for now", and {@code builtins.gie}'s only
+     * {@code chamb} block is exactly that case. Adding a collinearity test here would
+     * refuse a definition PROJ answers.
+     *
+     * <p>A bare {@code +proj=chamb} has all six ordinates defaulting to 0, so all three
+     * points coincide and it is refused — by this test, not by a missing-parameter one.
+     */
+    private static GieFailure chamb(GieProjArgs a) {
+        double lam0 = radians(a, "lon_0", 0.0);
+        double[] phi = new double[3];
+        double[] lam = new double[3];
+        for (int i = 0; i < 3; i++) {
+            phi[i] = radians(a, "lat_" + (i + 1), 0.0);
+            lam[i] = adjlon(radians(a, "lon_" + (i + 1), 0.0) - lam0);
+        }
+        for (int i = 0; i < 3; i++) {
+            int j = i == 2 ? 0 : i + 1;
+            if (chambArc(phi[i], lam[i], phi[j], lam[j]) == 0.0) {
+                return invalid("chamb",
+                        "control points should be distinct (chamb.cpp:126-132)");
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The distance half of {@code vect} ({@code chamb.cpp:34-51}), including the
+     * {@code TOL} floor that turns a short side into an exact zero. The azimuth half is
+     * not transcribed because nothing in the setup function can reject on it.
+     */
+    private static double chambArc(double phi1, double lam1, double phi2, double lam2) {
+        double dphi = phi2 - phi1;
+        double dlam = lam2 - lam1;
+        double c1 = Math.cos(phi1);
+        double s1 = Math.sin(phi1);
+        double c2 = Math.cos(phi2);
+        double s2 = Math.sin(phi2);
+        double r;
+        if (Math.abs(dphi) > 1.0 || Math.abs(dlam) > 1.0) {
+            double v = s1 * s2 + c1 * c2 * Math.cos(dlam);
+            r = Math.acos(v < -1.0 ? -1.0 : (v > 1.0 ? 1.0 : v));
+        } else {
+            double dp = Math.sin(0.5 * dphi);
+            double dl = Math.sin(0.5 * dlam);
+            double v = Math.sqrt(dp * dp + c1 * c2 * dl * dl);
+            r = 2.0 * Math.asin(v > 1.0 ? 1.0 : v);
+        }
+        return Math.abs(r) > CHAMB_TOL ? r : 0.0;
+    }
+
+    /** {@code adjlon.cpp:6-20}, needed only by {@link #chamb}. */
+    private static double adjlon(double longitude) {
+        if (Math.abs(longitude) < Math.PI + 1e-12) {
+            return longitude;
+        }
+        double v = longitude + Math.PI;
+        v -= 2.0 * Math.PI * Math.floor(v / (2.0 * Math.PI));
+        return v - Math.PI;
+    }
+
+    /**
      * {@code imw_p.cpp:32-57}, {@code phi12}, which is the whole of what
      * {@code PJ_PROJECTION(imw_p)} can reject — the rest of its setup returns only
      * {@code PROJ_ERR_OTHER} on a failed allocation ({@code :177-185}).
@@ -692,10 +834,118 @@ final class ProjOperatorSetup {
     }
 
     /**
+     * {@code airocean.cpp:829-841}. Not reached by any corpus row: both {@code airocean}
+     * blocks use a legal {@code +orient}, and their {@code expect failure} rows fail at
+     * transform time, on a point outside the unfolded net, which is not this class's
+     * business. It is here because the setup function is what is being transcribed.
+     *
+     * <p>Deliberately a separate method from {@link #isea} even though both police a key
+     * called {@code +orient}: the value sets are disjoint, so a shared helper would accept
+     * {@code +proj=airocean +orient=pole}, which upstream refuses.
+     */
+    private static GieFailure airocean(GieProjArgs a) {
+        return oneOf(a, "airocean", "orient", new String[] {"vertical", "horizontal"},
+                "airocean.cpp:829-841");
+    }
+
+    /**
+     * {@code healpix.cpp:664-683}, {@code rhealpix}'s two square positions.
+     *
+     * <p>There are <b>two</b> refusal mechanisms here and they report the same errno from
+     * different places, which is why neither can be dropped.
+     *
+     * <p>The first is {@code pj_param}'s {@code i} sigil itself
+     * ({@code param.cpp:172-180}): it runs {@code atoi} and then walks the text, and on
+     * any character outside {@code 0-9} it sets
+     * {@code PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE} on the context <em>and returns
+     * zero</em>. Zero is inside {@code [0, 3]}, so the range guard below is happy and the
+     * definition is refused anyway when the context errno is inspected after setup.
+     * Measured on 9.8.1: {@code +proj=rhealpix +R=1 +north_square=-1} and
+     * {@code +north_square=1.5} both exit 3 with "Invalid value for an argument", and only
+     * the second of the two prints the {@code [0,3]} text. A leading minus is a
+     * <em>parse</em> failure, not a range failure.
+     *
+     * <p>The second is the explicit range guard at {@code :670-683}, which is what
+     * {@code +north_square=4} trips.
+     *
+     * <p>An empty value is accepted. Whether the key is written {@code +north_square} or
+     * {@code +north_square=}, {@code opt} ends up pointing at a terminating NUL,
+     * {@code atoi("")} is 0 and the digit loop has nothing to walk, so no errno is set.
+     * <p><b>Two of the three 9.8.1 tools disagree about this, so it was settled with the
+     * third.</b> {@code cct} accepts both forms and {@code proj} refuses both with a
+     * message-less 1027; the {@code proj} CLI's extra guard is its own, since it accepts
+     * the identical empty value on a {@code d}-sigil key ({@code +proj=merc +lat_ts=}) and
+     * on an {@code i}-sigil key the operator never reads ({@code +proj=healpix
+     * +north_square=}). The tie-breaker is <b>{@code gie} itself</b>, the tool this
+     * harness mirrors: a two-block file asserting {@code +proj=rhealpix +ellps=WGS84
+     * +north_square=} and the bare {@code +north_square} both map {@code 0 0} to
+     * {@code 0 0} reports "2 tests succeeded, 0 failed" on 9.8.1. {@code +north_square=x}
+     * and {@code +north_square=7} stay refused. So the library behaviour is modelled here,
+     * and it is the behaviour the corpus is run under.
+     */
+    private static GieFailure rhealpix(GieProjArgs a) {
+        GieFailure f = squarePosition(a, "north_square", "healpix.cpp:665, :670-676");
+        if (f != null) {
+            return f;
+        }
+        return squarePosition(a, "south_square", "healpix.cpp:666, :677-683");
+    }
+
+    /**
+     * One of {@code rhealpix}'s two {@code i}-sigil square positions.
+     *
+     * @param a     the definition
+     * @param key   {@code north_square} or {@code south_square}
+     * @param where the upstream citation
+     * @return the failure, or null
+     */
+    private static GieFailure squarePosition(GieProjArgs a, String key, String where) {
+        GieToken t = a.find(key);
+        if (t == null) {
+            return null;
+        }
+        String v = t.value();
+        if (v == null || v.isEmpty()) {
+            // atoi("") is 0 and the digit loop never runs: upstream accepts this.
+            return null;
+        }
+        for (int i = 0; i < v.length(); i++) {
+            char c = v.charAt(i);
+            if (c < '0' || c > '9') {
+                return invalid("rhealpix", "+" + key + "=" + v + " is not a decimal "
+                        + "integer; pj_param's 'i' sigil sets "
+                        + "PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE on any character outside "
+                        + "0-9 (param.cpp:172-180)");
+            }
+        }
+        long n;
+        try {
+            n = Long.parseLong(v);
+        } catch (NumberFormatException e) {
+            // A digit string too long for a long; atoi's overflow is undefined but the
+            // value cannot be in [0,3] on any sane libc.
+            return invalid("rhealpix",
+                    "+" + key + "=" + v + " should be in [0,3] range (" + where + ")");
+        }
+        if (n > 3) {
+            return invalid("rhealpix",
+                    "+" + key + "=" + v + " should be in [0,3] range (" + where + ")");
+        }
+        return null;
+    }
+
+    /**
      * {@code isea.cpp:1008-1020} and {@code :1039-1050}. Neither guard is reached by
      * any corpus row — {@code builtins.gie:3152} uses the legal {@code +mode=hex} and
      * fails at transform time, which is not this class's business. They are here
      * because the setup function is what is being transcribed.
+     *
+     * <p><b>This branch stays now that {@code isea} is registered.</b> It looks redundant —
+     * {@code IcosahedralSnyderEqualAreaProjection.setOrient} refuses the same values — but
+     * the two answer different questions: this one says "PROJ would refuse", which is what
+     * scores an {@code expect failure} row, and deleting it would turn every assertion that
+     * depends on it from PASS to vacuous. Removing one such branch elsewhere cost seven
+     * assertions and failed the gate as {@code REGRESSED}.
      */
     private static GieFailure isea(GieProjArgs a) {
         GieFailure f = oneOf(a, "isea", "orient", new String[] {"isea", "pole"},
@@ -779,11 +1029,28 @@ final class ProjOperatorSetup {
      * {@code +drx=1} is not. {@code +towgs84} feeds the same three rotation slots
      * through {@code pj_datum_set} ({@code :590-604}), and then may only be combined
      * with {@code convention=position_vector} ({@code :542-548}).
+     *
+     * <p>{@code +s} has two refusals at {@code :615-621}, both guarded on the key being
+     * <em>present</em>. A scale of {@code -1e6} ppm or less would make the factor
+     * {@code 1 + s*1e-6} zero or negative, and under {@code +theta} the same key is a
+     * direct multiplier rather than ppm, so {@code +s=0} collapses the plane to a point.
+     * Both are checked before {@code read_convention} runs, though every path here ends
+     * in a rejection either way so the order only affects which message comes out.
      */
     private static GieFailure helmert(GieProjArgs a) {
         if (a.contains("transpose")) {
             return invalid("helmert",
                     "the 'transpose' argument is no longer valid (helmert.cpp:581-585)");
+        }
+        if (a.contains("s")) {
+            double s = ProjDefinitionValidator.number(a, "s", 0.0);
+            if (s <= -1.0e6) {
+                return invalid("helmert", "invalid value for s (helmert.cpp:615-618)");
+            }
+            if (a.contains("theta") && s == 0.0) {
+                return invalid("helmert",
+                        "invalid value for s under theta (helmert.cpp:619-621)");
+            }
         }
         return convention(a, "helmert", hasRotation(a));
     }
@@ -876,6 +1143,31 @@ final class ProjOperatorSetup {
         }
         return oneOf(a, "gridshift", "interpolation",
                 new String[] {"bilinear", "biquadratic"}, "gridshift.cpp:955-965");
+    }
+
+    /**
+     * {@code xyzgridshift.cpp:246-265}.
+     *
+     * <p><b>The order is load-bearing and is not the order the parameters are documented
+     * in.</b> {@code +grid_ref} is validated before {@code +grids} is even looked for, so a
+     * definition missing both reports 1027 (illegal value) and not 1026 (missing arg).
+     * Probed in the installed 9.8.1 {@code proj} in both directions and recorded in
+     * {@link ProjOperatorSetupTest}.
+     *
+     * <p>{@code +multiplier} is read with {@code pj_param}'s {@code d} sigil and has no
+     * guard at all — not even against zero — so there is nothing here to model for it.
+     */
+    private static GieFailure xyzgridshift(GieProjArgs a) {
+        GieFailure ref = oneOf(a, "xyzgridshift", "grid_ref",
+                new String[] {"input_crs", "output_crs"}, "xyzgridshift.cpp:246-260");
+        if (ref != null) {
+            return ref;
+        }
+        if (!a.contains("grids")) {
+            return invalid("xyzgridshift",
+                    "+grids parameter missing (xyzgridshift.cpp:262-265)");
+        }
+        return null;
     }
 
     // -------------------------------------------------- ellipsoid-dependent
@@ -972,9 +1264,9 @@ final class ProjOperatorSetup {
      * The {@code a} and {@code es} that {@code ell_set.cpp} would resolve, <b>or
      * {@code null} when this class declines to say.</b>
      *
-     * <p>It declines whenever a named {@code +ellps} or {@code +datum}, an
-     * {@code +init=}, or any spherification flag is in play, because reproducing those
-     * faithfully means porting all 657 lines of {@code ell_set.cpp} plus the 46-entry
+     * <p>It declines whenever a named {@code +datum}, an {@code +init=}, or any
+     * spherification flag is in play, because reproducing those faithfully means
+     * porting all 657 lines of {@code ell_set.cpp} plus the 46-entry
      * {@code ellps.cpp} table — a second, competing model of parameter resolution
      * living in test scope. Every caller treats {@code null} as "skip this check",
      * which costs assertions and cannot manufacture a pass.
@@ -985,10 +1277,35 @@ final class ProjOperatorSetup {
      * {@code +ellps=GRS80} that {@code init.cpp:362} appends when the definition names
      * no size or shape at all.
      *
+     * <h2>The one narrow thing it models about a named {@code +ellps}</h2>
+     *
+     * <p>A bare {@code +ellps=<name>} still declines. But {@code +ellps=<name>} together
+     * with an explicit {@code rf}/{@code f}/{@code es}/{@code e}/{@code b} resolves,
+     * because {@code pj_ellipsoid} runs {@code ellps_ellps}, then {@code ellps_size},
+     * then {@code ellps_shape} in that order ({@code ell_set.cpp:103-116}) — so the name
+     * supplies the size and the explicit key <em>replaces</em> the shape. That is
+     * upstream's documented intent, not an accident: its own comment cites
+     * {@code +ellps=xxx +a=1} as the point of it.
+     *
+     * <p>Looks inconsistent, and the asymmetry is deliberate. Resolving a bare
+     * {@code +ellps} would need the whole {@code ellps.cpp} table and would newly feed
+     * an {@code es} to the {@code lcc}, {@code omerc}, {@code sterea}, {@code ups},
+     * {@code utm}, {@code nsper} and {@code geos} guards on hundreds of corpus rows that
+     * skip them today. Resolving only the override case reaches <b>exactly one</b>
+     * operation in the whole vendored corpus — {@code builtins.gie:1865},
+     * {@code +proj=eqdc +lat_1=1 +ellps=GRS80 +b=.1}. Measured over all 53
+     * {@code .gie} files rather than only the 42 active ones: 146
+     * {@code operation}/{@code crs_src}/{@code crs_dst} lines name an {@code +ellps=},
+     * and that is the only one of them also carrying an
+     * {@code rf}/{@code f}/{@code es}/{@code e}/{@code b}. So every other verdict is
+     * unchanged by construction. Dropping the {@code hasShapeKey} condition to "tidy up"
+     * the asymmetry is therefore a much larger change than it looks, and needs its own
+     * before/after measurement.
+     *
      * @return {@code {a, es}}, or {@code null}
      */
     static double[] shape(GieProjArgs a) {
-        if (a.contains("ellps") || a.contains("datum") || a.contains("init")) {
+        if (a.contains("datum") || a.contains("init")) {
             return null;
         }
         for (int i = 0; i < SPHERIFICATION_KEYS.length; i++) {
@@ -1004,7 +1321,17 @@ final class ProjOperatorSetup {
 
         boolean hasShapeKey = a.contains("rf") || a.contains("f") || a.contains("es")
                 || a.contains("e") || a.contains("b");
-        Double major = a.contains("a") ? projDouble(a.peek("a")) : null;
+        Double named = null;
+        if (a.contains("ellps")) {
+            if (!hasShapeKey) {
+                return null;
+            }
+            named = namedEllipsoidMajorAxis(a.peek("ellps"));
+            if (named == null) {
+                return null;
+            }
+        }
+        Double major = a.contains("a") ? projDouble(a.peek("a")) : named;
         if (major == null) {
             if (hasShapeKey || a.contains("no_defs")) {
                 // ellps_size: "Major axis not given". Left to the existing
@@ -1066,6 +1393,30 @@ final class ProjOperatorSetup {
             return null;
         }
         return new double[] {size, es};
+    }
+
+    /**
+     * The semi-major axis of a built-in ellipsoid, or {@code null} if this class does
+     * not carry it.
+     *
+     * <p>Deliberately not all 46 entries of {@code ellps.cpp}. It is consulted from one
+     * place — {@link #shape}, and only when an explicit shape key is overriding the
+     * named ellipsoid — and there the size is needed for the {@code +b} branch alone,
+     * because {@code f = (a - b) / a}. A name absent from here makes {@link #shape}
+     * decline, which costs a check and cannot manufacture a pass, so growing this on
+     * demand is safe. <b>Both entries are probed against the installed 9.8.1 in
+     * {@link ProjOperatorSetupTest}</b>; add a probe with any name you add, or the entry
+     * is an untested guess about a table nobody read.
+     */
+    private static Double namedEllipsoidMajorAxis(String name) {
+        if ("GRS80".equals(name)) {
+            return Double.valueOf(GRS80_A);
+        }
+        if ("WGS84".equals(name)) {
+            // ellps.cpp: {"WGS84", "a=6378137.0", "rf=298.257223563"}.
+            return Double.valueOf(6378137.0);
+        }
+        return null;
     }
 
     private static GieFailure invalid(String op, String why) {
