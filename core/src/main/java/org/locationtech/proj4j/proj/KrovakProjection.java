@@ -72,6 +72,88 @@ import org.locationtech.proj4j.util.ProjectionMath;
  * rather than a catchable error. The budget is now upstream's own {@code MAX_ITER = 100} rather
  * than the 30 borrowed from {@code moll.cpp}, so the set of inputs that resolve is upstream's set.
  *
+ * <h2>The inverse deliberately disagrees with PROJ, because PROJ's inverse is wrong</h2>
+ *
+ * <p>This is the one place in this class where matching upstream was considered and rejected. Read
+ * this section before "fixing" anything here to make the corpus pass.
+ *
+ * <p><b>PROJ's krovak inverse is not the inverse of PROJ's own krovak forward.</b> Feed PROJ
+ * {@code +proj=krovak +ellps=GRS80}, project a point, and project it straight back: you land
+ * <b>138.6 m</b> away. (Measured at the Guidance Note 7-2 test point,
+ * 16&deg;50&prime;59.18&Prime;E 50&deg;12&prime;32.44&Prime;N, with the 9.8.1 binaries. With
+ * {@code +ellps=intl} the miss is 185.6 m. The magnitude depends on the {@code +ellps} you name,
+ * which is itself the tell, since krovak is documented to ignore it.)
+ *
+ * <p>The cause is two lines that were never written. {@code krovak_setup} assigns {@code P->a},
+ * {@code P->es} and {@code P->e} ({@code 9.8.1:src/projections/krovak.cpp}, lines 287-289) and
+ * never assigns {@code P->ra}, nor calls {@code pj_calc_ellipsoid_params} to re-derive it — that
+ * function is called zero times in the file. Krovak declares {@code PJ_IO_UNITS_CLASSIC}, so the
+ * generic wrappers do the unit scaling: the forward multiplies by {@code P->a}
+ * ({@code 9.8.1:src/fwd.cpp}, lines 142-143) and the inverse multiplies by {@code P->ra}
+ * ({@code 9.8.1:src/inv.cpp}, lines 92-93). After setup, {@code P->a} is Bessel's 6377397.155 while
+ * {@code P->ra} is still the reciprocal of whatever {@code +ellps} supplied — 1/6378137 for GRS80.
+ * The two directions are scaled by different ellipsoids, 1.16e-4 apart in relative terms, and at
+ * roughly 1.2e6 m from the projection origin that is the 138 m observed. The {@code +ellps} krovak
+ * claims to discard leaks back in through the inverse.
+ *
+ * <p>Upstream knows this hazard in general: every other projection that overwrites the axis at setup
+ * repairs {@code ra} as well — {@code calcofi.cpp} lines 139-140, {@code healpix.cpp} line 623 (via
+ * {@code pj_calc_ellipsoid_params}) and lines 667-668, {@code nzmg.cpp} line 117 — and
+ * {@code inv.cpp} lines 84-89 carries a comment about exactly this class of problem. Krovak is one
+ * of the two files that forgot. {@code mod_ster.cpp} is the other — it overwrites {@code P->a} at
+ * five sites and never touches {@code ra} — and it shows the same symptom: with the 9.8.1 binaries,
+ * {@code +proj=alsk} and {@code +proj=gs50} give bit-identical forward output under
+ * {@code +ellps=GRS80}, {@code clrk66} and {@code intl}, correctly ignoring the ellipsoid, yet only
+ * {@code clrk66} — the one they force internally — round-trips exactly; GRS80 misses by about 5 m
+ * for {@code alsk} and 50 m for {@code gs50}, and {@code intl} misses the other way. That is
+ * recorded as a lead for whoever ports those, not chased here.
+ *
+ * <p><b>What this class does instead.</b> {@code initialize()} assigns the Bessel {@code a} and
+ * {@code es} before {@code super.initialize()}, so {@code totalScale} derives from Bessel's axis and
+ * is used by <em>both</em> {@code project} and {@code projectInverse}. This class round-trips
+ * exactly, and its answer is what krovak's own definition implies.
+ *
+ * <p>Both answers, pinned, so nobody has to re-derive them. Inverse of
+ * {@code +proj=krovak +ellps=GRS80} at (200, 100), (200, &minus;100), (&minus;200, 100),
+ * (&minus;200, &minus;100) metres:
+ *
+ * <table>
+ * <caption>Krovak inverse, this class versus PROJ 9.8.1</caption>
+ * <tr><th>input</th><th>this class</th><th>PROJ 9.8.1</th></tr>
+ * <tr><td>200, 100</td><td>24.836219260 59.758404029</td><td>24.836218919 59.758403933</td></tr>
+ * <tr><td>200, &minus;100</td><td>24.836315838 59.756888342</td><td>24.836315485 59.756888426</td></tr>
+ * <tr><td>&minus;200, 100</td><td>24.830447406 59.758404029</td><td>24.830447748 59.758403933</td></tr>
+ * <tr><td>&minus;200, &minus;100</td><td>24.830350829 59.756888342</td><td>24.830351182 59.756888426</td></tr>
+ * </table>
+ *
+ * <p>The gap is about 22 mm per row, against {@code builtins.gie}'s 0.1 mm tolerance. Asking PROJ
+ * for the same inverse with the ellipsoid spelled out — {@code +a=6377397.155 +es=0.006674372230614},
+ * or equivalently {@code +ellps=bessel} — reproduces this class's four values exactly, which is the
+ * cleanest demonstration that the disagreement is the stale {@code ra} and nothing else.
+ *
+ * <p><b>The decision, which is settled: keep this behaviour, change no code here, and record PROJ's
+ * as an upstream defect.</b> Adopting PROJ's numbers would mean reintroducing the stale reciprocal
+ * on purpose — writing a known-wrong scale factor into the inverse so that a corpus generated by the
+ * defect agrees with us. That is the wrong trade at 22 mm.
+ *
+ * <p>The consequence is four rows of {@code builtins.gie}'s
+ * {@code +proj=krovak +ellps=GRS80} block — the inverse rows, keys
+ * {@code gie/builtins.gie#135:5} through {@code #135:8} — carried as expected failures in
+ * {@code conformance/src/test/resources/gie-expected-failures.tsv}. Three details of how they fail
+ * are worth keeping, because together they rule out every alternative explanation:
+ *
+ * <ul>
+ * <li>All five <em>forward</em> rows of that block pass. The projection kernel agrees with upstream;
+ *     only the outer scaling differs, and only in one direction.</li>
+ * <li>The fifth inverse row, {@code accept 0 0}, also passes — at the projection origin the two
+ *     scale factors both multiply zero, so the defect cannot show. The error grows with distance
+ *     from the origin, exactly as a scale-factor error must.</li>
+ * <li>The four failing deviations are 21.942, 21.932, 21.959 and 21.948 mm. The inputs are 224 m
+ *     from the origin, where a 1.16e-4 relative scale error predicts about 26 mm — the right size,
+ *     and not expected to match to the millimetre, since the deviation is measured on the
+ *     geographic side after a non-linear inverse rather than in projected metres.</li>
+ * </ul>
+ *
  * @see <a href="http://www.ihsenergy.com/epsg/guid7.html#1.4.3"> Guidance Note 7 </a>
  */
 public class KrovakProjection extends Projection {
@@ -130,6 +212,24 @@ public class KrovakProjection extends Projection {
 
     /** {@code krovak.cpp}'s {@code EPS}, in radians. Roughly 6 nm on the ground. */
     private static final double ITERATION_TOLERANCE = 1e-15;
+
+    /**
+     * Whether the Modified Krovak polynomial correction applies, i.e. whether this is
+     * {@code +proj=mod_krovak} rather than {@code +proj=krovak}.
+     * <p>
+     * Upstream is one function, {@code krovak_setup(P, modified)}, called with
+     * {@code false} from {@code PJ_PROJECTION(krovak)} and {@code true} from
+     * {@code PJ_PROJECTION(mod_krovak)} ({@code krovak.cpp:336-341}). It is <b>not</b> a
+     * parameter — there is no {@code +modified} key — so it is a property of the class
+     * and an overridden method rather than a field: a field would have to be assigned
+     * before this class's constructor calls {@link #initialize()}, which a subclass
+     * cannot do.
+     *
+     * @return {@code false} here, {@code true} in {@link ModifiedKrovakProjection}
+     */
+    protected boolean isModified() {
+        return false;
+    }
 
     public KrovakProjection() {
         minLatitude = ProjectionMath.toRad(-60);
@@ -203,6 +303,79 @@ public class KrovakProjection extends Projection {
         ad = s90 - UQ;
     }
 
+    // ------------------------------------------------------------------------------------
+    // Modified Krovak, namespace pj_modified_krovak (krovak.cpp:108-142).
+    //
+    // These twelve numbers are `constexpr double`, not parameters. There is no +X0, no +C1
+    // and nothing for Proj4Keyword to allow: mod_krovak's whole difference from krovak is
+    // a fixed polynomial published by the Czech survey office (CUZK), whose reference
+    // krovak.cpp:125-127 cites. Reproduced digit-for-digit including the exponent forms.
+    // ------------------------------------------------------------------------------------
+
+    /** {@code X0}: the southing, in metres, that the correction polynomial is centred on. */
+    private static final double MOD_X0 = 1089000.0;
+
+    /** {@code Y0}: the westing, in metres, that the correction polynomial is centred on. */
+    private static final double MOD_Y0 = 654000.0;
+
+    private static final double MOD_C1 = 2.946529277E-02;
+    private static final double MOD_C2 = 2.515965696E-02;
+    private static final double MOD_C3 = 1.193845912E-07;
+    private static final double MOD_C4 = -4.668270147E-07;
+    private static final double MOD_C5 = 9.233980362E-12;
+    private static final double MOD_C6 = 1.523735715E-12;
+    private static final double MOD_C7 = 1.696780024E-18;
+    private static final double MOD_C8 = 4.408314235E-18;
+    private static final double MOD_C9 = -8.331083518E-24;
+    private static final double MOD_C10 = -3.689471323E-24;
+
+    /**
+     * The southing half of {@code mod_krovak_compute_dx_dy} ({@code krovak.cpp:127-134}).
+     * <p>
+     * <b>Why two methods rather than one.</b> Upstream writes both corrections in one
+     * function with {@code double&amp;} out-parameters, which Java has no equivalent for.
+     * The alternatives were a {@code double[2]} allocated on every projected vertex, or a
+     * pair of fields — and a field written from {@code project()} is the shared-mutable-state
+     * defect this codebase has spent real effort removing. The two halves share only
+     * {@code Xr2}/{@code Yr2}/{@code Xr4}/{@code Yr4}, which are four multiplies; splitting
+     * them is bit-identical because every term is an independent product.
+     *
+     * @param Xr the southing relative to {@link #MOD_X0}, metres
+     * @param Yr the westing relative to {@link #MOD_Y0}, metres
+     * @return {@code dX}, the southing correction, metres
+     */
+    private static double modKrovakDX(double Xr, double Yr) {
+        final double Xr2 = Xr * Xr;
+        final double Yr2 = Yr * Yr;
+        final double Xr4 = Xr2 * Xr2;
+        final double Yr4 = Yr2 * Yr2;
+        return MOD_C1 + MOD_C3 * Xr - MOD_C4 * Yr - 2 * MOD_C6 * Xr * Yr
+                + MOD_C5 * (Xr2 - Yr2)
+                + MOD_C7 * Xr * (Xr2 - 3 * Yr2) - MOD_C8 * Yr * (3 * Xr2 - Yr2)
+                + 4 * MOD_C9 * Xr * Yr * (Xr2 - Yr2)
+                + MOD_C10 * (Xr4 + Yr4 - 6 * Xr2 * Yr2);
+    }
+
+    /**
+     * The westing half of {@code mod_krovak_compute_dx_dy} ({@code krovak.cpp:135-140}).
+     * See {@link #modKrovakDX(double, double)} for why this is a second method.
+     *
+     * @param Xr the southing relative to {@link #MOD_X0}, metres
+     * @param Yr the westing relative to {@link #MOD_Y0}, metres
+     * @return {@code dY}, the westing correction, metres
+     */
+    private static double modKrovakDY(double Xr, double Yr) {
+        final double Xr2 = Xr * Xr;
+        final double Yr2 = Yr * Yr;
+        final double Xr4 = Xr2 * Xr2;
+        final double Yr4 = Yr2 * Yr2;
+        return MOD_C2 + MOD_C3 * Yr + MOD_C4 * Xr + 2 * MOD_C5 * Xr * Yr
+                + MOD_C6 * (Xr2 - Yr2)
+                + MOD_C8 * Xr * (Xr2 - 3 * Yr2) + MOD_C7 * Yr * (3 * Xr2 - Yr2)
+                - 4 * MOD_C10 * Xr * Yr * (Xr2 - Yr2)
+                + MOD_C9 * (Xr4 + Yr4 - 6 * Xr2 * Yr2);
+    }
+
     /** {@code +czech}: report westing and southing rather than easting and northing. */
     public void setCzech(boolean czech) {
         this.czech = czech;
@@ -265,8 +438,22 @@ public class KrovakProjection extends Projection {
 
         // Upstream produces a southing and a westing and then swaps them, so the westing becomes
         // the first ordinate. That is the "x and y are reverted!" of the old comment.
-        out.x = ro * sin(eps);      /* westing  -> first  */
-        out.y = ro * cos(eps);      /* southing -> second */
+        double southing = ro * cos(eps);
+        double westing = ro * sin(eps);
+
+        if (isModified()) {
+            // krovak.cpp:174-190. The correction is defined on the SOUTHING/WESTING pair, in
+            // metres, and therefore has to be applied here -- before the swap and before the
+            // sign flip. Applying it after either would rotate or reflect a polynomial that
+            // was fitted in one particular frame.
+            final double Xr = southing * a - MOD_X0;
+            final double Yr = westing * a - MOD_Y0;
+            southing -= modKrovakDX(Xr, Yr) / a;
+            westing -= modKrovakDY(Xr, Yr) / a;
+        }
+
+        out.x = westing;            /* westing  -> first  */
+        out.y = southing;           /* southing -> second */
 
         if(!czech) {
             // krovak.cpp:203-208, AFTER the swap. The default (non-Czech) convention is
@@ -306,6 +493,19 @@ public class KrovakProjection extends Projection {
         /* revert y, x */
         double southing = wy;
         double westing = wx;
+
+        if (isModified()) {
+            // krovak.cpp:220-232, after the swap and before rho/eps -- the mirror of the
+            // forward, with the sign of the correction reversed and no re-solve. Upstream's
+            // own comment records that this is EPSG guidance note 7-2's Xr'/Yr'/dX'/dY', i.e.
+            // the correction is deliberately evaluated at the CORRECTED point rather than
+            // iterated back to the uncorrected one. It is not an exact inverse of the forward
+            // and it is not meant to be; the residual is sub-millimetre over Czechia.
+            final double Xr = southing * a - MOD_X0;
+            final double Yr = westing * a - MOD_Y0;
+            southing += modKrovakDX(Xr, Yr) / a;
+            westing += modKrovakDY(Xr, Yr) / a;
+        }
 
         ro = sqrt(southing * southing + westing * westing);
         eps = atan2(westing, southing);
