@@ -163,7 +163,7 @@ final class PjdxFile implements Closeable {
         // and a pool cannot declare more strings than its own section has room to describe.
         //
         // NOT bounded by GridExtents.MAX_EXTENT: this is a string count, not a grid axis, and the
-        // shipped proj4j-db.pjdx already holds 97,930 strings.
+        // shipped proj4j-db.pjdx already holds 97,937 strings.
         int offsetBytes = GridExtents.checkedCount(origin + " string pool offsets",
                 stringCount + 1L, 4L, 8L, sectionBytes, "the string-pool section length") * 4;
         byte[] offs = new byte[offsetBytes];

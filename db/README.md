@@ -6,8 +6,8 @@ pure-Java reader that serves it through `org.locationtech.proj4j.spi.ProjDatabas
 
 | | |
 |---|---:|
-| index, unpacked | **6,746,032 B** (6.43 MiB) |
-| index, `gzip -9` | **1,720,052 B** (1.64 MiB) |
+| index, unpacked | **6,746,280 B** (6.43 MiB) |
+| index, `gzip -9` | **1,720,110 B** (1.64 MiB) |
 | raw `proj.db` for comparison | 10,223,616 B / 1,858,856 B |
 | saving | **−34.0 % unpacked, −7.5 % compressed** |
 | dependencies | `proj4j` only |
@@ -35,13 +35,13 @@ Transcoding buys three things instead:
 2. **The bytes we do not need are gone** — the write path, the b-tree interior pages, the page slack, and
    the 798 KB `idx_usage_object` whose job is done here by a 20-byte-per-row sorted array.
 3. **Strings are shared.** `'EPSG'` appears in tens of thousands of rows upstream; here it appears once,
-   referenced by a varint. 97,930 distinct strings, 2,480,418 B of UTF-8.
+   referenced by a varint. 97,937 distinct strings, 2,480,497 B of UTF-8.
 
 ## The format, `.pjdx` v1
 
 Full specification in `PjdxFormat`'s javadoc — writer and reader share that class, so the two cannot
 drift. In outline: a 64-byte header carrying a SHA-256 of the content, a section directory, one shared
-string pool, 27 keyed row tables and 7 sorted indexes.
+string pool, 28 keyed row tables and 7 sorted indexes.
 
 Two rules do most of the work:
 
@@ -57,28 +57,29 @@ Two rules do most of the work:
 
 | section | bytes | | section | bytes |
 |---|---:|---|---|---:|
-| `S_STRINGS` | 2,871,672 | | `X_USAGE_BY_OBJECT` | 488,108 |
+| `S_STRINGS` | 2,872,257 | | `X_USAGE_BY_OBJECT` | 488,108 |
 | `S_CONVERSION` | 562,587 | | `X_CRS_BY_NAME` | 470,488 |
-| `S_HELMERT_TRANSFORMATION` | 449,613 | | `X_CRS_BY_CODE` | 220,648 |
+| `S_HELMERT_TRANSFORMATION` | 449,616 | | `X_CRS_BY_CODE` | 220,648 |
 | `S_ALIAS` | 439,389 | | `X_OP_BY_SOURCE_TARGET` | 114,032 |
-| `S_PROJECTED_CRS` | 334,354 | | `X_OP_BY_TARGET_SOURCE` | 114,032 |
+| `S_PROJECTED_CRS` | 334,376 | | `X_OP_BY_TARGET_SOURCE` | 114,032 |
 | `S_EXTENT` | 208,559 | | `X_CRS_BY_DATUM` | 66,176 |
-| `S_GEODETIC_CRS` | 67,551 | | 20 smaller sections | 249,133 |
+| `S_GEODETIC_CRS` | 67,573 | | 21 smaller sections | 337,387 |
 
 ## The schema subset
 
-**Transcoded (31 tables read, 27 sections written):** `metadata`, `unit_of_measure`, `celestial_body`,
+**Transcoded (32 tables read, 28 sections written):** `metadata`, `unit_of_measure`, `celestial_body`,
 `ellipsoid`, `prime_meridian`, `geodetic_datum`, `vertical_datum`, both `*_datum_ensemble_member`
 tables, `coordinate_system`, `axis`, `geodetic_crs`, `projected_crs`, `vertical_crs`, `compound_crs`,
 `engineering_crs`, `conversion_table` (names resolved from `conversion_method` and `conversion_param`),
 `helmert_transformation_table` (method name from `coordinate_operation_method`), `grid_transformation`,
 `other_transformation`, `concatenated_operation`, `concatenated_operation_step`, `usage`, `extent`,
-`grid_alternatives`, `alias_name`, `supersession`, `deprecation`.
+`grid_alternatives`, `alias_name`, `supersession`, `deprecation`,
+`authority_to_authority_preference`.
 
 **Dropped on purpose**, each with a reason, in `GenerateIndex`'s javadoc: `coordinate_metadata`
 (point-motion epochs for a capability proj4j does not have — 921,600 B of the SQLite file), `scope`,
 `sqlite_stat1`, `grid_packages`, `builtin_authorities`, `versioned_auth_name_mapping`,
-`authority_to_authority_preference`, `geoid_model`, and the free-text `description`/`anchor` columns on
+`geoid_model`, and the free-text `description`/`anchor` columns on
 datums and CRSs. `extent.description` **is** kept: it is the string a human is shown as the area of use.
 
 ### Helmert parameters are ported, not remembered
@@ -253,7 +254,7 @@ This module is **deliberately not in the root `<modules>`**. Add it with:
 ```xml
 <!-- PROJ 9.8.1's authority database (EPSG v12.029 + ESRI + IGNF + IAU_2015 + NKG), transcoded to a
      deterministic read-only binary index and read by a pure-Java reader. Published; implements
-     org.locationtech.proj4j.spi.ProjDatabase. 6,746,032 B unpacked / ~1.72 MB as a jar, and its only
+     org.locationtech.proj4j.spi.ProjDatabase. 6,746,280 B unpacked / ~1.78 MB as a jar, and its only
      dependency is proj4j itself -- no SQLite driver, no native library. See db/README.md. -->
 <module>db</module>
 ```

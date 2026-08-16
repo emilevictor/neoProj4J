@@ -55,7 +55,7 @@ import static org.junit.Assert.fail;
  * <h2>The bound is the section, not a number someone chose</h2>
  *
  * <p>This matters more here than in the grid readers, and the shipped file proves why twice. Its
- * string pool holds <strong>97,930</strong> strings, so a 100,000 cap borrowed from
+ * string pool holds <strong>97,937</strong> strings, so a 100,000 cap borrowed from
  * {@code CTABLEV2}'s grid-axis check would have passed today and refused the library's own database
  * after one EPSG release. And one of its tables has {@code keyFieldCount = 5} while
  * {@code PjdxFormat}'s own javadoc said <em>"0..4"</em> — a cap taken from the documentation would
@@ -268,7 +268,7 @@ public class PjdxFileSecurityTest {
     public void theShippedIndexStillOpensAndAnswers() throws IOException {
         PjdxFile f = openShipped();
         try {
-            assertEquals(97930, f.stringCount());
+            assertEquals(97937, f.stringCount());
             assertTrue("string 0 must decode", f.string(0) != null);
             assertTrue("the last string must decode", f.string(f.stringCount() - 1) != null);
 
@@ -295,7 +295,7 @@ public class PjdxFileSecurityTest {
                     indexes++;
                 }
             }
-            assertEquals("every table section must load", 27, tables);
+            assertEquals("every table section must load", 28, tables);
             assertEquals("every index section must load", 7, indexes);
         } finally {
             f.close();
@@ -310,7 +310,7 @@ public class PjdxFileSecurityTest {
     public void theShippedDatabaseIsInsideEveryBound() throws IOException {
         PjdxFile f = openShipped();
         try {
-            assertEquals("the string pool is just under a 100,000 cap, by accident", 97930,
+            assertEquals("the string pool is just under a 100,000 cap, by accident", 97937,
                     f.stringCount());
 
             int widestKey = 0;

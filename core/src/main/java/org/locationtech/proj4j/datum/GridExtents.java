@@ -188,7 +188,7 @@ public final class GridExtents {
      * <p>The {@link #MAX_EXTENT} per-axis bound belongs to this method and not to
      * {@link #checkedCount}, deliberately. It is a statement about grid <em>geometry</em>, and applying
      * it to a one-dimensional count would have been a guard that breaks the library: the shipped
-     * {@code proj4j-db.pjdx} string pool holds <strong>97,930</strong> strings, which is under 100,000
+     * {@code proj4j-db.pjdx} string pool holds <strong>97,937</strong> strings, which is under 100,000
      * only by accident and would be over it after one EPSG release.
      *
      * @param what            the file and section, for the message

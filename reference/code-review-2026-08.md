@@ -610,12 +610,16 @@ What is genuinely worth consolidating, split by whether it can move a bit.
   `NellProjection` — same step `(θ + sin θ − c)/(1 + cos θ)`, but Hatano damps the correction and
   Boggs forms `c` differently upstream. Extractable bit-for-bit only if the helper preserves each
   call site's exact token order, at which point it is barely shorter.
-- **Four parallel linear-unit tables** — `units/Units.java:130-137`, `pipeline/PipelineUnits.java:58-79`,
+- **Four parallel linear-unit tables** — `units/Units.java` (`LINEAR_UNITS`),
+  `pipeline/PipelineUnits.java` (`LINEAR_IDS`/`LINEAR_FACTORS`/`LINEAR_NAMES`),
   `io/wkt/WktNames.java:88-121`, `io/projjson/UnitDefinition.java:34-64`. The divergence is
   load-bearing: `PipelineUnits` uses `1200/3937.0` for the US survey foot while `Units` uses
-  `0.304800609601219`, and `PipelineUnits`' own Javadoc **documents that 1e-16 difference as
-  intentional PROJ fidelity**. Merging forces a choice. The ids and display names are pure strings
-  and can be shared; the factors cannot.
+  `0.304800609601219`. **Both are right**, because PROJ's `PJ_UNITS` row carries the conversion
+  twice and its two copies disagree by 3 ulps: `+units=` reads the `to_meter` *string*
+  (`9.8.1:src/init.cpp:689`) and `+proj=unitconvert` reads the `factor` *double*
+  (`unitconvert.cpp:411,425`). Each proj4j table tracks the column its own callers need, and both
+  Javadocs now say so. Merging forces a choice and would break parity on one path. The ids and
+  display names are pure strings and can be shared; the factors cannot.
 
 ### Looks redundant, is not
 
@@ -672,8 +676,10 @@ Forty-two tests were added in total, and the three touched modules pass: **core 
 `geoapi` 12**. Two checks are worth naming because they are stronger than a green suite. The `db`
 work was verified by regenerating the index from the same `proj.db` dump with the old and new
 generators and diffing the output: byte-identical, SHA-256
-`8a82064783a07132f31e42ffe51cdc2bbb48c3835a01ab015485dfe7a456d389`, which is the value already pinned
-in `db/pom.xml` and the hash of the checked-in artifact. `VerifyIndex` reports the same **486,491**
+`8a82064783a07132f31e42ffe51cdc2bbb48c3835a01ab015485dfe7a456d389`, which was the value pinned in
+`db/pom.xml` at the time of this review. (It is no longer: adding
+`authority_to_authority_preference` as section 43 deliberately regenerated the artifact. Read the
+current value out of `db/pom.xml`, never out of this paragraph.) `VerifyIndex` reports the same **486,491**
 field comparisons before and after, so no assertion was silently dropped. (That 486,491 was
 re-measured during the test-sufficiency work rather than carried forward on trust — see below, where
 the verifier gains eleven field checks and the count becomes 502,422.) And `javap` over every
