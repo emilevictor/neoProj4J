@@ -183,6 +183,36 @@ public interface ProjDatabase extends Closeable {
                                         String tgtAuthName, String tgtCode);
 
     /**
+     * Which authorities may supply an operation between two authorities, in the order they are to be
+     * tried &mdash; PROJ's {@code authority_to_authority_preference} table, resolved.
+     * <p>
+     * The list is <strong>not</strong> a set of allowed authorities to filter with. It is a search
+     * order: PROJ tries each authority in turn and stops at the first one that produced any operation,
+     * except for {@code PROJ} itself, whose results accumulate into the next authority's attempt. An
+     * entry of {@code "any"} means "every authority", and it is the list's own way of ending in a
+     * catch-all. See {@code 9.8.1:src/iso19111/factory.cpp} {@code getAllowedAuthorities} for the
+     * four-query fallback that resolves a pair, and
+     * {@code 9.8.1:src/iso19111/operation/coordinateoperationfactory.cpp} {@code getCandidateAuthorities}
+     * plus {@code findOpsInRegistryDirect} for how the order is consumed.
+     * <p>
+     * This is what keeps {@code ESRI:108089} out of an {@code EPSG:4277 -> EPSG:4326} search: the
+     * {@code (EPSG, EPSG)} row reads {@code PROJ,EPSG,NKG}, EPSG answers, and no ESRI row is ever
+     * reached. Neither of the two ESRI rows is deprecated, so nothing else in the pipeline would
+     * exclude them.
+     * <p>
+     * An empty list means the table has nothing to say about this pair, which PROJ treats as "search
+     * every authority". Default so that a database predating the table keeps working; it returns empty,
+     * which is exactly that behaviour.
+     *
+     * @param srcAuthName the source CRS's authority, e.g. {@code "EPSG"}
+     * @param tgtAuthName the target CRS's authority
+     * @return the search order, unmodifiable and possibly empty; never {@code null}
+     */
+    default List<String> allowedAuthorities(String srcAuthName, String tgtAuthName) {
+        return java.util.Collections.emptyList();
+    }
+
+    /**
      * Every operation whose {@code source_crs} is the given CRS, as references. Sorted by
      * {@link DbObjectRef} order, unmodifiable.
      * <p>
