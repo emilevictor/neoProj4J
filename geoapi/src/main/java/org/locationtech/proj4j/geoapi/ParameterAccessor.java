@@ -136,19 +136,36 @@ final class ParameterAccessor extends Wrapper implements ParameterDescriptor<Dou
     /**
      * Resets all parameters to their default value.
      *
-     * <p>The {@code true_scale_latitude} accessor needs one extra step. Its setter is
-     * {@link Projection#setTrueScaleLatitude}, which records that {@code +lat_ts} was given, so
-     * calling it with the default of zero would leave the projection claiming a parameter it does
-     * not have. {@code MercatorProjection.initialize()} reads that claim and answers it by
-     * replacing {@code +k} with 1, so the projection would come out of a reset with a scale factor
-     * it was never given. {@link Projection#clearTrueScaleLatitude()} is the one call that puts
-     * both the value and the claim back to their initial state.
+     * <p>Three accessors need one extra step each, for the same reason. Their setters record that
+     * the parameter was given, so calling them with a default of zero would leave the projection
+     * claiming a parameter it does not have:
+     *
+     * <ul>
+     * <li>{@code true_scale_latitude} -- {@link Projection#setTrueScaleLatitude}.
+     *     {@code MercatorProjection.initialize()} reads the claim and answers it by replacing
+     *     {@code +k} with 1, so the projection would come out of a reset with a scale factor it was
+     *     never given.</li>
+     * <li>{@code latitude_of_origin} and {@code standard_parallel_2} --
+     *     {@link Projection#setProjectionLatitude} and {@link Projection#setProjectionLatitude2}.
+     *     {@code LambertConformalConicProjection.initialize()} reads both claims: a reset lcc would
+     *     look like {@code +lat_2=0 +lat_0=0}, which is a secant cone through the equator with its
+     *     origin there, rather than like a projection with no standard parallels at all, which is
+     *     what a reset is supposed to leave behind.</li>
+     * </ul>
+     *
+     * <p>{@link Projection#clearTrueScaleLatitude()},
+     * {@link Projection#clearProjectionLatitude()} and
+     * {@link Projection#clearProjectionLatitude2()} are the calls that put both the value and the
+     * claim back to their initial state. They run after the loop, because the loop would otherwise
+     * set the claims again.
      */
     static void reset(final Projection proj) {
         for (ParameterAccessor c : ACCESSORS) {
             c.setter.accept(proj, c.defaultValue());
         }
         proj.clearTrueScaleLatitude();
+        proj.clearProjectionLatitude();
+        proj.clearProjectionLatitude2();
     }
 
     /**

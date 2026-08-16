@@ -359,6 +359,14 @@ public class Registry {
         projDescriptions = new HashMap<String, String>();
         register("aea", AlbersProjection.class, "Albers Equal Area");
         register("aeqd", EquidistantAzimuthalProjection.class, "Azimuthal Equidistant");
+        /*
+         * airocean reads one parameter of its own, +orient, and Proj4Parser dispatches it to
+         * AirOceanProjection.setOrient. Registering the name without that dispatch would make
+         * `+proj=airocean +orient=horizontal` parse cleanly and then draw the vertical net -
+         * see the note above the +azi fan-out in Proj4Parser for why the two always land in
+         * one change.
+         */
+        register("airocean", AirOceanProjection.class, "Airocean");
         register("airy", AiryProjection.class, "Airy");
         register("aitoff", AitoffProjection.class, "Aitoff");
         register("adams_hemi", AdamsHemisphereProjection.class, "Adams Hemisphere in a Square");
@@ -386,7 +394,7 @@ public class Registry {
         register("cc", CentralCylindricalProjection.class, "Central Cylindrical");
         register("ccon", CentralConicProjection.class, "Central Conic");
         register("cea", CylindricalEqualAreaProjection.class, "Equal Area Cylindrical");
-        // register( "chamb", Projection.class, "Chamberlin Trimetric" );
+        register("chamb", ChamberlinTrimetricProjection.class, "Chamberlin Trimetric");
         register("collg", CollignonProjection.class, "Collignon");
         register("crast", CrasterProjection.class, "Craster Parabolic (Putnins P4)");
         register("denoy", DenoyerProjection.class, "Denoyer Semi-Elliptical");
@@ -420,6 +428,13 @@ public class Registry {
         register("hammer", HammerProjection.class, "Hammer & Eckert-Greifendorff");
         register("hatano", HatanoProjection.class, "Hatano Asymmetrical Equal Area");
         /*
+         * healpix and rhealpix share one upstream file (healpix.cpp) and one opaque struct, but
+         * they are separate classes here: only healpix reads +rot_xy, and only rhealpix reads
+         * +north_square/+south_square, so a subclass relationship would let Proj4Parser's
+         * instanceof dispatch feed each operator a key upstream never gives it.
+         */
+        register("healpix", HealpixProjection.class, "HEALPix");
+        /*
          * The interrupted family, one class per upstream file: igh.cpp, igh_o.cpp, imoll.cpp and
          * imoll_o.cpp all dispatch over the Mollweide and (for the igh pair) sinusoidal children
          * this library already had. Note "goode" above is the UNinterrupted Goode Homolosine and
@@ -434,6 +449,14 @@ public class Registry {
                 "Interrupted Mollweide Oceanic View");
         register("imw_p", InternationalMapOfTheWorldPolyconicProjection.class,
                 "International Map of the World Polyconic");
+        /*
+         * isea reads five parameters of its own - +orient, +mode, +resolution, +aperture and
+         * +azi - plus +lat_0/+lon_0 with a meaning that is NOT the usual projection centre.
+         * All seven are dispatched in Proj4Parser; see the note there for why registering the
+         * name and widening the dispatch cannot be separate changes.
+         */
+        register("isea", IcosahedralSnyderEqualAreaProjection.class,
+                "Icosahedral Snyder Equal Area");
         register("kav5", KavraiskyVProjection.class, "Kavraisky V");
         register("kav7", Kavrayskiy7Projection.class, "Kavrayskiy VII");
         register("krovak", KrovakProjection.class, "Krovak");
@@ -464,6 +487,7 @@ public class Registry {
         register("misrsom", MisrSpaceObliqueMercatorProjection.class,
                 "Space oblique for MISR");
         register("mill", MillerProjection.class, "Miller Cylindrical");
+        register("mod_krovak", ModifiedKrovakProjection.class, "Modified Krovak");
         // register( "mpoly", Projection.class, "Modified Polyconic" );
         register("moll", MolleweideProjection.class, "Mollweide");
         register("murd1", Murdoch1Projection.class, "Murdoch I");
@@ -482,7 +506,7 @@ public class Registry {
                 "General Oblique Transformation");
         register("ocea", ObliqueCylindricalEqualAreaProjection.class,
                 "Oblique Cylindrical Equal Area");
-        // register( "oea", Projection.class, "Oblated Equal Area" );
+        register("oea", OblatedEqualAreaProjection.class, "Oblated Equal Area");
         register("omerc", ObliqueMercatorProjection.class, "Oblique Mercator");
         register("ortel", OrteliusOvalProjection.class, "Ortelius Oval");
         register("ortho", OrthographicAzimuthalProjection.class, "Orthographic");
@@ -498,9 +522,14 @@ public class Registry {
         register("putp5p", PutninsP5PProjection.class, "Putnins P5'");
         register("putp6", PutninsP6Projection.class, "Putnins P6");
         register("putp6p", PutninsP6PProjection.class, "Putnins P6'");
+        register("qsc", QuadrilateralizedSphericalCubeProjection.class,
+                "Quadrilateralized Spherical Cube");
         register("qua_aut", QuarticAuthalicProjection.class, "Quartic Authalic");
+        register("rhealpix", RHealpixProjection.class, "rHEALPix");
         register("robin", RobinsonProjection.class, "Robinson");
+        register("rouss", RoussilheStereographicProjection.class, "Roussilhe Stereographic");
         register("rpoly", RectangularPolyconicProjection.class, "Rectangular Polyconic");
+        register("s2", S2Projection.class, "S2");
         register("sinu", SinusoidalProjection.class, "Sinusoidal (Sanson-Flamsteed)");
         register("som", SpaceObliqueMercatorProjection.class, "Space Oblique Mercator");
         register("somerc", SwissObliqueMercatorProjection.class, "Swiss Oblique Mercator");

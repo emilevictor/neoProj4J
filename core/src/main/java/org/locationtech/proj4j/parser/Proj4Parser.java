@@ -23,23 +23,31 @@ import org.locationtech.proj4j.*;
 import org.locationtech.proj4j.datum.Datum;
 import org.locationtech.proj4j.datum.Ellipsoid;
 import org.locationtech.proj4j.datum.Grid;
+import org.locationtech.proj4j.proj.AirOceanProjection;
 import org.locationtech.proj4j.proj.AiryProjection;
 import org.locationtech.proj4j.proj.CassiniProjection;
+import org.locationtech.proj4j.proj.ChamberlinTrimetricProjection;
 import org.locationtech.proj4j.proj.ColombiaUrbanProjection;
 import org.locationtech.proj4j.proj.EquidistantAzimuthalProjection;
 import org.locationtech.proj4j.proj.FoucautSinusoidalProjection;
 import org.locationtech.proj4j.proj.GeneralSinusoidalProjection;
 import org.locationtech.proj4j.proj.HammerProjection;
+import org.locationtech.proj4j.proj.HealpixProjection;
+import org.locationtech.proj4j.proj.IcosahedralSnyderEqualAreaProjection;
 import org.locationtech.proj4j.proj.InternationalMapOfTheWorldPolyconicProjection;
+import org.locationtech.proj4j.proj.KrovakProjection;
 import org.locationtech.proj4j.proj.LabordeProjection;
 import org.locationtech.proj4j.proj.LagrangeProjection;
 import org.locationtech.proj4j.proj.LandsatProjection;
 import org.locationtech.proj4j.proj.MisrSpaceObliqueMercatorProjection;
 import org.locationtech.proj4j.proj.ObliqueCylindricalEqualAreaProjection;
 import org.locationtech.proj4j.proj.ObliqueMercatorProjection;
+import org.locationtech.proj4j.proj.OblatedEqualAreaProjection;
 import org.locationtech.proj4j.proj.ObliqueTransformationProjection;
 import org.locationtech.proj4j.proj.PeirceQuincuncialProjection;
 import org.locationtech.proj4j.proj.Projection;
+import org.locationtech.proj4j.proj.RHealpixProjection;
+import org.locationtech.proj4j.proj.S2Projection;
 import org.locationtech.proj4j.proj.SpaceObliqueMercatorProjection;
 import org.locationtech.proj4j.proj.SimpleConicProjection;
 import org.locationtech.proj4j.proj.SpilhausProjection;
@@ -194,6 +202,21 @@ public class Proj4Parser {
         if (s != null)
             projection.setLonCDegrees(parseAngle(Proj4Keyword.lonc, s));
 
+        /*
+         * +lat_0 and +lat_2: the setters run only when the key is present, and they record that
+         * fact on Projection.projectionLatitudeSpecified and
+         * Projection.projectionLatitude2Specified. LambertConformalConicProjection.initialize()
+         * needs presence rather than value, because lcc.cpp:88-95 tests presence with pj_param's
+         * leading 't' sigil and zero is a real standard parallel and a real latitude of origin.
+         * Presence is information this parser has and a Projection does not: by the time
+         * initialize() runs, an omitted +lat_2 and an explicit +lat_2=0 are both 0.0 in the same
+         * field. Same shape as the +lat_ts handling below and the SimpleConicProjection check
+         * above.
+         *
+         * There is no ordering constraint against the +lat_1 handling between them, or against
+         * anything else here: initialize() is called at the end of this method, so it sees the
+         * final state of all four latitudes whatever order the setters ran in.
+         */
         s = params.get(Proj4Keyword.lat_0);
         if (s != null)
             projection.setProjectionLatitudeDegrees(parseAngle(Proj4Keyword.lat_0, s));
@@ -392,6 +415,37 @@ public class Proj4Parser {
         if (params.containsKey(Proj4Keyword.over))
             projection.setOver(parseBoolean(Proj4Keyword.over, params.get(Proj4Keyword.over)));
 
+        /*
+         * +lon_wrap is global too, and forward-only: init.cpp:611-623 reads it, and
+         * fwd_finalize applies it in `case PJ_IO_UNITS_RADIANS` alone (fwd.cpp:162-167).
+         * inv_finalize has no lon_wrap. Hence Projection.setLongitudeWrapCenter rather than
+         * a concrete class, and hence its position beside +over.
+         *
+         * READ WITH THE 'r' SIGIL, so the value is an ANGLE and parseAngleRadians is the
+         * right reader: "rlon_wrap" at init.cpp:613. +lon_wrap=180 therefore stores pi, and
+         * DMS spellings are legal. Using parseDouble here would have stored 180 radians.
+         *
+         * The guard is upstream's, character for character:
+         *
+         *     if (!(fabs(PIN->long_wrap_center) < 10 * M_TWOPI))  -> error 1027
+         *
+         * so the bound is 10 * 2*pi RADIANS, about 3600 degrees, NOT 62.8 degrees.
+         * Measured on 9.8.1: +lon_wrap=3599 is accepted; 3600 and 3601 are
+         * "Invalid value for lon_wrap". Written inverted rather than as `>=` on purpose -
+         * upstream's own comment says the test is that way round "to error on
+         * long_wrap_center = NaN" - and the inversion is preserved here for the same
+         * reason, which is why there is no separate isNaN test: !(NaN < limit) is true.
+         */
+        s = params.get(Proj4Keyword.lon_wrap);
+        if (s != null) {
+            double center = parseAngleRadians(Proj4Keyword.lon_wrap, s);
+            if (!(Math.abs(center) < 10.0 * ProjectionMath.TWOPI))
+                throw new InvalidValueException(
+                        "Invalid value for +lon_wrap: " + s + ". Should be NaN-free and less "
+                                + "than 10*2*pi radians (about 3600 degrees) in magnitude");
+            projection.setLongitudeWrapCenter(center);
+        }
+
         s = params.get(Proj4Keyword.pm);
         if (s != null)
             projection.setPrimeMeridian(normalizePrimeMeridian(s));
@@ -550,7 +604,9 @@ public class Proj4Parser {
          * labrd was already registered with the same hole open; no corpus row exercises
          * `labrd +azi`, which is why it survived unnoticed.
          *
-         * isea is not ported, so its +proj= name is refused before +azi could matter.
+         * isea's +azi is handled in its own block below rather than here, because for isea
+         * +azi is not a map rotation at all - it is the third component of the icosahedron's
+         * orientation, and it has to be set alongside +lat_0 and +lon_0 in upstream's order.
          *
          * All of these must be set before initialize(), which derives cosrot/sinrot,
          * lambda_0 and beta (spilhaus), cg/sg/cw/sw (tpers) and Ca/Cb/Cc/Cd (labrd)
@@ -590,6 +646,126 @@ public class Proj4Parser {
             if (s != null)
                 ((LabordeProjection) projection)
                         .setAziRadians(parseAngleRadians(Proj4Keyword.azi, s));
+        }
+        /*
+         * airocean's +orient, an 's' sigil compared with strcmp (airocean.cpp:829-841).
+         * A bare "+orient" with no value must be refused, not ignored, for the same
+         * reason +shape is: pj_param 's' hands the setup an empty string, which matches
+         * neither name, so upstream fails setup. containsKey, not get() != null.
+         *
+         * The value set is airocean's own - vertical|horizontal - and is NOT isea's.
+         * Sending one operator the other's value has to be an error; each setter polices
+         * its own list, which is why this is two blocks and not one shared helper.
+         */
+        if (projection instanceof AirOceanProjection) {
+            if (params.containsKey(Proj4Keyword.orient)) {
+                s = params.get(Proj4Keyword.orient);
+                ((AirOceanProjection) projection).setOrient(s == null ? "" : s);
+            }
+        }
+        /*
+         * isea. The ORDER below is upstream's (isea.cpp:1008-1068) and is load-bearing:
+         * +orient assigns all three of o_lat/o_lon/o_az, and +azi/+lon_0/+lat_0 then override
+         * individual components of it. Reading them the other way round would let +orient
+         * silently undo an explicit +lat_0.
+         *
+         * +lat_0 and +lon_0 are ALSO consumed generically above, into projectionLatitude and
+         * projectionLongitude. That double read is upstream's too - pj_init copies "rlon_0"
+         * into P->lam0 whatever the operator does with it - so `+proj=isea +lon_0=10` both
+         * shifts the incoming longitude and moves the icosahedron. Reading it once would be
+         * a divergence, not a tidy-up.
+         *
+         * parseAngleRadians, not parseAngle: all three are 'r' sigils, so an r-suffixed value
+         * must be scaled once, not by RTD and then DTR again.
+         */
+        if (projection instanceof IcosahedralSnyderEqualAreaProjection) {
+            IcosahedralSnyderEqualAreaProjection isea =
+                    (IcosahedralSnyderEqualAreaProjection) projection;
+
+            if (params.containsKey(Proj4Keyword.orient)) {
+                s = params.get(Proj4Keyword.orient);
+                isea.setOrient(s == null ? "" : s);
+            }
+            s = params.get(Proj4Keyword.azi);
+            if (s != null)
+                isea.setAziRadians(parseAngleRadians(Proj4Keyword.azi, s));
+            s = params.get(Proj4Keyword.lon_0);
+            if (s != null)
+                isea.setOrientationLongitudeRadians(parseAngleRadians(Proj4Keyword.lon_0, s));
+            s = params.get(Proj4Keyword.lat_0);
+            if (s != null)
+                isea.setOrientationLatitudeRadians(parseAngleRadians(Proj4Keyword.lat_0, s));
+
+            if (params.containsKey(Proj4Keyword.mode)) {
+                s = params.get(Proj4Keyword.mode);
+                isea.setMode(s == null ? "" : s);
+            }
+            s = params.get(Proj4Keyword.resolution);
+            if (s != null)
+                isea.setResolution(parseIntStrict(Proj4Keyword.resolution, s));
+            s = params.get(Proj4Keyword.aperture);
+            if (s != null)
+                isea.setAperture(parseIntStrict(Proj4Keyword.aperture, s));
+        }
+
+        /*
+         * healpix reads +rot_xy and rhealpix reads +north_square/+south_square. They share
+         * one upstream file and one opaque struct but NOT their parameters: healpix.cpp's
+         * two setup functions each write only their own keys, so the other operator sees
+         * the zero calloc left behind. That is why HealpixProjection and RHealpixProjection
+         * are siblings - a subclass would make one of these two blocks fire for both, and
+         * +proj=rhealpix +rot_xy=45 would silently produce a rotated map.
+         *
+         * +rot_xy is a 'd' sigil then PJ_TORAD (healpix.cpp:615-616), so parseDouble and
+         * ProjectionMath.toRad, NOT parseAngle: pj_strtod does not take a DMS string, and
+         * an r-suffixed value is not radians here.
+         */
+        if (projection instanceof HealpixProjection) {
+            s = params.get(Proj4Keyword.rot_xy);
+            if (s != null)
+                ((HealpixProjection) projection).setRotXyDegrees(
+                        parseDouble(Proj4Keyword.rot_xy, s));
+        }
+        if (projection instanceof RHealpixProjection) {
+            RHealpixProjection rhealpix = (RHealpixProjection) projection;
+            /*
+             * The 'i' sigil, so parseIntStrict: healpix.cpp:665-666 reads both with
+             * pj_param(..., "inorth_square").i, whose grammar is decimal digits and nothing
+             * else. A value outside [0,3] is then rejected at :670-683, which the setters
+             * enforce.
+             *
+             * An EMPTY value is not an error. pj_param lands on a terminating NUL, atoi("")
+             * is 0 and the digit loop never runs, so `+north_square=` means 0 - measured
+             * with cct on 9.8.1, which transforms it cleanly while refusing
+             * `+north_square=x` and `+north_square=7`. createParameterMap already stores
+             * null for the bare `+north_square`, so both spellings land here as "skip".
+             */
+            s = params.get(Proj4Keyword.north_square);
+            if (s != null && !s.isEmpty())
+                rhealpix.setNorthSquare(parseIntStrict(Proj4Keyword.north_square, s));
+
+            s = params.get(Proj4Keyword.south_square);
+            if (s != null && !s.isEmpty())
+                rhealpix.setSouthSquare(parseIntStrict(Proj4Keyword.south_square, s));
+        }
+
+        /*
+         * +UVtoST is an 's' sigil (s2.cpp:413), so no numeric parsing at all: the raw string
+         * is looked up in a four-entry std::map and a miss is an error (s2.cpp:417-427).
+         *
+         * PRESENCE, not value, decides whether the lookup happens - and present-with-no-value
+         * is present. pj_param's 's' branch (param.cpp:192-194) hands back a pointer to the
+         * terminating NUL when the token has no '=', so both `+UVtoST` and `+UVtoST=` reach
+         * the map as "" and are refused. Measured on the 9.8.1 proj CLI: both give
+         * "Invalid value for s2 parameter", as does +UVtoST=Linear, the map being
+         * case-sensitive. createParameterMap stores null for the bare form and "" for the
+         * empty one, so containsKey is what distinguishes them from absent.
+         */
+        if (projection instanceof S2Projection) {
+            if (params.containsKey(Proj4Keyword.UVtoST)) {
+                s = params.get(Proj4Keyword.UVtoST);
+                ((S2Projection) projection).setUVtoST(s == null ? "" : s);
+            }
         }
 
         /*
@@ -992,6 +1168,68 @@ public class Proj4Parser {
         }
 
         /*
+         * oea reads all three of +n, +m and +theta (oea.cpp:64-74). The first two are
+         * 'd' and are REQUIRED - upstream rejects <= 0, and pj_param's 'd' sigil gives 0
+         * for an absent key, so "missing" and "zero" are one refusal. +theta is 'r',
+         * hence parseAngleRadians: the corpus block writes +theta=3, which is three
+         * degrees, and the r/R suffix has to keep working.
+         */
+        if (projection instanceof OblatedEqualAreaProjection) {
+            OblatedEqualAreaProjection oea = (OblatedEqualAreaProjection) projection;
+            s = params.get(Proj4Keyword.n);
+            if (s != null)
+                oea.setN(parseDouble(Proj4Keyword.n, s));
+
+            s = params.get(Proj4Keyword.m);
+            if (s != null)
+                oea.setM(parseDouble(Proj4Keyword.m, s));
+
+            s = params.get(Proj4Keyword.theta);
+            if (s != null)
+                oea.setTheta(parseAngleRadians(Proj4Keyword.theta, s));
+        }
+
+        /*
+         * chamb's six control ordinates are all 'r' (chamb.cpp:112-117). +lat_1 and
+         * +lat_2 are already delivered by the universal dispatch above, into
+         * projectionLatitude1/2; the other four land here. None is required and all
+         * default to 0, so a bare +proj=chamb has three coincident control points and
+         * is refused by the distinctness test rather than by a missing-parameter test.
+         */
+        if (projection instanceof ChamberlinTrimetricProjection) {
+            ChamberlinTrimetricProjection chamb = (ChamberlinTrimetricProjection) projection;
+            s = params.get(Proj4Keyword.lat_3);
+            if (s != null)
+                chamb.setLat3(parseAngleRadians(Proj4Keyword.lat_3, s));
+
+            s = params.get(Proj4Keyword.lon_1);
+            if (s != null)
+                chamb.setLon1(parseAngleRadians(Proj4Keyword.lon_1, s));
+
+            s = params.get(Proj4Keyword.lon_2);
+            if (s != null)
+                chamb.setLon2(parseAngleRadians(Proj4Keyword.lon_2, s));
+
+            s = params.get(Proj4Keyword.lon_3);
+            if (s != null)
+                chamb.setLon3(parseAngleRadians(Proj4Keyword.lon_3, s));
+        }
+
+        /*
+         * +czech is presence-only. krovak.cpp:157 reads it with pj_param's 't' sigil,
+         * so containsKey is the whole test and the value must never be parsed:
+         * +czech=0, +czech=false and a bare +czech all select the Czech axis
+         * convention. Same shape as +no_rot above.
+         *
+         * Covers mod_krovak too, because ModifiedKrovakProjection extends
+         * KrovakProjection and krovak_setup is one function shared by both names.
+         */
+        if (projection instanceof KrovakProjection) {
+            if (params.containsKey(Proj4Keyword.czech))
+                ((KrovakProjection) projection).setCzech(true);
+        }
+
+        /*
          * ob_tran is the one operator that needs the raw argument list rather than
          * values out of the map, because ob_tran_target_params builds its child's argv
          * from the ob_tran argv: it drops "proj=ob_tran" and a bare "inv", then turns
@@ -1070,9 +1308,21 @@ public class Proj4Parser {
      * <p>This scans {@link Units#LINEAR_UNITS}, which is the same array
      * {@link Units#linearUnitIds()} is built from, so the set a caller can discover
      * cannot drift from the set this accepts. {@code PipelineUnits} holds a second copy
-     * of the same 21 ids for the pipeline layer; the two were diffed and agree on every
-     * id and factor, but it is package-private to {@code pipeline} and reaching it from
-     * here would mean widening its visibility, so it is left alone.
+     * of the same 21 ids for the pipeline layer, but it is package-private to
+     * {@code pipeline} and reaching it from here would mean widening its visibility, so
+     * it is left alone.
+     *
+     * <p><b>Which of PipelineUnits' two number columns this agrees with.</b> PROJ's
+     * {@code PJ_UNITS} row carries the conversion twice — a {@code to_meter} string and a
+     * {@code factor} double ({@code 9.8.1:src/proj.h:258}) — and they are different
+     * doubles on the five U.S. survey rows. {@code +units} reads the string
+     * ({@code init.cpp:689}), which is what {@link Units#LINEAR_UNITS} transcribes and so
+     * what this method returns. It therefore agrees bit for bit with
+     * {@code PipelineUnits.LINEAR_TO_METER} on all 21 rows, and <em>not</em> with
+     * {@code PipelineUnits.LINEAR_FACTORS}, which is {@code +proj=unitconvert}'s column
+     * and sits 1 to 3 ulps away on {@code us-in}, {@code us-ft}, {@code us-yd},
+     * {@code us-ch} and {@code us-mi}. {@code PipelineUnitColumnTest} pins both halves of
+     * that, the agreement and the disagreement.
      *
      * @param name the raw {@code +units} value; may be empty, never null here
      * @return the unit, or null if {@code name} is not one of PROJ's 21 linear ids

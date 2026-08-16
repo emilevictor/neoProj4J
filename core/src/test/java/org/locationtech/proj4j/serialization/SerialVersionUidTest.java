@@ -473,8 +473,14 @@ public class SerialVersionUidTest {
 
         // Control: the great majority must serialise, or "9 broken" would be measuring a broken
         // harness rather than 9 broken projections.
-        assertEquals("the registry stopped producing projections", 151, projections.size());
-        assertEquals("projections that serialise cleanly", 142, serialisedFine);
+        // Master pinned 151/142. THREE changes landed on top of it and each re-pinned this pair from
+        // master's own figures, so none of their three numbers is right and the sum is: +2 for the two
+        // icosahedral projections, +4 for chamb / mod_krovak / oea / rouss, +4 for the cube-and-sphere
+        // batch healpix / qsc / rhealpix / s2. Only registry-produced projections are counted here,
+        // which is why the six pipeline operators added in the same release appear in none of the
+        // figures.
+        assertEquals("the registry stopped producing projections", 161, projections.size());
+        assertEquals("projections that serialise cleanly", 152, serialisedFine);
         assertEquals("the set of projections that cannot be serialised has changed", expected, actual);
     }
 

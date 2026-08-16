@@ -106,8 +106,10 @@ final class Proj4jCapabilities {
      * it survived. {@code Proj4Parser} now dispatches {@code +azi} to
      * {@code SpilhausProjection}, {@code TiltedPerspectiveProjection} and
      * {@code LabordeProjection} - every registered reader - so the two sets coincide again.
-     * {@code isea} is unported, so its {@code +proj=} name is refused long before
-     * {@code +azi} could matter.
+     * {@code isea} is registered as of this change and is the fourth: {@code Proj4Parser}
+     * dispatches {@code +azi} to {@code IcosahedralSnyderEqualAreaProjection} as well, where
+     * it is not a map rotation but the third component of the icosahedron's orientation. All
+     * four readers are now registered and all four receive the key.
      *
      * <p><b>The standing rule, which now has a precedent in both directions: never register a
      * {@code +proj=} name in {@code Registry} without checking every key its upstream operator
@@ -140,17 +142,72 @@ final class Proj4jCapabilities {
             "shape", "scrollx", "scrolly", "azi", "rot",
             // +tilt, tpers's rotation of the image plane out of the tangent plane
             // (nsper.cpp:186). tpers is registered as of this change, and +azi is now
-            // dispatched per class to all three REGISTERED readers - spilhaus, tpers and
-            // labrd - which is what made registering it safe, and which is why +azi can
-            // stay here rather than moving to CONDITIONAL. isea is still unported, so its
-            // +proj= name is refused before +azi could matter.
+            // dispatched per class to all four REGISTERED readers - spilhaus, tpers, labrd
+            // and isea - which is what made registering them safe, and which is why +azi can
+            // stay here rather than moving to CONDITIONAL.
             "tilt",
+            // The icosahedral pair's own keys, added in the same change that registered
+            // airocean and isea and dispatched all four in Proj4Parser.
+            //
+            // +orient is read by BOTH operators with DISJOINT value sets - airocean takes
+            // vertical|horizontal (airocean.cpp:829-841), isea takes isea|pole
+            // (isea.cpp:1008-1021) - and each class refuses the other's values, so it is
+            // HONOURED rather than CONDITIONAL: there is no +proj=/value combination where
+            // the key is silently dropped. Crossing the two is an error on both sides.
+            //
+            // +mode, +resolution and +aperture are isea's alone (isea.cpp:1035-1068).
+            // +resolution and +aperture are 'i' sigils and default to 4 and 3 - upstream's
+            // POST-setup defaults, not isea_grid_init's 6 and 4, which the setup overwrites
+            // unconditionally. All three feed the same test that decides whether an inverse
+            // exists at all, so dropping any of them would turn a refusal into a wrong answer.
+            "orient", "mode", "resolution", "aperture",
+            // +rot_xy, healpix's rotation of the projected plane (healpix.cpp:615-616), and
+            // +north_square/+south_square, rhealpix's two polar-square positions (:665-666).
+            // The two operators share one upstream file and one opaque struct but read
+            // DISJOINT key sets: healpix's setup writes rot_xy and never the squares,
+            // rhealpix's writes the squares and never rot_xy. HealpixProjection and
+            // RHealpixProjection are therefore siblings rather than parent and child, so
+            // Proj4Parser's instanceof dispatch cannot leak a key from one to the other -
+            // the same discipline that keeps +azi honest across spilhaus/tpers/labrd. Note
+            // +rot_xy is a 'd' sigil then PJ_TORAD, NOT the 'r' sigil, so it does not take
+            // DMS; and the squares are 'i' sigils whose [0,3] guard ProjOperatorSetup
+            // mirrors.
+            "rot_xy", "north_square", "south_square",
+            // +UVtoST, s2's cube-face-to-unit-square mapping (s2.cpp:413-428). An 's' sigil
+            // looked up in a four-entry std::map, so there is nothing numeric to compare and
+            // it belongs in neither ANGLE_KEYS nor DOUBLE_KEYS. Honoured because
+            // S2Projection.setUVtoST selects the kernel branch outright: all four names give
+            // materially different coordinates, and a fifth is refused, so there is no value
+            // of this key that proj4j accepts and then ignores. The mixed case is the key:
+            // pj_param matches the name literally, so +uvtost is a DIFFERENT parameter that
+            // s2 never reads - and one this list does not claim.
+            "UVtoST",
             // +over. Global in PROJ (init.cpp:601, "bover"): fwd_prepare skips both of its
             // adjlon calls (fwd.cpp:82-83, :109-111) and inv_finalize skips its one
             // (inv.cpp:115-116). Proj4Parser dispatches it to Projection.setOver, and both
             // of Projection's forward funnels as well as inverseProjectRadians branch on
             // it, so there is no +proj=/value combination where it is silently dropped.
             "over",
+            // +lon_wrap. Global in PROJ (init.cpp:611-623, "tlon_wrap"/"rlon_wrap") but
+            // applied in exactly ONE place, fwd_finalize's case PJ_IO_UNITS_RADIANS
+            // (fwd.cpp:162-167); inv_finalize (inv.cpp:102-130) has no lon_wrap at all. So
+            // it is honoured on the forward angular arm of Projection.projectRadians and
+            // deliberately absent from inverseProjectRadians - which is not a dropped key
+            // but upstream's own asymmetry, and reproducing it is the parity.
+            //
+            // Added to supportedParameters() FIRST and to this table SECOND, per the
+            // sequencing rule stated on +m/+q above: the dangerous split is claiming to
+            // honour a key core drops, because the bridge then calls more_builtins.gie:768
+            // executable and it returns the UNWRAPPED -1 where PROJ returns 359 - a
+            // plausible wrong number in place of an honest NOT_IMPLEMENTED. The whole gap
+            // was that shape: Proj4Keyword had no lon_wrap constant, isSupported() is a
+            // closed allow-list, and GieProjArgs.toProj4Args() drops unregistered keys
+            // before setParameters.
+            //
+            // In ANGLE_KEYS as well, because the sigil is 'r'. Upstream-side validation of
+            // the 10*2*pi-radian bound already lives in ProjDefinitionValidator:369-376 and
+            // did not need touching.
+            "lon_wrap",
             // +W and +M. +W is read by BOTH lagrng (lagrng.cpp:79-85, default 2) and hammer
             // (hammer.cpp:63-70, default .5); +M by hammer alone (:72-79, default 1).
             // Proj4Parser dispatches to both classes, which is the whole set of readers.
@@ -219,6 +276,23 @@ final class Proj4jCapabilities {
             "o_proj", "o_alpha", "o_lon_c", "o_lat_c", "o_lat_p", "o_lon_p",
             "o_lon_1", "o_lat_1", "o_lon_2", "o_lat_2",
             "m", "q",
+            // chamb's third control point, and oea's rotation. All three are 'r' sigil, so
+            // they are in ANGLE_KEYS too. +lat_1/+lat_2 arrive by the parser's universal
+            // dispatch and +lon_1/+lon_2 are already above, so these three complete the set
+            // that chamb and oea read. Registered in the same change as the two Registry
+            // entries and the two Proj4Parser branches - before the operators existed the
+            // keys were unreachable, and after them a missing key would have silently put a
+            // control point on the equator or unrotated the oval.
+            "lat_3", "lon_3", "theta",
+            // +czech, krovak's and mod_krovak's axis convention. Presence-only upstream
+            // (krovak.cpp:157, pj_param's 't' sigil), exactly like +hyperbolic above, so it
+            // belongs in neither ANGLE_KEYS nor DOUBLE_KEYS and Proj4Parser tests it with
+            // containsKey. It was NOT honoured before this change: KrovakProjection.setCzech
+            // had existed since 1.4.3 and nothing called it, because the key was absent from
+            // Proj4Keyword's allow-list. +proj=krovak +czech and +proj=krovak returned
+            // bit-identical coordinates, which differ from PROJ's by the sign of both
+            // ordinates.
+            "czech",
             // tmerc's algorithm selection. PROJ 9.8.1 ships Poder/Engsager as the built-in
             // algorithm and proj4j now matches, so these two are the documented escape back
             // to the Evenden/Snyder series - without them there is no way to ask for the
@@ -456,7 +530,16 @@ final class Proj4jCapabilities {
                             + "Cs2csOperator, not in Projection.projectRadians");
         }
         if ("vto_meter".equals(key)) {
-            Double v = ProjDefinitionValidator.projDouble(value);
+            // projRatio, NOT projDouble. +vto_meter takes the same num/den syntax as
+            // +to_meter - init.cpp:729-749 is byte-identical to the +to_meter block above
+            // it - so projDouble read "2/2" as 2.0 and this branch refused a definition
+            // whose vertical scale is exactly 1, i.e. exactly the identity case the branch
+            // exists to wave through. Latent rather than live: the corpus carries no
+            // slash-bearing +vto_meter today, so nothing moves. It is fixed here because
+            // this line is the ONLY judge of the key - vto_meter is CONDITIONAL, and
+            // Proj4jGieOperationFactory.classifyTokens `continue`s past
+            // valueGrammarFailure for a CONDITIONAL key that comes back clean.
+            Double v = ProjDefinitionValidator.projRatio(value);
             if (v != null && v.doubleValue() == 1.0) {
                 return null;
             }
@@ -534,7 +617,16 @@ final class Proj4jCapabilities {
             "o_lon_1", "o_lat_1", "o_lon_2", "o_lat_2",
             // omerc's two-point form: the latitudes were reachable via +lat_1/+lat_2 but
             // the longitudes had no keyword at all, so only half the form could be given.
-            "lon_1", "lon_2");
+            "lon_1", "lon_2",
+            // chamb builds its six control-point key names with snprintf and reads every one
+            // of them as "r" (chamb.cpp:112-117); oea reads "rtheta" (oea.cpp:74). +lat_1,
+            // +lat_2, +lon_1 and +lon_2 are already listed above.
+            "lat_3", "lon_3", "theta",
+            // +lon_wrap. "rlon_wrap" at init.cpp:613, so the value is an angle in radians
+            // and +lon_wrap=180 is pi. This is the entry that makes the 10*2*pi guard a
+            // bound of ~3600 DEGREES rather than 62.8: leaving the key out of this set and
+            // in DOUBLE_KEYS would compare PROJ's pi against a plain 180.
+            "lon_wrap");
 
     /** The keys PROJ reads with {@code pj_param} type {@code 'd'}. */
     static final Set<String> DOUBLE_KEYS = set(
@@ -546,7 +638,13 @@ final class Proj4jCapabilities {
             // lagrng's and hammer's +W and hammer's +M: presence is tested with 't' and the
             // value then read with 'd' (lagrng.cpp:79-80, hammer.cpp:63-73), so both are
             // plain doubles and NOT angles.
-            "W", "M");
+            "W", "M",
+            // healpix's +rot_xy. It ends up as an angle, but it is READ with the 'd' sigil
+            // and only then multiplied by PJ_TORAD (healpix.cpp:615-616), so dmstor never
+            // sees it and it belongs here rather than in ANGLE_KEYS. Putting it in
+            // ANGLE_KEYS would have made "+rot_xy=42r" compare as radians on our side
+            // against PROJ's plain 42.
+            "rot_xy");
 
     /**
      * Whether proj4j's value grammar can represent this value the way PROJ reads
@@ -555,10 +653,12 @@ final class Proj4jCapabilities {
      * <p>PROJ's grammar is wider in most places but <b>not strictly wider</b>, so this
      * compares the two readings rather than asking whether ours parses. Upstream is
      * wider in that {@code pj_atof} is C {@code strtod} and stops at the first invalid
-     * character rather than failing, and that {@code +to_meter} accepts a
-     * {@code num/den} ratio. Both sides read DMS with {@code '}/{@code "}, a
+     * character rather than failing. Both sides read DMS with {@code '}/{@code "}, a
      * {@code d}/{@code D}/degree-sign suffix, an {@code r}/{@code R} <em>radian</em>
-     * suffix and a trailing cardinal. But proj4j is wider on two counts, each
+     * suffix and a trailing cardinal, and <b>both</b> read {@code +to_meter}'s
+     * {@code num/den} ratio — this javadoc used to claim the ratio as an upstream-only
+     * form, which had already stopped being true when {@code Proj4Parser.parseToMeter}
+     * was written. But proj4j is wider on two counts, each
      * deliberate and each documented on {@code Angle.parse} and
      * {@code AngleFormat.isHemisphereLetter}: it takes {@code m} as a minutes marker
      * that a seconds field may follow, where {@code dmstor} stops at the {@code m} and
@@ -584,9 +684,49 @@ final class Proj4jCapabilities {
         if (value == null) {
             return null;
         }
-        if ("to_meter".equals(key) && value.indexOf('/') >= 0) {
-            return GieFailures.notImplemented(
-                    "+to_meter=" + value + ": PROJ accepts a num/den ratio, proj4j does not");
+        if ("to_meter".equals(key) || "vto_meter".equals(key)) {
+            // MUST come before the DOUBLE_KEYS arm below and MUST be judged with
+            // projRatio, not projDouble. This branch used to be a flat veto - "PROJ
+            // accepts a num/den ratio, proj4j does not" - which had been false since
+            // Proj4Parser.parseToMeter was written: core implements init.cpp:692-711 in
+            // full, ratio, zero denominator and the <= 0 rejection included. Deleting the
+            // veto alone would NOT have been enough, and that is the trap: `to_meter` was
+            // also named explicitly in the DOUBLE_KEYS condition, so "2.0/0.2" would have
+            // gone projDouble -> 2.0 against proj4jDouble -> null and emitted a DIFFERENT
+            // wrong NOT_IMPLEMENTED, on the same row, for a reason that reads plausibly.
+            // The name is out of that condition now; this arm is the only judge.
+            //
+            // Only compared when PROJ ACCEPTS the value. projRatio returns null on a zero
+            // denominator and returns the signed quotient otherwise, so both of upstream's
+            // rejections - denom == 0 (init.cpp:698) and to_meter <= 0 (:707) - fall
+            // through to `return null` here and are reported by ProjDefinitionValidator as
+            // INVALID_DEFINITION instead. That is the routing the corpus needs: the three
+            // `expect failure` rows at more_builtins.gie:516, :521 and their siblings are
+            // satisfied by an upstream-side refusal, and turning any of them into a
+            // NOT_IMPLEMENTED would demote a real pass to VACUOUS_EXPECTED_FAILURE.
+            //
+            // Measured against 9.8.1, and the last two are the ones worth pinning because
+            // they are not the obvious reading: "1/0" is error 1027 via the denominator
+            // branch; "-2/-0.2" is ACCEPTED and equals 10, because two negatives pass the
+            // `<= 0` check; "2/-0.2" is error 1027 via the `<= 0` branch and NOT via the
+            // denominator branch. Whitespace before the '/' cannot occur - pj_mkparam_ws
+            // ends the payload at the first space.
+            Double proj = ProjDefinitionValidator.projRatio(value);
+            if (proj == null || !(proj.doubleValue() > 0)) {
+                return null;
+            }
+            Double ours = proj4jToMeter(value);
+            if (ours == null) {
+                return GieFailures.notImplemented(
+                        "+" + key + "=" + value + ": PROJ reads " + proj
+                                + ", proj4j cannot parse it");
+            }
+            if (!closeEnough(proj.doubleValue(), ours.doubleValue())) {
+                return GieFailures.notImplemented(
+                        "+" + key + "=" + value + ": PROJ reads " + proj
+                                + ", proj4j reads " + ours);
+            }
+            return null;
         }
         if (ANGLE_KEYS.contains(key)) {
             Double proj = ProjDefinitionValidator.projAngleRadians(value);
@@ -606,7 +746,10 @@ final class Proj4jCapabilities {
             }
             return null;
         }
-        if (DOUBLE_KEYS.contains(key) || "to_meter".equals(key)) {
+        // NOT `|| "to_meter".equals(key)` any more: to_meter and vto_meter are judged by
+        // the projRatio arm at the top of this method, which is the only reading that can
+        // represent "2.0/0.2". Sending either name here would read the numerator alone.
+        if (DOUBLE_KEYS.contains(key)) {
             Double proj = ProjDefinitionValidator.projDouble(value);
             if (proj == null) {
                 return null;
@@ -665,6 +808,52 @@ final class Proj4jCapabilities {
         } catch (RuntimeException e) {
             return null;
         }
+    }
+
+    /**
+     * A mirror of {@code Proj4Parser.parseToMeter}, the {@code +to_meter}/{@code +vto_meter}
+     * reading — a plain double <em>or</em> a {@code num/den} ratio, which is upstream's own
+     * unit-table syntax ({@code dm} is literally the string {@code "1/10"}, and
+     * {@code init.cpp:689} feeds a {@code +units} hit's table string through this same
+     * parser, so the ratio form is not an exotic corner).
+     *
+     * <p>Both of upstream's rejections are reproduced, in upstream's order: a zero
+     * denominator first ({@code init.cpp:698}), then {@code <= 0} on the quotient
+     * ({@code :707}). The order is observable — {@code 2/-0.2} is refused by the second and
+     * not the first — but only in the message, since this method answers {@code null} for
+     * either. {@link #valueGrammarFailure} never reaches it unless PROJ accepted the value,
+     * so a {@code null} from here really is a divergence.
+     *
+     * <p>Only the wrapper is duplicated, as with {@link #proj4jDouble}: the digits go
+     * through {@code Double.parseDouble} exactly as core's {@code parseDouble} sends them.
+     *
+     * @return the linear scale, or {@code null} if proj4j would throw.
+     */
+    static Double proj4jToMeter(String s) {
+        if (s == null) {
+            return null;
+        }
+        String v = s.trim();
+        int slash = v.indexOf('/');
+        double value;
+        try {
+            if (slash >= 0) {
+                double numerator = Double.parseDouble(v.substring(0, slash).trim());
+                double denominator = Double.parseDouble(v.substring(slash + 1).trim());
+                if (denominator == 0.0) {
+                    return null;
+                }
+                value = numerator / denominator;
+            } else {
+                value = Double.parseDouble(v);
+            }
+        } catch (RuntimeException e) {
+            return null;
+        }
+        if (!(value > 0.0) || Double.isInfinite(value)) {
+            return null;
+        }
+        return Double.valueOf(value);
     }
 
     /**

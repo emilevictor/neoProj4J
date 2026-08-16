@@ -16,6 +16,9 @@
 
 package org.locationtech.proj4j.numerics.wiring;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.locationtech.proj4j.numerics.wiring.GieCase.GRS80_A;
@@ -25,10 +28,15 @@ import static org.locationtech.proj4j.numerics.wiring.GieCase.NM;
 
 import org.junit.Test;
 import org.locationtech.proj4j.CRSFactory;
+import org.locationtech.proj4j.CoordinateReferenceSystem;
 import org.locationtech.proj4j.ErrorCause;
 import org.locationtech.proj4j.InvalidValueException;
 import org.locationtech.proj4j.ProjCoordinate;
+import org.locationtech.proj4j.datum.Ellipsoid;
+import org.locationtech.proj4j.proj.LambertConformalConicProjection;
+import org.locationtech.proj4j.proj.Projection;
 import org.locationtech.proj4j.util.ConformalLat;
+import org.locationtech.proj4j.util.ProjectionMath;
 
 /**
  * {@code LambertConformalConicProjection} re-pointed at {@link ConformalLat}.
@@ -188,8 +196,8 @@ public class LambertConformalConicWiringTest {
 
     /**
      * The eight {@code expect failure errno invalid_op_illegal_arg_value} rows at
-     * {@code builtins.gie:3862}, {@code :3869}, {@code :3876}, {@code :3881}, {@code :3886},
-     * {@code :3891}, {@code :3896}, {@code :3901} and {@code :3906}.
+     * {@code builtins.gie:3862}, {@code :3876}, {@code :3881}, {@code :3886}, {@code :3891},
+     * {@code :3896}, {@code :3901} and {@code :3906}.
      *
      * <p><b>proj4j accepted every one of them</b> and went on to produce coordinates from a cone
      * constant that was infinite, NaN or exactly zero — non-negotiably wrong, because a failure must
@@ -200,12 +208,15 @@ public class LambertConformalConicWiringTest {
      * <p>{@code errno} is checked, not just the exception type: gie names
      * {@code invalid_op_illegal_arg_value}, which is
      * {@link ErrorCause#INVALID_PARAM_VALUE}.
+     *
+     * <p>The ninth row this list used to carry, {@code :3869}, has moved to
+     * {@link #theOssfuzzRowIsPlatformDependentInProjItself()}. It was passing here for a reason
+     * that had nothing to do with lcc.
      */
     @Test
     public void degenerateSetupsAreRejectedWithTheErrnoGieNames() {
         String[] rows = {
             "+proj=lcc +a=9999999 +b=.9 +lat_2=1",                    // :3862
-            "+proj=lcc +lat_1=2D32 +lat_2=0 +a=6378137 +b=0.2",       // :3869
             "+proj=lcc +ellps=GRS80 +lat_1=0 +lat_2=90",              // :3876
             "+proj=lcc +ellps=GRS80 +lat_1=90 +lat_2=0",              // :3881
             "+proj=lcc +ellps=GRS80 +lat_1=90 +lat_2=90",             // :3886
@@ -225,6 +236,188 @@ public class LambertConformalConicWiringTest {
                         e.cause() == ErrorCause.INVALID_PARAM_VALUE);
             }
         }
+    }
+
+    /**
+     * {@code builtins.gie:3869}, the ossfuzz row, which <b>PROJ itself does not agree with across
+     * platforms</b> — so it is recorded here as measured rather than asserted as parity.
+     *
+     * <pre>
+     * # This case is incredible. ossfuzz has found the exact value of lat_1 that
+     * # triggers a division by zero
+     * operation +proj=lcc +lat_1=2D32 +lat_2=0 +a=6378137 +b=0.2
+     * expect     failure
+     * # For some reason fails on MacOSX with a different error
+     * # errno invalid_op_illegal_arg_value
+     * </pre>
+     *
+     * <p>The commented-out {@code errno} is upstream telling us the row is not portable, and it is
+     * worse than that: on the installed 9.8.1 here the operation is <b>accepted outright</b>.
+     * {@code echo "0 0" | proj +proj=lcc +lat_1=2D32 +lat_2=0 +a=6378137 +b=0.2} answers
+     * {@code 0.00 0.00}, where the positive control
+     * {@code +proj=lcc +ellps=GRS80 +lat_1=0 +lat_2=90} on the same binary answers
+     * {@code Error 1027 ... lcc: Invalid value for lat_2}.
+     *
+     * <p><b>Why it cannot be made portable.</b> {@code lcc.cpp:122} rejects only when
+     * {@code log(m1/m2)} is <em>exactly</em> zero, where {@code pj_msfn} is
+     * {@code cosphi/sqrt(1 - es*sinphi*sinphi)} and {@code es} is {@code 1 - (0.2/6378137)^2}
+     * = {@code 0.999999999999999}. Because {@code es < 1} the denominator is always at least
+     * {@code cosphi}, so {@code m1 <= 1}, and whether it lands <em>on</em> 1 or one ulp below is
+     * decided by the platform's {@code sin} and {@code cos}. Measured here:
+     * {@code msfn(sin(2D32), cos(2D32), es)} is {@code 0.9999999999999999} — one ulp below — so
+     * {@code log(m1/m2)} is {@code -1.1102230246251565E-16} rather than {@code 0.0}, and the
+     * guard at {@code LambertConformalConicProjection:200} correctly does not fire. That is one
+     * ulp of {@code Math.cos}, not a defect, and chasing it would mean pinning proj4j to one
+     * libm's rounding.
+     *
+     * <p><b>This test used to pass on this row for an unrelated reason, which is the more useful
+     * finding.</b> {@code AngleFormat.indexOfDegreeMarker} did not know the uppercase {@code D},
+     * so {@code +lat_1=2D32} threw out of {@code Angle.parse} before lcc's setup ran at all. The
+     * row was therefore asserting the <em>angle parser's</em> ignorance and calling it lcc
+     * coverage — a vacuous pass of exactly the shape this suite exists to catch. Fixing the
+     * {@code D} (see {@code AngleFormatParseTest}) removed that accident and revealed both the
+     * ulp above and the {@code lat_2} defect below.
+     *
+     * <p><b>A separate, real defect this exposed, since fixed.</b> This row used to read
+     * {@code lat_2} back as {@code 0.04421500771718968} rad — equal to {@code lat_1} — because
+     * {@code LambertConformalConicProjection} tested {@code projectionLatitude2 == 0} where
+     * {@code lcc.cpp:88-95} tests presence, so an explicit {@code +lat_2=0} became the tangent case
+     * instead of the secant case upstream builds. It is now read as presence
+     * ({@link #presenceOfLatTwoAndLatZeroDecidesTheCone()}), so {@code lat_2} stays 0 and
+     * {@code secant} is true, and the {@code :122-138} block upstream relies on is entered.
+     *
+     * <p>That does not change this row's outcome, which is the point of keeping it here: with
+     * {@code lat_2} at 0, {@code m2} is {@code pj_msfn(0, 1, es)} = 1 exactly, so the guard still
+     * turns on whether {@code m1} is 1 or one ulp below, and it is one ulp below. The row is
+     * accepted before and after, exactly as on the installed 9.8.1.
+     */
+    @Test
+    public void theOssfuzzRowIsPlatformDependentInProjItself() {
+        String row = "+proj=lcc +lat_1=2D32 +lat_2=0 +a=6378137 +b=0.2 +no_defs";
+        CoordinateReferenceSystem crs = new CRSFactory().createFromParameters("gie", row);
+        Projection p = crs.getProjection();
+
+        // The angle now parses, which is the parity fix. Before it, this line threw.
+        assertEquals("2D32 is two degrees thirty-two minutes, as dmstor reads it",
+                0.04421500771718968, p.getProjectionLatitude1(), 0.0);
+
+        // The lat_2 presence fix, pinned from the other side: an explicit +lat_2=0 stays 0 and is
+        // no longer copied from lat_1. This assertion used to read the opposite, and read it as
+        // "currently indistinguishable"; it is the assertion that changes when the defect is fixed.
+        assertEquals("an explicit +lat_2=0 must stay 0", 0.0, p.getProjectionLatitude2(), 0.0);
+        assertNotEquals("and must not be copied from lat_1 (lcc.cpp:88 tests presence)",
+                p.getProjectionLatitude1(), p.getProjectionLatitude2(), 0.0);
+
+        // The ulp that decides upstream's exact-zero test, stated as a number rather than as a
+        // hope. If a future StrictMath change makes this exactly 1.0, the guard at :200 fires,
+        // this test starts failing, and the corpus row becomes reachable -- which is the signal
+        // worth having.
+        double es = p.getEllipsoid().getEccentricitySquared();
+        double m1 = ProjectionMath.msfn(Math.sin(0.04421500771718968),
+                Math.cos(0.04421500771718968), es);
+        assertEquals(0.9999999999999999, m1, 0.0);
+        assertNotEquals("one ulp below 1.0, so log(m1/m2) is not exactly zero and lcc's "
+                + "eccentricity guard does not fire -- as on the installed 9.8.1 here",
+                0.0, Math.log(m1 / 1.0), 0.0);
+
+        // The lowercase spelling is the control: it was accepted all along, so this row's old
+        // pass really was about the uppercase D and nothing else.
+        assertNotNull(new CRSFactory().createFromParameters("gie",
+                "+proj=lcc +lat_1=2d32 +lat_2=0 +a=6378137 +b=0.2 +no_defs"));
+    }
+
+    /**
+     * Which parallels are in play is decided by <b>presence</b>, not by value.
+     *
+     * <p>{@code 9.8.1:src/projections/lcc.cpp:88-95}:
+     *
+     * <pre>
+     * if (!pj_param(P-&gt;ctx, P-&gt;params, "tlat_2").i) {
+     *     phi2 = phi1;
+     *     if (!pj_param(P-&gt;ctx, P-&gt;params, "tlat_0").i)
+     *         P-&gt;phi0 = phi1;
+     * }
+     * </pre>
+     *
+     * The {@code t} prefix asks "was this token supplied at all?" and {@code .i} is a 0/1 flag, so
+     * zero is a legal value that upstream can tell apart from silence. Reading it as
+     * {@code == 0} cannot, and collapsed three distinct projections onto one.
+     *
+     * <p>Every number below is {@code proj} 9.8.1 on this machine, {@code echo "10 40" | proj -d 12
+     * <i>definition</i>}, and the interesting part is which rows differ from which:
+     *
+     * <table>
+     * <caption>PROJ 9.8.1, GRS80 unless stated, at 10E 40N</caption>
+     * <tr><th>definition</th><th>easting</th><th>northing</th></tr>
+     * <tr><td>{@code +lat_1=45 +lat_2=0}</td>
+     *     <td>825297.566331256530</td><td>4211552.547939138487</td></tr>
+     * <tr><td>{@code +lat_1=45}</td>
+     *     <td>854925.007478637854</td><td>-503282.608577708714</td></tr>
+     * <tr><td>{@code +lat_1=45 +lat_2=45}</td>
+     *     <td>854925.007478637854</td><td>4982777.080788109452</td></tr>
+     * <tr><td>{@code +lat_1=45 +lat_0=0}</td>
+     *     <td>854925.007478637854</td><td>4982777.080788109452</td></tr>
+     * <tr><td>{@code +lat_1=45 +lat_2=0 +lat_0=0}</td>
+     *     <td>825297.566331256530</td><td>4211552.547939138487</td></tr>
+     * <tr><td>{@code +R=6400000 +lat_1=45 +lat_2=0}</td>
+     *     <td>826859.712208376499</td><td>4246691.012762566097</td></tr>
+     * <tr><td>{@code +R=6400000 +lat_1=45}</td>
+     *     <td>856680.202972664731</td><td>-506270.700710539240</td></tr>
+     * </table>
+     *
+     * <p>proj4j before this change answered {@code 854925.007478637900 -503282.608577709060} — the
+     * bare {@code +lat_1=45} row — for <b>four</b> of the five ellipsoidal definitions, so the
+     * {@code +lat_2=0} error was 29.6 km of easting and 4,715 km of northing, and the
+     * {@code +lat_0=0} error was 5,486 km of northing on the same cone. The two spherical rows are
+     * here because the spherical branch computes {@code n} and {@code rho0} by a different formula
+     * and would not have been covered by the ellipsoidal rows.
+     *
+     * <p>Rows three and four are the pair that pins the {@code lat_0} half on its own: they are the
+     * same projection reached two ways, once by giving {@code lat_2} explicitly and once by giving
+     * {@code lat_0=0} explicitly, and both must leave the origin at the equator.
+     */
+    @Test
+    public void presenceOfLatTwoAndLatZeroDecidesTheCone() {
+        GieCase.grs80("+proj=lcc +ellps=GRS80 +lat_1=45 +lat_2=0")
+                .expectForward(10, 40, 825297.566331256530, 4211552.547939138487, 0.1 * MM);
+        GieCase.grs80("+proj=lcc +ellps=GRS80 +lat_1=45")
+                .expectForward(10, 40, 854925.007478637854, -503282.608577708714, 0.1 * MM);
+        GieCase.grs80("+proj=lcc +ellps=GRS80 +lat_1=45 +lat_2=45")
+                .expectForward(10, 40, 854925.007478637854, 4982777.080788109452, 0.1 * MM);
+        GieCase.grs80("+proj=lcc +ellps=GRS80 +lat_1=45 +lat_0=0")
+                .expectForward(10, 40, 854925.007478637854, 4982777.080788109452, 0.1 * MM);
+        GieCase.grs80("+proj=lcc +ellps=GRS80 +lat_1=45 +lat_2=0 +lat_0=0")
+                .expectForward(10, 40, 825297.566331256530, 4211552.547939138487, 0.1 * MM);
+
+        GieCase.sphere("+proj=lcc +R=6400000 +lat_1=45 +lat_2=0", 6400000)
+                .expectForward(10, 40, 826859.712208376499, 4246691.012762566097, 0.1 * MM);
+        GieCase.sphere("+proj=lcc +R=6400000 +lat_1=45", 6400000)
+                .expectForward(10, 40, 856680.202972664731, -506270.700710539240, 0.1 * MM);
+    }
+
+    /**
+     * The seven-argument State Plane constructor is public API and hands both latitudes in
+     * explicitly, so it must record them as given.
+     *
+     * <p>It has no caller in this repository, which is why it is asserted here rather than reached
+     * through a proj-string: it writes the fields itself, and a direct write would leave both
+     * presence flags false. A zone with {@code lat_2} on the equator, or with {@code lat_0} there,
+     * would then come out tangent at {@code lat_1} — the defect the reading was changed to fix,
+     * reintroduced through the other door.
+     *
+     * <p>The expected pair is PROJ 9.8.1's {@code +lat_1=45 +lat_2=0 +lat_0=0} row from
+     * {@link #presenceOfLatTwoAndLatZeroDecidesTheCone()}, and the control is that it is <em>not</em>
+     * the bare {@code +lat_1=45} answer.
+     */
+    @Test
+    public void theStatePlaneConstructorRecordsBothLatitudesAsGiven() {
+        LambertConformalConicProjection p = new LambertConformalConicProjection(
+                Ellipsoid.GRS80, 0.0, Math.toRadians(45), 0.0, 0.0, 0.0, 0.0);
+        ProjCoordinate out = p.project(new ProjCoordinate(10, 40), new ProjCoordinate());
+        assertEquals("a lat_2 of 0 handed to the constructor is a secant cone through the equator",
+                825297.566331256530, out.x, 0.1 * MM);
+        assertEquals(4211552.547939138487, out.y, 0.1 * MM);
+        assertNotEquals("and must not be the tangent answer", 854925.007478637854, out.x, 1.0);
     }
 
     /**
