@@ -323,8 +323,287 @@ final class OperationSelector {
                     Collections.<String>emptyList(), null, null);
         }
 
-        List<CrsOperationCandidate> candidates = enumerate(db, srcBase, tgtBase, srcDatum, tgtDatum);
-        return decide(candidates, context, srcBase, tgtBase);
+        // The CRS the caller named, not its geodetic base. For EPSG:32633 those are a UTM zone's
+        // 6-degree band and the whole world respectively, and the band is the answer: upstream takes
+        // the extent from CRS::getResolvedCRS on the CRS it was handed
+        // (9.8.1:src/iso19111/operation/coordinateoperationfactory.cpp:7724-7729), and its
+        // getExtent(CRS) falls back to a base CRS only for a BoundCRS, never for a projected one
+        // (9.8.1:src/iso19111/operation/oputils.cpp:485-495).
+        AreaOfUse srcExtent = crsExtent(db, srcRef);
+        AreaOfUse tgtExtent = crsExtent(db, tgtRef);
+
+        List<CrsOperationCandidate> all = enumerate(db, srcBase, tgtBase, srcDatum, tgtDatum,
+                srcExtent, tgtExtent);
+
+        AreaOfUse areaOfInterest = computeAreaOfInterest(context, srcExtent, tgtExtent);
+        List<CrsOperationCandidate> kept = filterOut(all, context, areaOfInterest, srcExtent,
+                tgtExtent);
+        if (kept.isEmpty() && !all.isEmpty()) {
+            // Reachable only when the spatial filter removed everything, including the ballpark,
+            // and neither rescue trigger fired. Reported as its own sentence rather than through
+            // decide()'s "deprecated or superseded" ending, which would be false here.
+            return failure(rank(all), new ArrayList<String>(), ErrorCause.NO_OPERATION_AVAILABLE,
+                    "refusing to build " + srcBase.authorityCode() + " -> "
+                            + tgtBase.authorityCode() + ": none of the "
+                            + all.size() + " operations the authority publishes covers the area "
+                            + "of interest under SpatialCriterion." + context.spatialCriterion()
+                            + ".\nArea of interest: "
+                            + (areaOfInterest == null ? "none" : areaOfInterest.toString())
+                            + "\n" + areaOfInterestProvenance(context)
+                            + "\nEither supply a narrower ProjContext.Builder.areaOfInterest(), or "
+                            + "set SourceTargetCRSExtentUse.NONE to switch the spatial filter off "
+                            + "entirely.\n" + list(rank(all)));
+        }
+        return decide(rank(kept), context, srcBase, tgtBase);
+    }
+
+    /** Where the area of interest came from, for a refusal message that a reader can act on. */
+    private static String areaOfInterestProvenance(ProjContext context) {
+        if (context.areaOfInterest().isPresent()) {
+            return "It was supplied by the caller, through ProjContext.Builder.areaOfInterest().";
+        }
+        return "Nobody supplied it: it was synthesised from the two CRSs' own declared extents "
+                + "under SourceTargetCRSExtentUse." + context.sourceTargetCrsExtentUse()
+                + ", which is what PROJ does.";
+    }
+
+    /**
+     * A CRS's own declared extent, or null.
+     *
+     * <p>PROJ's {@code getExtent(const crs::CRSNNPtr &)},
+     * {@code 9.8.1:src/iso19111/operation/oputils.cpp:485-495}, which takes {@code domains[0]}
+     * &mdash; the first usage row in whatever order the database hands them over. This takes the
+     * smallest by {@link CrsOperationCandidate#smallestExtent}, for the reasons recorded there.
+     *
+     * <p>Called with the CRS the caller named. A projected CRS that declares no usage row therefore
+     * has no extent, rather than inheriting its base geographic CRS's: upstream's fallback to a base
+     * CRS applies to a {@code BoundCRS} only. The one synthesis upstream does perform is for a
+     * compound CRS, whose extent is the intersection of its components' &mdash; not reproduced here,
+     * because this library resolves a compound CRS to its horizontal component before it gets this
+     * far.
+     * <b>Measured, not assumed:</b> in the 9.8.1 database every one of the nine {@code EPSG:4267} to
+     * {@code EPSG:4269} operations, and both CRSs themselves, declare exactly one usage row, so the
+     * two rules pick the same extent on the pair this library's regression tests turn on.
+     */
+    private static AreaOfUse crsExtent(ProjDatabase db, DbObjectRef crs) {
+        return AreaOfUse.fromDbExtent(CrsOperationCandidate.smallestExtent(db.extentsFor(crs)));
+    }
+
+    /** Sorts by {@link CrsOperationCandidate#compareTo} and stamps {@link CrsOperationCandidate#rank()}. */
+    private static List<CrsOperationCandidate> rank(List<CrsOperationCandidate> out) {
+        List<CrsOperationCandidate> sorted = new ArrayList<CrsOperationCandidate>(out);
+        Collections.sort(sorted);
+        List<CrsOperationCandidate> ranked = new ArrayList<CrsOperationCandidate>(sorted.size());
+        for (int i = 0; i < sorted.size(); i++) {
+            ranked.add(sorted.get(i).withRank(i));
+        }
+        return ranked;
+    }
+
+    // ------------------------------------------------------------------ spatial filter
+
+    /**
+     * PROJ's {@code FilterResults::computeAreaOfInterest},
+     * {@code 9.8.1:src/iso19111/operation/coordinateoperationfactory.cpp:1239-1266}.
+     *
+     * <p>The part worth stating out loud: when the caller supplies nothing, this <em>still</em>
+     * produces an area, out of the CRSs' own metadata, and the filter below then runs against it.
+     * A default of "no filter" would put this library's candidate list somewhere PROJ's never goes.
+     *
+     * <p>Package-private rather than private so {@code SpatialFilterTest} can drive it directly. It
+     * is a pure function of its arguments and the four {@link SourceTargetCRSExtentUse} branches are
+     * not all reachable from the shipped database, so testing it through {@link #select} alone would
+     * leave two of them unexercised.
+     *
+     * @return the area of interest, or null when there is genuinely nothing to filter against
+     */
+    static AreaOfUse computeAreaOfInterest(ProjContext context, AreaOfUse extent1,
+                                           AreaOfUse extent2) {
+        if (context.areaOfInterest().isPresent()) {
+            return context.areaOfInterest().get();
+        }
+        switch (context.sourceTargetCrsExtentUse()) {
+            case INTERSECTION:
+                // Upstream computes this only when BOTH extents exist; with one it deliberately
+                // leaves the area null rather than falling back to the one it has.
+                return extent1 != null && extent2 != null
+                        ? Extents.intersection(extent1, extent2) : null;
+            case SMALLEST:
+                return Extents.smaller(extent1, extent2);
+            case NONE:
+            case BOTH:
+            default:
+                // Both leave the area null. NONE means no spatial test at all; BOTH means the test
+                // is against the two extents separately, which filterOut does in its own branch.
+                return null;
+        }
+    }
+
+    /**
+     * PROJ's {@code FilterResults::filterOut},
+     * {@code 9.8.1:src/iso19111/operation/coordinateoperationfactory.cpp:1271-1416}, including the
+     * rescue clause at the end.
+     *
+     * <h4>Two deliberate departures, both narrower than upstream's</h4>
+     *
+     * <p><b>The desired-accuracy leg is absent</b>, because this library has no desired-accuracy
+     * setting to drive it. Upstream's default is {@code 0}, which disables that leg, so the ported
+     * code and upstream's agree on every input this library can produce. If a
+     * {@code desiredAccuracy} is ever added it belongs in both loops below, the rescue included.
+     *
+     * <p><b>The ballpark leg is absent too</b>, and this one is a real difference of shape rather
+     * than of reachability. Upstream drops ballpark operations here when
+     * {@code allowBallparkTransformations} is false; this library keeps the ballpark candidate in
+     * the list and refuses it later, in {@link #decide}, so that a refusal can name it and say what
+     * it would have cost. The observable difference is the refusal message, never the selected
+     * operation. The {@code hasOnlyBallpark} and {@code hasNonBallparkWithoutExtent} flags below are
+     * still computed exactly as upstream computes them, because they drive the rescue.
+     *
+     * <h4>The rescue has two triggers, not one</h4>
+     *
+     * <p>{@code (res.empty() && !hasNonBallparkOpWithExtent) || (hasOnlyBallpark &&
+     * hasNonBallparkWithoutExtent)}. The first is "nothing survived and nothing that could have
+     * survived declared an extent"; the second is "the only survivors are ballpark, and a real
+     * operation was thrown out for declaring no extent". Reading it as one condition &mdash; "the
+     * result is empty" &mdash; loses every case of the second kind, where the result is not empty at
+     * all. And note that the re-run <b>still applies the accuracy and ballpark filters</b>: only the
+     * spatial test is dropped. It is not "give up and return everything".
+     *
+     * <p>Upstream appends to {@code res} rather than clearing it, so trigger 2 can produce
+     * duplicates, which {@code andSort}'s {@code removeDuplicateOps} then removes. This dedupes as
+     * it appends instead: same output, and no window in which the list is wrong.
+     *
+     * <h4>One upstream flag is deliberately not computed</h4>
+     *
+     * <p>Upstream also sets {@code hasOpThatContainsAreaOfInterestAndNoGrid} in both loops
+     * ({@code :1331} and {@code :1368}) and uses it in {@code removeSyntheticNullTransforms}
+     * ({@code :1565}) to drop a trailing ballpark once some real grid-free operation covers the
+     * area. This library keeps the ballpark and refuses it in {@link #decide} instead, so there is
+     * nothing for the flag to drive. It is worth knowing that the flag would be <b>false</b> for the
+     * pair this library turns on in any case: it additionally requires
+     * {@code op->gridsNeeded(nullptr, true).empty()}, and every published {@code EPSG:4267} to
+     * {@code EPSG:4269} operation needs a grid, so upstream keeps its ballpark there too.
+     *
+     * <p>Package-private for {@code SpatialFilterTest}. The two rescue triggers in particular cannot
+     * both be reached through {@link #select} against any database this library ships, and a rescue
+     * that never fires is the failure mode this whole method exists to avoid.
+     */
+    static List<CrsOperationCandidate> filterOut(List<CrsOperationCandidate> sourceList,
+                                                 ProjContext context,
+                                                 AreaOfUse areaOfInterest,
+                                                 AreaOfUse extent1, AreaOfUse extent2) {
+        final SpatialCriterion spatialCriterion = context.spatialCriterion();
+        final SourceTargetCRSExtentUse crsExtentUse = context.sourceTargetCrsExtentUse();
+        final boolean areaOfInterestUserSpecified = context.areaOfInterest().isPresent();
+
+        boolean hasOnlyBallpark = true;
+        boolean hasNonBallparkWithoutExtent = false;
+        boolean hasNonBallparkOpWithExtent = false;
+
+        // Upstream's "same description" shortcut: if the caller named their area of interest and
+        // some operation declares an extent with exactly that name, then only operations with that
+        // name survive. It keys off the description being present, which is why an intersection
+        // this library computed carries none.
+        boolean foundExtentWithExpectedDescription = false;
+        if (areaOfInterestUserSpecified && areaOfInterest != null
+                && areaOfInterest.description() != null) {
+            for (int i = 0; i < sourceList.size(); i++) {
+                AreaOfUse extent = sourceList.get(i).areaOfUse().orElse(null);
+                if (extent != null && extent.description() != null
+                        && areaOfInterest.description().equals(extent.description())) {
+                    foundExtentWithExpectedDescription = true;
+                    break;
+                }
+            }
+        }
+
+        List<CrsOperationCandidate> res = new ArrayList<CrsOperationCandidate>(sourceList.size());
+        for (int i = 0; i < sourceList.size(); i++) {
+            CrsOperationCandidate op = sourceList.get(i);
+            final boolean ballpark = isBallparkOperation(op);
+            if (areaOfInterest != null) {
+                AreaOfUse extent = op.areaOfUse().orElse(null);
+                if (extent == null) {
+                    if (!ballpark) {
+                        hasNonBallparkWithoutExtent = true;
+                    }
+                    continue;
+                }
+                if (foundExtentWithExpectedDescription
+                        && (extent.description() == null
+                                || !areaOfInterest.description().equals(extent.description()))) {
+                    continue;
+                }
+                if (!ballpark) {
+                    hasNonBallparkOpWithExtent = true;
+                }
+                boolean extentContains = Extents.contains(extent, areaOfInterest);
+                if (spatialCriterion == SpatialCriterion.STRICT_CONTAINMENT && !extentContains) {
+                    continue;
+                }
+                if (spatialCriterion == SpatialCriterion.PARTIAL_INTERSECTION
+                        && !Extents.intersects(extent, areaOfInterest)) {
+                    continue;
+                }
+            } else if (crsExtentUse == SourceTargetCRSExtentUse.BOTH) {
+                AreaOfUse extent = op.areaOfUse().orElse(null);
+                if (extent == null) {
+                    if (!ballpark) {
+                        hasNonBallparkWithoutExtent = true;
+                    }
+                    continue;
+                }
+                if (!ballpark) {
+                    hasNonBallparkOpWithExtent = true;
+                }
+                boolean containsExtent1 = extent1 == null || Extents.contains(extent, extent1);
+                boolean containsExtent2 = extent2 == null || Extents.contains(extent, extent2);
+                if (spatialCriterion == SpatialCriterion.STRICT_CONTAINMENT) {
+                    if (!containsExtent1 || !containsExtent2) {
+                        continue;
+                    }
+                } else if (spatialCriterion == SpatialCriterion.PARTIAL_INTERSECTION) {
+                    // Note the asymmetry, which is upstream's and is kept: a null extent1 counts as
+                    // intersecting, a null extent2 counts as NOT intersecting. It reads like a typo
+                    // and may well be one, but it is 9.8.1's behaviour and this library's job is to
+                    // agree with 9.8.1. It is reachable only under BOTH with no area of interest and
+                    // a target CRS that declares no extent.
+                    boolean intersects1 = extent1 == null || Extents.intersects(extent, extent1);
+                    boolean intersects2 = extent2 != null && Extents.intersects(extent, extent2);
+                    if (!intersects1 || !intersects2) {
+                        continue;
+                    }
+                }
+            }
+            if (!ballpark) {
+                hasOnlyBallpark = false;
+            }
+            res.add(op);
+        }
+
+        if ((res.isEmpty() && !hasNonBallparkOpWithExtent)
+                || (hasOnlyBallpark && hasNonBallparkWithoutExtent)) {
+            for (int i = 0; i < sourceList.size(); i++) {
+                CrsOperationCandidate op = sourceList.get(i);
+                if (!res.contains(op)) {
+                    res.add(op);
+                }
+            }
+        }
+        return res;
+    }
+
+    /**
+     * Whether a candidate is one of PROJ's ballpark operations, i.e. whether
+     * {@code op->hasBallparkTransformation()} would be true of it.
+     *
+     * <p>Both the synthesised candidate and an authority row whose own name marks it ballpark count,
+     * which is what upstream's flag means. Deliberately not "was rejected as ballpark": a candidate
+     * can carry a different rejection and still be ballpark, and it is the ballpark-ness the rescue
+     * triggers are asking about.
+     */
+    private static boolean isBallparkOperation(CrsOperationCandidate op) {
+        return op.isSynthesisedBallpark() || isBallparkByName(op.name());
     }
 
     private static String describe(DbObjectRef datum) {
@@ -334,7 +613,9 @@ final class OperationSelector {
     // ------------------------------------------------------------------ enumeration
 
     /**
-     * Every candidate, ranked, with {@link CrsOperationCandidate#rank()} assigned.
+     * Every candidate, unsorted and unranked: the spatial filter runs before the sort, as upstream's
+     * {@code FilterResults} does, so ranks are stamped by {@link #rank} on what survives and there
+     * are no holes in the numbering.
      *
      * <p>Both directions, from two calls to
      * {@link ProjDatabase#operationsBetween(String, String, String, String)} with the arguments
@@ -343,11 +624,17 @@ final class OperationSelector {
      */
     private static List<CrsOperationCandidate> enumerate(ProjDatabase db, DbObjectRef srcBase,
                                                          DbObjectRef tgtBase, DbObjectRef srcDatum,
-                                                         DbObjectRef tgtDatum) {
+                                                         DbObjectRef tgtDatum, AreaOfUse srcExtent,
+                                                         AreaOfUse tgtExtent) {
         List<DbOperation> forward = db.operationsBetween(srcBase.authName(), srcBase.code(),
                 tgtBase.authName(), tgtBase.code());
         List<DbOperation> reverse = db.operationsBetween(tgtBase.authName(), tgtBase.code(),
                 srcBase.authName(), srcBase.code());
+
+        List<String> winning = winningAuthorities(db, srcBase.authName(), tgtBase.authName(),
+                forward, reverse);
+        forward = retainAuthorities(forward, winning);
+        reverse = retainAuthorities(reverse, winning);
 
         List<DbObjectRef> present = new ArrayList<DbObjectRef>(forward.size() + reverse.size());
         for (int i = 0; i < forward.size(); i++) {
@@ -365,14 +652,101 @@ final class OperationSelector {
         for (int i = 0; i < reverse.size(); i++) {
             out.add(build(db, reverse.get(i), true, present));
         }
-        out.add(ballpark(srcBase, tgtBase, srcDatum, tgtDatum));
+        out.add(ballpark(srcBase, tgtBase, srcDatum, tgtDatum, srcExtent, tgtExtent));
+        return out;
+    }
 
-        Collections.sort(out);
-        List<CrsOperationCandidate> ranked = new ArrayList<CrsOperationCandidate>(out.size());
-        for (int i = 0; i < out.size(); i++) {
-            ranked.add(out.get(i).withRank(i));
+    /** PROJ's wildcard in {@code authority_to_authority_preference}, in both key and value columns. */
+    private static final String ANY_AUTHORITY = "any";
+
+    /**
+     * PROJ's own namespace, which is the one exception to "stop at the first authority that answers".
+     * Its rows accumulate into the next authority's attempt instead of ending the search.
+     */
+    private static final String PROJ_AUTHORITY = "PROJ";
+
+    /**
+     * Which authorities may supply an operation for this pair &mdash; the reason
+     * {@code EPSG:4277 -> EPSG:4326} offers ten candidates and not twelve, the two it drops being
+     * the ESRI pair named below.
+     *
+     * <p>Quote the ten, never a comparison with {@code projinfo}'s count on its own.
+     * {@code projinfo -s EPSG:4277 -t EPSG:4326 --spatial-test intersects} at 9.8.1 lists
+     * <em>nine</em>, and the one-row difference is not a defect on either side: this library also
+     * reports {@code EPSG:5339} as a {@code SUPERSEDED} candidate where PROJ omits it, which is
+     * deliberate. The figure that is asserted, and therefore the figure to trust, is in
+     * {@code PjdxAuthorityPreferenceTest.osgb36ToWgs84DropsTheTwoEsriOperationsProjExcludes}.
+     *
+     * <p>The authority database publishes a preference order per pair of authorities
+     * ({@link ProjDatabase#allowedAuthorities}); for {@code (EPSG, EPSG)} it reads
+     * {@code PROJ,EPSG,NKG}. PROJ tries each in turn and <b>stops at the first one that answered</b>,
+     * so ESRI's {@code OSGB_1936_To_WGS_1984_8_BAD_DX} and {@code ..._NGA_7PAR} are never reached.
+     * Neither is deprecated and both are executable, so nothing else in this class would exclude them:
+     * without this step they outrank published EPSG operations on accuracy and one of them can be
+     * <em>selected</em>. Ported from {@code 9.8.1:src/iso19111/operation/coordinateoperationfactory.cpp}
+     * {@code getCandidateAuthorities} and {@code findOpsInRegistryDirect}.
+     *
+     * <p>Two details are PROJ's and are easy to get wrong. {@code PROJ} does not end the search, and
+     * an {@code "any"} entry admits every authority at once &mdash; it is how the
+     * {@code (any, EPSG)} row ends in a catch-all rather than a closed list.
+     *
+     * <p>"Answered" is judged on non-deprecated rows only, because PROJ's query filters
+     * {@code cov.deprecated = 0} and a deprecated row therefore cannot make an authority look
+     * productive. Deprecated rows of a <em>winning</em> authority are still returned: this class
+     * reports them as {@link CrsOperationCandidate.Rejection#DEPRECATED} candidates rather than hiding
+     * them, and that is deliberate.
+     *
+     * @return the authorities to keep, or null to keep every one &mdash; which is what an empty
+     *         preference list means, and what a database that predates the table returns
+     */
+    private static List<String> winningAuthorities(ProjDatabase db, String srcAuth, String tgtAuth,
+                                                   List<DbOperation> forward,
+                                                   List<DbOperation> reverse) {
+        List<String> order = db.allowedAuthorities(srcAuth, tgtAuth);
+        if (order.isEmpty()) {
+            return null;
         }
-        return ranked;
+        List<String> winning = new ArrayList<String>(order.size());
+        for (int i = 0; i < order.size(); i++) {
+            String authority = order.get(i);
+            if (ANY_AUTHORITY.equals(authority)) {
+                return null;
+            }
+            winning.add(authority);
+            if (PROJ_AUTHORITY.equals(authority)) {
+                continue;
+            }
+            if (answers(forward, winning) || answers(reverse, winning)) {
+                return winning;
+            }
+        }
+        return winning;
+    }
+
+    /** Whether any non-deprecated row belongs to one of the authorities accumulated so far. */
+    private static boolean answers(List<DbOperation> ops, List<String> authorities) {
+        for (int i = 0; i < ops.size(); i++) {
+            DbOperation op = ops.get(i);
+            if (!op.deprecated() && authorities.contains(op.authName())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The rows of the winning authorities, in the order the database returned them. */
+    private static List<DbOperation> retainAuthorities(List<DbOperation> ops,
+                                                       List<String> authorities) {
+        if (authorities == null) {
+            return ops;
+        }
+        List<DbOperation> kept = new ArrayList<DbOperation>(ops.size());
+        for (int i = 0; i < ops.size(); i++) {
+            if (authorities.contains(ops.get(i).authName())) {
+                kept.add(ops.get(i));
+            }
+        }
+        return kept;
     }
 
     /**
@@ -382,21 +756,59 @@ final class OperationSelector {
      * matches {@code projinfo}'s.
      */
     private static CrsOperationCandidate ballpark(DbObjectRef srcBase, DbObjectRef tgtBase,
-                                                  DbObjectRef srcDatum, DbObjectRef tgtDatum) {
+                                                  DbObjectRef srcDatum, DbObjectRef tgtDatum,
+                                                  AreaOfUse srcExtent, AreaOfUse tgtExtent) {
         String name = "Ballpark geographic offset from " + describe(srcDatum) + " to "
                 + describe(tgtDatum);
         DbOperation synthetic = new DbOperation(DbObjectType.OTHER_TRANSFORMATION, "PROJ",
                 "BALLPARK_" + srcBase.code() + "_TO_" + tgtBase.code(), name, "PROJ", "PROJString",
                 "+proj=noop", srcBase, tgtBase, Double.NaN, null, null, null, null, null, false);
         return new CrsOperationCandidate(synthetic, false, true, null,
-                new ArrayList<GridInfo>(0), null, CrsOperationCandidate.Rejection.BALLPARK,
+                new ArrayList<GridInfo>(0), ballparkExtent(srcExtent, tgtExtent),
+                CrsOperationCandidate.Rejection.BALLPARK,
                 "a ballpark offset applies no datum shift at all. The coordinate it produces is out "
                         + "by the size of the shift -- tens to hundreds of metres -- and is finite, "
                         + "in the right units and in the right part of the world, so nothing "
-                        + "downstream can detect it. PROJ synthesises the same operation and assigns "
-                        + "it no accuracy, which is the authority saying this is a guess.",
+                        + "downstream can detect it. PROJ has the same fallback and likewise leaves "
+                        + "its accuracy unset, which is the authority saying this is a guess. That "
+                        + "does not mean PROJ would fall back here: it may well have found a real "
+                        + "operation for this pair where this library found none.",
                 "synthesised, not published: the shipped database contains no ballpark row at all",
                 0);
+    }
+
+    /** The whole world, {@code metadata::Extent::WORLD}. */
+    private static final AreaOfUse WORLD =
+            new AreaOfUse(-180.0, -90.0, 180.0, 90.0, "World", false);
+
+    /**
+     * The extent the synthesised ballpark declares:
+     * {@code sameExtent ? sourceCRSExtent : Extent::WORLD}, from
+     * {@code createBallparkGeographicOffset},
+     * {@code 9.8.1:src/iso19111/operation/coordinateoperationfactory.cpp:2270-2281}.
+     *
+     * <p><b>This is load-bearing and it is easy to get wrong by omission.</b> Until 2.2.0 the
+     * ballpark carried no extent at all, which was harmless while nothing filtered on extents; the
+     * moment the spatial filter arrives, an extent-less operation is <em>dropped</em> by it. That
+     * would remove the ballpark from every candidate list and change {@code EPSG:4267} to
+     * {@code EPSG:4269} from "one candidate, the ballpark" &mdash; which is exactly what
+     * {@code projinfo --summary} reports &mdash; to "no candidates at all".
+     *
+     * <p>"Same extent" is {@link AreaOfUse#equals}, which compares the description as well as the
+     * four bounds. That is upstream's rule, not a convenience: {@code Extent::_isEquivalentTo},
+     * {@code 9.8.1:src/iso19111/metadata.cpp:794-826}, compares {@code description()} first and only
+     * then the geographic elements. Two extents with identical bounds and different names are not
+     * the same extent to PROJ and are not the same extent here.
+     *
+     * <p>Measured against the 9.8.1 database: {@code EPSG:4267}'s extent is {@code EPSG:1349} and
+     * {@code EPSG:4269}'s is {@code EPSG:1350}, which differ, so that pair's ballpark gets
+     * {@code WORLD}. A world extent contains any area of interest of non-zero width, by
+     * {@link Extents#contains}'s first special case, so the ballpark survives even
+     * {@link SpatialCriterion#STRICT_CONTAINMENT}. That is why upstream's count is one and not zero.
+     */
+    private static AreaOfUse ballparkExtent(AreaOfUse srcExtent, AreaOfUse tgtExtent) {
+        boolean sameExtent = srcExtent != null && tgtExtent != null && srcExtent.equals(tgtExtent);
+        return sameExtent ? srcExtent : WORLD;
     }
 
     /** Turns one authority row into a candidate: accuracy, grids, extent, and why it can or cannot run. */
@@ -624,8 +1036,19 @@ final class OperationSelector {
             return " (the unified NADCON 5 / general-shift operator; only +proj=hgridshift is "
                     + "implemented)";
         }
-        if ("xyzgridshift".equals(operator) || "geocentricoffset".equals(operator)) {
-            return " (a geocentric shift by grid; not implemented)";
+        if ("xyzgridshift".equals(operator)) {
+            // The reason changed in 2.2.0 and the note is corrected rather than dropped: the
+            // operator itself is implemented (XyzGridShiftOperator), so "not implemented" was
+            // false. What is missing is a height: xyzgridshift works in geocentric cartesian
+            // metres, so reaching it from a two-dimensional Crs would mean inventing an
+            // ellipsoidal height, and the dX,dY,dZ it then applies would be wrong in all three
+            // ordinates by an amount that still looks like a plausible datum shift.
+            return " (a geocentric shift by grid. The operator exists in the pipeline engine but "
+                    + "needs geocentric input, and a Crs here is two-dimensional by construction, "
+                    + "so there is no height to convert with)";
+        }
+        if ("geocentricoffset".equals(operator)) {
+            return " (a geocentric shift; not implemented)";
         }
         if ("vgridshift".equals(operator) || "geoid_like".equals(operator)) {
             return " (a vertical shift. Proj4J does have a vertical grid operator, but a Crs here is "
@@ -672,6 +1095,22 @@ final class OperationSelector {
                                     DbObjectRef srcBase, DbObjectRef tgtBase) {
         List<String> warnings = new ArrayList<String>();
 
+        // Two different questions are being answered here and they need two different orders.
+        //
+        //   "which operation should this call return?"  -- answered by RANK, because rank is the
+        //       list PROJ publishes and a caller reading candidates() must see the same first entry
+        //       projinfo does.
+        //   "was a better one available?"               -- answered by ACCURACY, because rank puts
+        //       every usable candidate above every unusable one, so a rank-ordered scan of the
+        //       rejected candidates cannot answer an accuracy question at all.
+        //
+        // Both rejected slots below are therefore filled by accuracy, not by rank. Every message
+        // that consumes them calls them "best", and until 2.2.0 they were filled by rank while
+        // being described as best -- invisible only because the comparator happened to be
+        // accuracy-ordered. `EPSG:4267 -> EPSG:4269` with no reachable grid is the case that shows
+        // it: by rank the best missing-grid candidate is EPSG:1313 (1.5 m, Canada), by accuracy it
+        // is EPSG:1241 (0.15 m, CONUS), and it is the second that a reader is being told to go and
+        // install.
         CrsOperationCandidate usable = null;
         CrsOperationCandidate bestRejectedForGrid = null;
         CrsOperationCandidate bestRejectedForMethod = null;
@@ -686,12 +1125,13 @@ final class OperationSelector {
                     }
                     break;
                 case MISSING_GRID:
-                    if (bestRejectedForGrid == null) {
+                    if (bestRejectedForGrid == null || c.isBetterAccuracyThan(bestRejectedForGrid)) {
                         bestRejectedForGrid = c;
                     }
                     break;
                 case UNSUPPORTED_METHOD:
-                    if (bestRejectedForMethod == null) {
+                    if (bestRejectedForMethod == null
+                            || c.isBetterAccuracyThan(bestRejectedForMethod)) {
                         bestRejectedForMethod = c;
                     }
                     break;
@@ -727,8 +1167,20 @@ final class OperationSelector {
             if (better != null) {
                 if (usable.isDegradedRelativeTo(better)
                         && context.bestOperationPolicy() == BestOperationPolicy.REQUIRE_BEST) {
-                    return failure(candidates, warnings, ErrorCause.BEST_OPERATION_UNAVAILABLE,
-                            degradedMessage(usable, better, srcBase, tgtBase, context));
+                    // REQUIRE_BEST does not promise the first operation on the list. It promises not
+                    // to hand back a degraded one. So before refusing, look for a usable candidate
+                    // further down that is not a degradation -- refusing while holding one would be
+                    // incoherent under the name. See highestRankedUndegraded for what "further down"
+                    // means and for the reading that was NOT taken.
+                    CrsOperationCandidate undegraded = highestRankedUndegraded(candidates, better);
+                    if (undegraded == null) {
+                        return failure(candidates, warnings, ErrorCause.BEST_OPERATION_UNAVAILABLE,
+                                degradedMessage(usable, better, srcBase, tgtBase, context));
+                    }
+                    // Not a silent divergence: the caller asked for one operation and got one that
+                    // is not the head of the list it can also read, so the reason is recorded.
+                    warnings.add(undegradedInsteadOfRankZeroNote(usable, undegraded, better));
+                    usable = undegraded;
                 }
                 warnings.add(betterButUnavailableNote(usable, better, context));
             }
@@ -810,6 +1262,83 @@ final class OperationSelector {
             }
         }
         return best;
+    }
+
+    /**
+     * The <b>highest-ranked</b> usable candidate that is not a degradation relative to
+     * {@code better}, or null if every usable candidate is a degradation.
+     *
+     * <p>This is what {@link BestOperationPolicy#REQUIRE_BEST} selects when the head of the list is
+     * itself a degradation. Refusing at that point while a usable, non-degraded candidate sits further
+     * down would be incoherent under the name of the policy, and it is what this library did until
+     * 2.2.0 &mdash; harmlessly, because the comparator was accuracy-ordered and so the head of the list
+     * was also the most accurate usable operation. Once the comparator was brought to parity with
+     * PROJ's {@code SortFunction::compare}, where area outranks accuracy magnitude, the two came apart
+     * and {@code EPSG:4267 -> EPSG:4269} began refusing under the default policy while
+     * {@code EPSG:1241} at 0.15&nbsp;m sat usable one row down.
+     *
+     * <h4>The reading that was not taken</h4>
+     *
+     * <p>The alternative is to ask the degradation question symmetrically on both sides: take the
+     * <em>most accurate</em> usable candidate rather than the highest-ranked non-degraded one. The two
+     * always agree on <em>whether</em> to refuse &mdash; if any usable candidate is not degraded then
+     * the most accurate usable one is not degraded either &mdash; so they differ only in which
+     * operation is handed back when several qualify.
+     *
+     * <p>Rank was kept as the primary because it is the only side of the choice that has an upstream
+     * answer to be faithful to. A worked example, on the shipped database: for
+     * {@code EPSG:4267 -> EPSG:4269} both readings select {@code EPSG:1241}, because only the
+     * 0.15&nbsp;m operation clears {@code EPSG:8555}'s 0.15&nbsp;m bar. They come apart on a pair whose
+     * best rejected candidate is coarse or absent &mdash; say a usable 2.0&nbsp;m operation at rank 0,
+     * a usable 0.15&nbsp;m one at rank 3, and a rejected 5.0&nbsp;m one. Neither usable candidate is
+     * degraded, so this method returns the rank-0 2.0&nbsp;m operation and {@code projinfo}'s first
+     * line is also this library's answer; the symmetric reading would return the 0.15&nbsp;m one and
+     * diverge from {@code projinfo} on a pair that is not failing and has no accuracy complaint
+     * against it. Confining the change to the refusal path is what makes it strictly less refusing and
+     * never differently wrong.
+     *
+     * <p>PROJ has no policy to copy here. {@code pj_get_suggested_operation}
+     * ({@code 9.8.1:src/trans.cpp}) selects per coordinate and picks the <em>best accuracy</em> among
+     * the operations whose area of use contains the point, using list order only as a tie-break &mdash;
+     * so upstream has neither "select rank 0 and refuse" nor a pair-level answer at all. When Stream D
+     * step 3 ports that function this method stops being the selection rule and the question here
+     * becomes moot; until then this library returns one operation per pair and the two readings are
+     * genuinely different promises rather than two spellings of one. A future reader who wants the
+     * symmetric reading should overturn this deliberately, and the sentence to disagree with is the
+     * one about {@code projinfo} parity above.
+     *
+     * @param candidates the ranked list
+     * @param better     the most accurate rejected candidate, never null here
+     * @return the selection, or null if there is no non-degraded usable candidate
+     */
+    private static CrsOperationCandidate highestRankedUndegraded(
+            List<CrsOperationCandidate> candidates, CrsOperationCandidate better) {
+        for (int i = 0; i < candidates.size(); i++) {
+            CrsOperationCandidate c = candidates.get(i);
+            if (c.rejection() == CrsOperationCandidate.Rejection.NONE
+                    && !c.isDegradedRelativeTo(better)) {
+                return c;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Accounts for returning something other than the first usable operation on the list, so that the
+     * difference is readable rather than inferred.
+     */
+    private static String undegradedInsteadOfRankZeroNote(CrsOperationCandidate rankZero,
+                                                          CrsOperationCandidate selected,
+                                                          CrsOperationCandidate better) {
+        return "BestOperationPolicy.REQUIRE_BEST passed over the highest-ranked usable candidate, "
+                + rankZero.authorityCode() + ", " + rankZero.name() + ", " + accuracyText(rankZero)
+                + ": it is a degradation relative to " + better.authorityCode() + ", "
+                + better.name() + ", " + accuracyText(better) + ", which cannot be executed here. "
+                + "Selected the highest-ranked usable candidate that is not a degradation instead: "
+                + selected.authorityCode() + ", " + selected.name() + ", " + accuracyText(selected)
+                + ", at rank " + selected.rank() + ". The ranked list itself is unchanged and still "
+                + "in the authority's order, so candidates() still reports "
+                + rankZero.authorityCode() + " first.";
     }
 
     private static Selection failure(List<CrsOperationCandidate> candidates, List<String> warnings,
@@ -965,9 +1494,18 @@ final class OperationSelector {
                 .append(ballpark.name()).append(". ")
                 .append(ballpark.rejectionReason().orElse("")).append('\n');
         if (candidates.size() == 1) {
-            sb.append("The authority publishes no coordinate operation between these CRSs in either "
-                    + "direction, so this offset is synthesised rather than read -- PROJ synthesises "
-                    + "the same one, and stores it no more than this does.\n");
+            sb.append("The shipped database publishes no coordinate operation between these CRSs in "
+                    + "either direction that this library can use, so this offset is synthesised "
+                    + "rather than read.\n");
+            sb.append("That is a statement about this library, not about the data. Only operations "
+                    + "published directly between these two CRSs were looked for: this library does "
+                    + "not chain through an intermediate CRS, and it ignores authorities outside its "
+                    + "search order. PROJ does both, so it may well have a real operation with a real "
+                    + "accuracy for this pair. EPSG:7843 -> EPSG:7912 is the worked example -- PROJ "
+                    + "9.8.1 finds EPSG:8049 at 0.03 m, published between the geocentric CRSs on "
+                    + "either side, which this library never reaches. Run "
+                    + "projinfo -s <source> -t <target> --summary before concluding that no "
+                    + "operation exists.\n");
         } else {
             sb.append("All candidates, best first:\n").append(list(candidates));
         }

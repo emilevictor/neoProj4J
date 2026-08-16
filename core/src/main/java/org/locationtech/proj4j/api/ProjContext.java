@@ -17,6 +17,7 @@ package org.locationtech.proj4j.api;
 
 import org.locationtech.proj4j.DomainErrorPolicy;
 import org.locationtech.proj4j.io.wkt.AxisOrderPolicy;
+import org.locationtech.proj4j.io.wkt.EsriDatumPolicy;
 import org.locationtech.proj4j.parser.Proj4Parser.ParseMode;
 import org.locationtech.proj4j.spi.ProjDatabase;
 
@@ -85,7 +86,8 @@ public final class ProjContext {
      */
     public static final ProjContext DEFAULT = new ProjContext(AxisOrderPolicy.LEGACY,
             BallparkPolicy.REJECT, GridPolicy.REQUIRE_ALL, BestOperationPolicy.REQUIRE_BEST,
-            DomainErrorPolicy.THROW, ParseMode.PROJ_COMPATIBLE, null);
+            DomainErrorPolicy.THROW, ParseMode.PROJ_COMPATIBLE, EsriDatumPolicy.REJECT, null,
+            null, SpatialCriterion.PARTIAL_INTERSECTION, SourceTargetCRSExtentUse.SMALLEST);
 
     private final AxisOrderPolicy axisOrderPolicy;
     private final BallparkPolicy ballparkPolicy;
@@ -93,19 +95,29 @@ public final class ProjContext {
     private final BestOperationPolicy bestOperationPolicy;
     private final DomainErrorPolicy domainErrorPolicy;
     private final ParseMode parseMode;
+    private final EsriDatumPolicy esriDatumPolicy;
     private final ProjDatabase database;
+    private final AreaOfUse areaOfInterest;
+    private final SpatialCriterion spatialCriterion;
+    private final SourceTargetCRSExtentUse sourceTargetCrsExtentUse;
 
     private ProjContext(AxisOrderPolicy axisOrderPolicy, BallparkPolicy ballparkPolicy,
                         GridPolicy gridPolicy, BestOperationPolicy bestOperationPolicy,
                         DomainErrorPolicy domainErrorPolicy, ParseMode parseMode,
-                        ProjDatabase database) {
+                        EsriDatumPolicy esriDatumPolicy, ProjDatabase database,
+                        AreaOfUse areaOfInterest, SpatialCriterion spatialCriterion,
+                        SourceTargetCRSExtentUse sourceTargetCrsExtentUse) {
         this.axisOrderPolicy = axisOrderPolicy;
         this.ballparkPolicy = ballparkPolicy;
         this.gridPolicy = gridPolicy;
         this.bestOperationPolicy = bestOperationPolicy;
         this.domainErrorPolicy = domainErrorPolicy;
         this.parseMode = parseMode;
+        this.esriDatumPolicy = esriDatumPolicy;
         this.database = database;
+        this.areaOfInterest = areaOfInterest;
+        this.spatialCriterion = spatialCriterion;
+        this.sourceTargetCrsExtentUse = sourceTargetCrsExtentUse;
     }
 
     /**
@@ -143,6 +155,17 @@ public final class ProjContext {
      */
     public BallparkPolicy ballparkPolicy() {
         return ballparkPolicy;
+    }
+
+    /**
+     * What happens when an ESRI-flavoured WKT document names a reference frame this library cannot
+     * place and supplies no {@code TOWGS84[]} of its own.
+     *
+     * @return the policy; never null
+     * @since 2.2.0
+     */
+    public EsriDatumPolicy esriDatumPolicy() {
+        return esriDatumPolicy;
     }
 
     /**
@@ -282,6 +305,65 @@ public final class ProjContext {
     }
 
     /**
+     * The area the caller cares about, against which an operation's declared extent is tested.
+     *
+     * <p><b>Empty is not "no filter".</b> When this is empty the area of interest is synthesised
+     * from the two CRSs' own extents, according to {@link #sourceTargetCrsExtentUse()}, and the
+     * spatial filter still runs &mdash; which is what PROJ does. The only configuration that
+     * switches the filter off is {@link SourceTargetCRSExtentUse#NONE} <em>and</em> no area here.
+     *
+     * @return the caller-supplied area of interest, or empty
+     * @see SourceTargetCRSExtentUse
+     * @since 2.2.0
+     */
+    public java.util.Optional<AreaOfUse> areaOfInterest() {
+        return java.util.Optional.ofNullable(areaOfInterest);
+    }
+
+    /**
+     * How an operation's extent must relate to the area of interest.
+     *
+     * <p>The default is {@link SpatialCriterion#PARTIAL_INTERSECTION}, not
+     * {@code STRICT_CONTAINMENT}. PROJ declares {@code STRICT_CONTAINMENT} as the default in its
+     * own header, and that default survives only in {@code projinfo};
+     * {@code proj_create_crs_to_crs_from_pj} overrides it to partial intersection
+     * unconditionally, so partial intersection is what a caller transforming coordinates
+     * actually gets from PROJ. This library matches the behaviour, not the header. Do not
+     * "correct" this to strict containment without re-measuring against
+     * {@code proj_create_crs_to_crs}.
+     *
+     * @return the criterion; never null, {@link SpatialCriterion#PARTIAL_INTERSECTION} by default
+     * @since 2.2.0
+     */
+    public SpatialCriterion spatialCriterion() {
+        return spatialCriterion;
+    }
+
+    /**
+     * How the two CRSs' own extents synthesise an area of interest when the caller supplies none.
+     *
+     * @return the mode; never null, {@link SourceTargetCRSExtentUse#SMALLEST} by default
+     * @since 2.2.0
+     */
+    public SourceTargetCRSExtentUse sourceTargetCrsExtentUse() {
+        return sourceTargetCrsExtentUse;
+    }
+
+    /**
+     * A copy of this context with a different area of interest.
+     *
+     * @param area the area, or null for none
+     * @return a new context, or {@code this} if nothing changed
+     * @since 2.2.0
+     */
+    public ProjContext withAreaOfInterest(AreaOfUse area) {
+        if (area == null ? areaOfInterest == null : area.equals(areaOfInterest)) {
+            return this;
+        }
+        return toBuilder().areaOfInterest(area).build();
+    }
+
+    /**
      * A copy of this context with a different authority database.
      *
      * @param db the database, or null for none
@@ -311,6 +393,18 @@ public final class ProjContext {
     public ProjContext withBallparkPolicy(BallparkPolicy policy) {
         BallparkPolicy p = policy == null ? BallparkPolicy.REJECT : policy;
         return p == ballparkPolicy ? this : toBuilder().ballparkPolicy(p).build();
+    }
+
+    /**
+     * A copy of this context with a different ESRI datum policy.
+     *
+     * @param policy the new policy; null means {@link EsriDatumPolicy#REJECT}
+     * @return a new context, or {@code this} if nothing changed
+     * @since 2.2.0
+     */
+    public ProjContext withEsriDatumPolicy(EsriDatumPolicy policy) {
+        EsriDatumPolicy p = policy == null ? EsriDatumPolicy.REJECT : policy;
+        return p == esriDatumPolicy ? this : toBuilder().esriDatumPolicy(p).build();
     }
 
     /**
@@ -370,6 +464,13 @@ public final class ProjContext {
         }
         sb.append('\n');
         sb.append("  ballparkPolicy      = ").append(ballparkPolicy).append('\n');
+        sb.append("  esriDatumPolicy     = ").append(esriDatumPolicy)
+                .append(esriDatumPolicy == EsriDatumPolicy.REJECT
+                        ? "   (an ESRI D_ reference frame this library cannot place, with no "
+                                + "TOWGS84[], is refused at parse time -- a divergence from PROJ, "
+                                + "which answers with the ellipsoid alone)\n"
+                        : "   (as PROJ: the ellipsoid alone, with the datum shift absent and "
+                                + "unreported here; BallparkPolicy still governs the transform)\n");
         sb.append("  gridPolicy          = ").append(gridPolicy).append('\n');
         sb.append("  bestOperationPolicy = ").append(bestOperationPolicy)
                 .append(database == null
@@ -386,6 +487,20 @@ public final class ProjContext {
                         : "   (as PROJ: an unrecognised +key is retained and ignored)\n")
                 .append("                        both modes: +units must be one of PROJ's 21 "
                         + "linear unit ids (Units.linearUnitIds()); anything else is refused\n");
+        sb.append("  areaOfInterest      = ").append(areaOfInterest == null
+                ? "NONE supplied -- synthesised from the two CRSs' own extents (the spatial "
+                        + "filter still runs)"
+                : areaOfInterest.toString()).append('\n');
+        sb.append("  spatialCriterion    = ").append(spatialCriterion)
+                .append(spatialCriterion == SpatialCriterion.STRICT_CONTAINMENT
+                        ? "   (an operation must cover the whole area of interest, as PROJ; "
+                                + "projinfo's larger counts are --spatial-test intersects)\n"
+                        : "   (an operation need only overlap the area of interest)\n");
+        sb.append("  crsExtentUse        = ").append(sourceTargetCrsExtentUse)
+                .append(sourceTargetCrsExtentUse == SourceTargetCRSExtentUse.NONE
+                        ? "   (with no area of interest supplied, the spatial filter does not "
+                                + "run at all)\n"
+                        : "   (used only when no area of interest is supplied)\n");
         sb.append("  database            = ").append(database == null
                 ? "NONE -- operation selection falls back to the legacy datum model, which "
                         + "synthesises exactly one operation per CRS pair"
@@ -401,6 +516,10 @@ public final class ProjContext {
                 + ", grid=" + gridPolicy + ", bestOperation=" + bestOperationPolicy
                 + ", domainError=" + domainErrorPolicy
                 + ", parseMode=" + parseMode
+                + ", esriDatum=" + esriDatumPolicy
+                + ", areaOfInterest=" + (areaOfInterest == null ? "none" : areaOfInterest)
+                + ", spatialCriterion=" + spatialCriterion
+                + ", crsExtentUse=" + sourceTargetCrsExtentUse
                 + ", database=" + (database == null ? "none" : database.name()) + "]";
     }
 
@@ -429,6 +548,12 @@ public final class ProjContext {
                 && bestOperationPolicy == that.bestOperationPolicy
                 && domainErrorPolicy == that.domainErrorPolicy
                 && parseMode == that.parseMode
+                && esriDatumPolicy == that.esriDatumPolicy
+                && spatialCriterion == that.spatialCriterion
+                && sourceTargetCrsExtentUse == that.sourceTargetCrsExtentUse
+                && (areaOfInterest == null
+                        ? that.areaOfInterest == null
+                        : areaOfInterest.equals(that.areaOfInterest))
                 && database == that.database;
     }
 
@@ -440,6 +565,10 @@ public final class ProjContext {
         h = 31 * h + bestOperationPolicy.hashCode();
         h = 31 * h + domainErrorPolicy.hashCode();
         h = 31 * h + parseMode.hashCode();
+        h = 31 * h + esriDatumPolicy.hashCode();
+        h = 31 * h + spatialCriterion.hashCode();
+        h = 31 * h + sourceTargetCrsExtentUse.hashCode();
+        h = 31 * h + (areaOfInterest == null ? 0 : areaOfInterest.hashCode());
         return 31 * h + System.identityHashCode(database);
     }
 
@@ -459,7 +588,11 @@ public final class ProjContext {
         private BestOperationPolicy bestOperationPolicy;
         private DomainErrorPolicy domainErrorPolicy;
         private ParseMode parseMode;
+        private EsriDatumPolicy esriDatumPolicy;
         private ProjDatabase database;
+        private AreaOfUse areaOfInterest;
+        private SpatialCriterion spatialCriterion;
+        private SourceTargetCRSExtentUse sourceTargetCrsExtentUse;
 
         private Builder(ProjContext from) {
             this.axisOrderPolicy = from.axisOrderPolicy;
@@ -468,7 +601,11 @@ public final class ProjContext {
             this.bestOperationPolicy = from.bestOperationPolicy;
             this.domainErrorPolicy = from.domainErrorPolicy;
             this.parseMode = from.parseMode;
+            this.esriDatumPolicy = from.esriDatumPolicy;
             this.database = from.database;
+            this.areaOfInterest = from.areaOfInterest;
+            this.spatialCriterion = from.spatialCriterion;
+            this.sourceTargetCrsExtentUse = from.sourceTargetCrsExtentUse;
         }
 
         /**
@@ -491,6 +628,19 @@ public final class ProjContext {
          */
         public Builder ballparkPolicy(BallparkPolicy policy) {
             this.ballparkPolicy = policy == null ? BallparkPolicy.REJECT : policy;
+            return this;
+        }
+
+        /**
+         * Sets the ESRI datum policy. Read {@link EsriDatumPolicy} before setting
+         * {@link EsriDatumPolicy#ALLOW}: it restores a silently missing datum shift.
+         *
+         * @param policy the policy, or null to leave it at {@link EsriDatumPolicy#REJECT}
+         * @return this builder
+         * @since 2.2.0
+         */
+        public Builder esriDatumPolicy(EsriDatumPolicy policy) {
+            this.esriDatumPolicy = policy == null ? EsriDatumPolicy.REJECT : policy;
             return this;
         }
 
@@ -575,13 +725,73 @@ public final class ProjContext {
         }
 
         /**
+         * Sets the area the caller actually cares about, which operation selection uses to throw out
+         * operations that do not cover it.
+         *
+         * <p>Leaving this unset does <b>not</b> switch the spatial filter off. With no area supplied
+         * one is synthesised from the two CRSs' own declared extents, per
+         * {@link #sourceTargetCrsExtentUse(SourceTargetCRSExtentUse)}, which is what PROJ does. To
+         * get an unfiltered candidate list, set that to {@link SourceTargetCRSExtentUse#NONE} as
+         * well as leaving this null.
+         *
+         * <pre>{@code
+         * ProjContext ctx = ProjContext.builder()
+         *         .database(db)
+         *         .areaOfInterest(new AreaOfUse(-100.5, 40.0, -99.5, 41.0))   // W, S, E, N
+         *         .build();
+         * }</pre>
+         *
+         * @param area the area of interest, or null for none (the CRSs' own extents are then used)
+         * @return this builder
+         */
+        public Builder areaOfInterest(AreaOfUse area) {
+            this.areaOfInterest = area;
+            return this;
+        }
+
+        /**
+         * Sets how an operation's extent must relate to the area of interest.
+         *
+         * <p>Null means "the default", and the default is
+         * {@link SpatialCriterion#PARTIAL_INTERSECTION} &mdash; the value every PROJ transformation
+         * path uses, not the one {@code CoordinateOperationContext}'s header initialises. Coercing
+         * null to {@link SpatialCriterion#STRICT_CONTAINMENT} instead would make
+         * {@code spatialCriterion(null)} a policy change rather than a no-op, and on
+         * {@code EPSG:4267} to {@code EPSG:4269} that particular change is the difference between a
+         * transformation and a refusal. See {@link SpatialCriterion} for why the two differ.
+         *
+         * @param criterion the criterion, or null to leave it at
+         *                  {@link SpatialCriterion#PARTIAL_INTERSECTION}
+         * @return this builder
+         */
+        public Builder spatialCriterion(SpatialCriterion criterion) {
+            this.spatialCriterion = criterion == null
+                    ? SpatialCriterion.PARTIAL_INTERSECTION : criterion;
+            return this;
+        }
+
+        /**
+         * Sets how an area of interest is synthesised from the two CRSs when the caller supplies
+         * none.
+         *
+         * @param use the policy, or null to leave it at {@link SourceTargetCRSExtentUse#SMALLEST}
+         * @return this builder
+         */
+        public Builder sourceTargetCrsExtentUse(SourceTargetCRSExtentUse use) {
+            this.sourceTargetCrsExtentUse = use == null
+                    ? SourceTargetCRSExtentUse.SMALLEST : use;
+            return this;
+        }
+
+        /**
          * Builds the immutable context.
          *
          * @return the context; never null
          */
         public ProjContext build() {
             ProjContext built = new ProjContext(axisOrderPolicy, ballparkPolicy, gridPolicy,
-                    bestOperationPolicy, domainErrorPolicy, parseMode, database);
+                    bestOperationPolicy, domainErrorPolicy, parseMode, esriDatumPolicy, database,
+                    areaOfInterest, spatialCriterion, sourceTargetCrsExtentUse);
             return built.equals(DEFAULT) ? DEFAULT : built;
         }
     }
