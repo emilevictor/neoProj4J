@@ -14,11 +14,17 @@
 #
 #     check         mirrors                              expected today
 #     ------------  -----------------------------------  ------------------------------------------
-#     ci            ci.yaml   job build-and-test          passes; 2,667 tests, 3 skipped
-#     conformance   conformance.yaml  job corpus          passes, 7449/7902, regressed 0
-#     golden        golden.yaml       job golden          FAILS on 2,287 UNEXPLAINED rows
+#     ci            ci.yaml   job build-and-test          passes; 3,029 tests, 6 skipped
+#     conformance   conformance.yaml  job corpus          passes, 7819/7911, regressed 0
+#     golden        golden.yaml       job golden          FAILS on 2,083 UNEXPLAINED rows
 #     determinism   determinism.yaml  job bits (one leg)  passes, 22 tests
 #     bench         bench.yaml        job gate            passes; OPT-IN, ~21 min, needs a quiet box
+#
+# ONE NOTE ON bench, SINCE 2026-08-14. bench.yaml is turned off for the time being - its only
+# trigger is workflow_dispatch, so no push, no pull request and no schedule starts it. This check
+# is therefore the main way the allocation and op-count gate gets run at all. It is still opt-in
+# here, because it takes about 21 minutes, but leaving it out means nothing measured how much
+# memory the library allocates per operation.
 #
 # ONE OF THESE IS EXPECTED TO FAIL, AND THE SUMMARY SAYS WHICH AND WHY. It is reported as
 # EXPECTED-FAIL, not as PASS: the check really did fail, and the run prints its measured numbers.
@@ -310,56 +316,56 @@ break_conformance() {
 # =====================================================================================
 # CHECK: ci   -- mirrors .github/workflows/ci.yaml, job build-and-test
 # =====================================================================================
-# A FLOOR, NOT AN EXPECTED COUNT. The reading it guards is 2,667 tests - core 2,234, conformance 345
-# (its unit tests; the corpus sweep is behind -Pconformance and does not run here), db 75, geoapi
-# 13, and no test sources in epsg or grids-us-legacy. Measured 2026-08-14 on the 2.1.0 release
-# branch with `./docker/run.sh ci conformance golden determinism`, whose own tally line reads
-# `tests=2667 failures=0 errors=0 skipped=3  across 251 report files`; the four module totals above
-# are the `Tests run:` lines of the same log and they sum to 2,667 exactly, which is the second,
-# independent count. Master at 2fc5989, measured the same way, reads 2,640. READ BOTH OFF A RUN AND
+# A FLOOR, NOT AN EXPECTED COUNT. The reading it guards is 3,029 tests - core 2,573, conformance 354
+# (its unit tests; the corpus sweep is behind -Pconformance and does not run here), db 88, geoapi
+# 14, and no test sources in epsg or grids-us-legacy. Measured 2026-08-16 on the assembled 2.2.0
+# stack with `./docker/run.sh ci conformance golden determinism`, whose own tally line reads
+# `tests=3029 failures=0 errors=0 skipped=6  across 276 report files`; the four module totals above
+# are the `Tests run:` lines of the same log and they sum to 3,029 exactly, which is the second,
+# independent count. The 2.1.0 release commit 6ae23b7, measured the same way, reads 2,667 - core
+# 2,234, conformance 345, db 75, geoapi 13. READ BOTH OFF A RUN AND
 # NEVER SUBTRACT ONE FROM THE OTHER TO GET THE THIRD: this one integer is what caught a half-merged
 # PR when four green gates did not, and a computed delta would have agreed with itself and hidden it.
 # The 2,667 was itself neither of the two figures predicted before the run - the documents all carried
 # 2,662 and the arithmetic said 2,663. Surefire's `tests`
-# attribute counts skips, so the three aborted tests do not move this number - two in core's
-# NoGeoApiInCoreTest (geoapi not yet compiled, core's jar not yet packaged, both true of surefire on
-# a clean first build) and one in conformance's GieConformanceTest (the corpus sweep is behind
-# -Pconformance). They are printed separately because a skip is never a pass.
+# attribute counts skips, so the six aborted tests do not move this number - five in core (two in
+# NoGeoApiInCoreTest, where geoapi is not yet compiled and core's jar not yet packaged, both true of
+# surefire on a clean first build, and three in EsriDatumTableTest, which re-derives the ESRI datum
+# table from a PROJ checkout that the container does not have) and one in conformance's
+# GieConformanceTest (the corpus sweep is behind -Pconformance). They are printed separately because
+# a skip is never a pass.
 #
-# 2,600 IS CHOSEN, NOT ROUNDED, and the rule that chooses it is the same one that once chose 2,500:
-# it is the highest multiple of 100 that STILL FAILS when the db module (75 tests) drops out of the
-# reactor. 2,667 - 75 = 2,592, and 2,592 < 2,600, so the gate goes red. That property is the whole
-# reason this floor exists. The admissible interval is therefore (2,592, 2,667] - above the db-less
-# reading so losing db is caught, at or below today's reading so a clean tree passes - and 2,700 is
-# already outside it, which is what makes 2,600 the only round hundred still available rather than a
-# preference.
+# 3,000 IS CHOSEN, NOT ROUNDED, and the rule that chooses it is the same one that once chose 2,500 and
+# then 2,600: it is the highest multiple of 100 that STILL FAILS when the db module (88 tests) drops
+# out of the reactor. 3,029 - 88 = 2,941, and 2,941 < 3,000, so the gate goes red. That property is
+# the whole reason this floor exists. The admissible interval is therefore (2,941, 3,029] - above the
+# db-less reading so losing db is caught, at or below today's reading so a clean tree passes - and
+# both 2,900 and 3,100 are outside it, which is what makes 3,000 the only round hundred available
+# rather than a preference.
 #
-# THE PROPERTY NOW HOLDS BY 8 TESTS, AND THAT IS THE NARROWEST IT HAS EVER BEEN. The db-less reading
-# is 2,592 against a floor of 2,600, a margin of 8. It was 13 at the 2,662 reading and 40 at the
-# 2,635 reading (2,635 - 75 = 2,560). The margin shrinks every time the suite grows, because the
-# floor is fixed and the db-less reading rises with it. THE EXACT BREAKING POINT IS A TOTAL OF 2,675:
-# at 2,675 the db-less reading is 2,675 - 75 = 2,600, which is no longer BELOW the floor, and the
-# entire db module could drop out with the gate still green. THAT IS NOW 8 TESTS AWAY - ONE ORDINARY
-# PR. WHOEVER PUSHES THE TOTAL PAST 2,674 MUST RAISE THIS FLOOR IN THE SAME CHANGE - to 2,650, which
-# restores the property against a db-less 2,600 and buys another 50.
+# THE PROPERTY NOW HOLDS BY 59 TESTS. The db-less reading is 2,941 against a floor of 3,000. The
+# margin shrinks every time the suite grows, because the floor is fixed and the db-less reading rises
+# with it. THE EXACT BREAKING POINT IS A TOTAL OF 3,088: at 3,088 the db-less reading is
+# 3,088 - 88 = 3,000, which is no longer BELOW the floor, and the entire db module could drop out with
+# the gate still green. WHOEVER PUSHES THE TOTAL PAST 3,087 MUST RAISE THIS FLOOR IN THE SAME CHANGE -
+# to 3,100, which restores the property against a db-less 3,000 and buys another 100.
 #
-# 2,600 WAS DELIBERATELY KEPT AT THE 2,667 READING RATHER THAN RAISED EARLY, and the reasoning is
-# recorded here so the next reader does not take it for an oversight and does not re-argue it. Going
-# to 2,650 now would buy 58 tests of margin, but it would abandon the multiple-of-100 rule 8 tests
-# before that rule's own trigger fires, and it would cut the room for a legitimate test DELETION from
-# 67 tests down to 17. The trigger in the paragraph above IS the decision. It has not fired. When it
-# does, raise the floor and do not reopen the question.
+# THE PREVIOUS FLOOR OF 2,600 HAD LOST THE PROPERTY, and how it lost it is the lesson. 2,600 was
+# chosen against a 2,667 reading where db was 75 tests, and the comment at that reading named 2,674 as
+# the breaking point and 2,650 as the remedy. 2.2.0 took the total to 3,029 and db to 88, so the
+# trigger fired many times over - AND THE PRESCRIBED 2,650 WOULD NOT HAVE WORKED EITHER, because
+# 3,029 - 88 = 2,941 is far above it. A remedy written down against one reading does not survive the
+# reading moving. DO NOT APPLY A STALE PRESCRIPTION; RE-DERIVE THE INTERVAL FROM THE RUN IN FRONT OF
+# YOU. The same thing had already happened to 2,500 before it: chosen against a 2,573 reading where
+# 2,573 - 75 = 2,498 < 2,500, and left behind when the suite reached 2,635 and the db-less reading
+# rose to 2,560, 60 clear of the floor. The floor never breaks; reality moves out from under it, which
+# is why it needs raising rather than defending.
 #
-# THE PREVIOUS 2,500 HAD LOST EXACTLY THAT PROPERTY, in precisely this way. It was chosen against a
-# 2,573-test reading, where 2,573 - 75 = 2,498 < 2,500. The suite grew to 2,635, so the db-less
-# reading rose to 2,560 - 60 clear of the old floor - and the entire db module could have vanished
-# with the gate still green. The floor did not break; reality moved out from under it, which is what
-# a ratchet is for and why it needs raising rather than defending.
-#
-# What it deliberately does NOT catch: geoapi's 13 tests vanishing (2,654, still over). No floor can
-# catch a 13-test module and still leave room for ordinary additions. 67 tests of headroom above the
-# floor is a few PRs' worth, but the 8-test margin above is the binding constraint, not this one;
-# when either runs out, RAISE IT, do not lower it. It is a ratchet.
+# What it deliberately does NOT catch: geoapi's 14 tests vanishing (3,015, still over). No floor can
+# catch a 14-test module and still leave room for ordinary additions. Losing conformance IS caught -
+# 3,029 - 354 = 2,675, well under. The room for a legitimate test DELETION is 29 tests, narrower than
+# the 67 the old floor allowed; that is the price of keeping the multiple-of-100 rule and the db
+# property at the same time. When either margin runs out, RAISE THE FLOOR, never lower it.
 #
 # AND THE REAL FIX IS TO STOP DEPENDING ON THIS COMMENT BEING READ. "Losing a whole module turns this
 # gate red" is arithmetic over the per-module totals, and this script already parses those - the four
@@ -373,7 +379,7 @@ break_conformance() {
 # This check has no counterpart in ci.yaml - that workflow's only numeric comparisons are in its
 # jdk8-runtime job. So on this axis the container asserts strictly MORE than the workflow it
 # otherwise mirrors, and raising this line here does not desynchronise anything.
-CI_MIN_TESTS=2600
+CI_MIN_TESTS=3000
 check_ci() {
     hdr "ci  -- mvn -B -ntp clean install   (ci.yaml / build-and-test)"
     cd "$WORK" || return 2
@@ -684,11 +690,11 @@ check_golden() {
     say "Non-vacuity satisfied: the gate ran, over the full $want-line table, with no skips."
 
     # ---- classify the failure ----------------------------------------------------------
-    # 49 rules, all `status: active` and all with a pinned expected_rows, is the state the backlog
-    # is being worked against - measured 2026-08-14 on the 2.1.0 release branch, and the pins sum to
-    # 39,149, which is the INTENDED figure. The count is read from the file below rather than
-    # trusted from this comment - it has been written down as 38, 41, 42, 44 and 48 at various points
-    # and was wrong each time.
+    # 54 rules, all `status: active` and all with a pinned expected_rows, is the state the backlog
+    # is being worked against - measured 2026-08-16 on the assembled 2.2.0 stack, and the pins sum
+    # to 39,403, which is the INTENDED figure. The count is read from the file below rather than
+    # trusted from this comment - it has been written down as 38, 41, 42, 44, 48, 49 and 50 at
+    # various points and was wrong each time.
     local rules pinned
     rules=$(grep -cE '^  - id:' golden/rules.yaml)
     pinned=$(grep -cE '^    expected_rows: [0-9]+' golden/rules.yaml)
@@ -839,7 +845,7 @@ check_determinism() {
 # CHECK: bench -- mirrors .github/workflows/bench.yaml, job gate.  OPT-IN.
 # =====================================================================================
 check_bench() {
-    hdr "bench  -- Tier 1 allocation + Tier 2 op-count gate   (bench.yaml / gate)"
+    hdr "bench  -- Tier 1 allocation + Tier 2 op-count gate   (bench.yaml / gate, manual-only)"
     cd "$WORK" || return 2
     rm -f benchmark/target/jmh-result.json
 

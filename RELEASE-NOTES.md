@@ -1,3 +1,560 @@
+# neoProj4J 2.2.0 release notes
+
+Released <RELEASE DATE> to Maven Central under the same groupId and artifactId as 2.1.0 — see the
+README for the coordinates. Figures are measured unless labelled otherwise; where a number is still
+pending it says so.
+
+**2.1.0 was the review pass. 2.2.0 is about which operation actually runs.** Ten numbered items, and
+the first of them is the one to read: the library named a transformation, published its accuracy, and
+then computed the coordinate with something else. The rest follow from fixing that — if the named
+operation is the one that runs, then how operations get ranked, which authorities they may come from,
+and which ones the area of interest rules out all start to matter, and all three now follow PROJ.
+Alongside that: vertical and compound CRSs are read rather than half-read, nineteen operators that were
+refused now answer, ESRI documents that name a reference frame without saying where it is are now
+refused instead of quietly treated as WGS 84, `+czech` and `+lat_2` and `+lat_0` are read the way PROJ
+reads them rather than being discarded or tested for a value, and a pipeline step's `+units` is
+resolved through the column PROJ's own `+units=` handler reads.
+
+If you only read one section, read
+[Compatibility](#220-compatibility-what-moves-and-by-how-much). If you only read one item, read item 1
+if you parse ESRI WKT and item 2 otherwise.
+
+**Where the numbers come from.** Everything below was measured locally in the pinned container, or read
+out of a committed file at this commit. The CI workflow files are committed; **nothing here should be
+read as a green CI run**.
+
+---
+
+## 2.2.0 compatibility: what moves, and by how much
+
+Every row is **measured**. The magnitude is the point.
+
+> **Do not read a clean API-compatibility report as "nothing moved".** No public signature was removed
+> or changed in this release — the new types are additions — so a binary-compatibility check has
+> nothing to report. It cannot have anything to report, because **none of the changes in this section
+> are signature changes.** Candidate operations are now ranked in PROJ's own order, and an
+> area-of-use filter is on by default; both change *which operation you get back* from the same call
+> with the same arguments, and one of them changes the coordinate that call returns. An empty API
+> report is silent about all of it. Read items 2 through 5.
+>
+> **japicmp 0.26.1 has now been run**, from its command line; it is not wired into the Maven build. It
+> compared the `core` jar built from the clean checkout at the 2.1.0 release commit `6ae23b7`, which
+> names itself `neoproj4j-2.1.0.jar`, against the `core` jar built at this branch tip, at public
+> visibility. In incompatible-changes-only mode the report is **"No changes"** — no binary-incompatible
+> change at public visibility. The full report is **16 new public types, 181 new public members, 15
+> modified classes, 1 modified interface, and nothing removed.** The one modified interface is
+> `spi/ProjDatabase`, which gains `allowedAuthorities(String, String)`. That is a **`default`** method,
+> in the source and in the compiled class, where `javap` prints `public default`, and it is what keeps
+> this a minor version bump rather than a breaking one.
+>
+> One caveat: japicmp skipped its semantic-versioning check, because the worktree build stamps the
+> version as `0.0.0-NO_WORKTREE_AND_INDEX` and japicmp will not reason about semantic versioning when
+> the major version is zero. The compatibility verdict above was measured and is unaffected, but the
+> version stamp itself was not machine-checked.
+
+The first item is the one most likely to break an existing deployment on input you have been feeding
+the library for years. Items 2 through 9 change coordinates or change which operation you get. Item 10
+changes nothing that already worked.
+
+### 1. ESRI WKT1 naming a `D_` reference frame with no `TOWGS84` is now refused
+
+Read this first if you parse ESRI WKT — from a `.prj` sidecar, a geodatabase, or anything ArcGIS
+wrote.
+
+A document like `DATUM["D_European_1950", SPHEROID["Airy_1830", ...]]` names a reference frame. The
+spheroid says what shape the earth is. **Nothing in the document says where that frame sits relative to
+WGS 84.** Reading it as though it were WGS 84 does not fail — it answers, with the entire datum shift
+missing.
+
+`EsriDatumPolicy` has two values, `REJECT` and `ALLOW`, and **`REJECT` is the default.**
+
+**What was being silently omitted**, one probe point per frame:
+
+| ESRI name | probe | omitted shift |
+|---|---|---|
+| `D_European_1950` | 5°E 52°N | **124.286 m** |
+| `D_Tokyo` | 139.7°E 35.7°N | **462.853 m** |
+| `D_Pulkovo_1942` | 37.6°E 55.75°N | **117.802 m** |
+| `D_CH1903` | 7.44°E 46.95°N | **163.878 m** |
+
+Each figure is a property of its probe point, not of the frame — a different point gives a different
+number. The point of the table is the order of magnitude.
+
+**This is the one place in this release where the library deliberately does not do what PROJ does.**
+PROJ resolves these names through `proj.db` and answers. proj4j now resolves the name too — the
+generated `EsriDatumTable` covers **475** distinct `D_` names, all of them — but resolving the name
+only tells you *which published frame it is*, and proj4j has nowhere to carry a frame's identity into
+operation selection. `ProjDatabase.crsUsingDatum`, the pivot that would turn a frame identity into
+candidate operations, has no caller. So the resolution makes the refusal **specific** rather than
+turning it into an answer, and wiring it through is the follow-on work.
+
+**What to do.** Add an explicit `TOWGS84` to the document, which is the honest fix and is what the
+refusal message asks for. Or set `EsriDatumPolicy.ALLOW` to get the old behaviour back — with the
+figures above in mind.
+
+### 2. The operation the library names is now the operation it runs
+
+Before this release, `selectedOperation()`, `accuracy()`, `areaOfUse()` and `describe()` reported a
+chosen candidate that had been stored in a field, while the engine built its transform from
+`source.legacy()` and `target.legacy()` exactly as handed in. **The chosen operation was never an
+argument to anything that computed a coordinate.** So the facade named one operation and the engine ran
+another, with a published accuracy attached to the wrong arithmetic.
+
+Where the two disagree, your coordinates move by the difference between the authority's published
+parameters and proj4j's own built-in datum table. At the Cheshire point this repository already audits
+— lon −2.0301713578021983, lat 53.35168607080468 — into
+`+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000` on the Airy ellipsoid. Every
+figure below is **`cs2cs` 9.8.1's own output**, never proj4j's:
+
+| | easting | northing |
+|---|---|---|
+| **is** — EPSG:1314's published parameters, the operation selection chooses | `398089.000827863` | `383867.000380436` |
+| **was** — proj4j's `Datum.OSGB36` table, what the engine ran instead | `398089.003912952` | `383867.000589373` |
+| for scale — PROJ with the OSTN15 grid present, which it is not on this classpath | `398088.964408128` | `383865.216031245` |
+
+So the two Helmerts differ by **3.085 mm of easting and 0.209 mm of northing**, and the grid differs
+from either Helmert by **1.784 m of northing**.
+
+**3 mm is worth a section not for its size but for its cause.** It is the whole of the difference
+between "we ran the operation we named" and "we ran something else that happens to be close" — and the
+same code path carries the 1.784 m case. The 1.784 m case is deliberately **not** pinned by a test:
+`uk_os_OSTN15_NTv2_OSGBtoETRS.tif` ships in PROJ-data and not in this repository, so a test asserting
+it would either fail in CI or quietly assert nothing.
+
+**The rewrite lands on whichever side carries the datum**, source or target. Here the target does, and
+the published operation is `EPSG:4277 → EPSG:4326` used in reverse — the orientation an
+on-the-source-only implementation would silently miss.
+
+### 3. Candidates are ranked in PROJ's own order, so the first one can be a different operation
+
+`SortFunction::compare`'s criteria are ported, and **they are deliberately not accuracy-ascending.**
+
+For `EPSG:4314 → EPSG:4326`, `projinfo --summary --spatial-test intersects` at 9.8.1 lists three, all
+EPSG, in this order:
+
+| rank | operation | accuracy | extent |
+|---|---|---|---|
+| 1 | `EPSG:15949` | 1.0 m | all Germany onshore |
+| 2 | `EPSG:1777` | 3.0 m | former West Germany |
+| 3 | `EPSG:15869` | 2.0 m | former East Germany |
+
+**3.0 m sits above 2.0 m** because West Germany's extent is the larger of the two, and a larger
+intersection with the area of interest outranks a smaller accuracy number. This library now agrees. The
+one difference is `EPSG:15949`, which this library demotes below both because its grid is not reachable
+on this classpath — an existing usability tier, not part of the ordering — so the first **usable**
+operation is `EPSG:1777`, which is also PROJ's first usable one.
+
+**If you were reading the first candidate and assuming best-accuracy-first, that assumption was never
+PROJ's.**
+
+### 4. Where an authority preference exists, non-preferred operations are no longer offered
+
+PROJ's `authority_to_authority_preference` table is now in the index, as section
+`S_AUTHORITY_PREFERENCE`, and it is read as a search **order** — not as a filter over the target
+authority, which is the plausible wrong port.
+
+For `EPSG:4277 → EPSG:4326` the EPSG prefix answers, so the walk stops before it reaches ESRI, and two
+operations disappear from the candidate list:
+
+| dropped | what it is | its own declared accuracy |
+|---|---|---|
+| `ESRI:108089` | `OSGB_1936_To_WGS_1984_8_BAD_DX` | 5 m |
+| `ESRI:108336` | `OSGB_1936_To_WGS_1984_NGA_7PAR` | 21 m |
+
+Neither is deprecated, so nothing else in the pipeline would have removed them. The list comes to
+**ten**, against `projinfo`'s nine; the one extra is `EPSG:5339`, which this library reports as a
+`SUPERSEDED` candidate rather than omitting, by design.
+
+**An ESRI source still sees ESRI operations.** `ESRI:104105 → EPSG:4326` keeps all three of
+`projinfo`'s, because `ESRI|EPSG` resolves to the order `PROJ, ESRI, EPSG` and the walk stops at ESRI.
+That is the control that fails loudly if the search order is ever collapsed into a set-shaped filter.
+
+**And a pair with no preference row keeps everything it had**: `EPSG:4267 → EPSG:4269` stays at ten,
+which says this change removes only what it is meant to.
+
+The visible effect for `EPSG:4314 → EPSG:4326` is larger than a shorter list. Five ESRI Helmerts each
+declare 0.1 m — better than every EPSG operation for that pair — so before this change one of them
+ranked first. Now the best usable operation comes from EPSG.
+
+### 5. An area-of-use filter is on by default, and it removes candidates
+
+When you supply no area of interest, one is now synthesised from the source and target CRS extents,
+and candidates whose own extent does not meet it are dropped. Two new settings on `ProjContext` say
+how:
+
+| setting | values | default |
+|---|---|---|
+| `SpatialCriterion` | `PARTIAL_INTERSECTION` — keep anything that overlaps at all; `STRICT_CONTAINMENT` — keep only what covers the whole area | **`PARTIAL_INTERSECTION`** |
+| `SourceTargetCRSExtentUse` | `SMALLEST`, `BOTH`, `INTERSECTION`, `NONE` | **`SMALLEST`** |
+
+The two criteria genuinely disagree on the same input, which is why both exist. A caller-supplied area
+of interest wins over any extent-use setting, and `SourceTargetCRSExtentUse.NONE` turns the filter off
+entirely — with no area of interest, nothing is filtered out.
+
+**PROJ declares `STRICT_CONTAINMENT` as its documented default and then does not use it** for
+transformation lookup; every PROJ transformation path passes `PARTIAL_INTERSECTION`. This library
+follows the behaviour rather than the documentation, and `ProjContext.spatialCriterion()`'s javadoc
+names both values and says which one is real. Copying the documentation instead would have silently
+discarded candidates PROJ keeps.
+
+### 6. A compound CRS read from a document keeps its vertical half
+
+`CrsDefinitions` took `horizontalComponent()` on its first working line and threaded only that through
+every append step, so the height definition was still unread when the parameter list came back.
+
+Across the **5,671** rows of `proj4/wkt/epsg.properties` that silently dropped the height of **72**
+compound CRSs, and a standalone `VERT_CS` — **177** rows — could not be read at all.
+
+**No horizontal coordinate moves.** What changes is the parameter list those 72 definitions produce, so
+anything that compared, cached or hashed one of them will see it change, and a height that used to be
+dropped now survives. `+vunits`, `+vto_meter` and `+z_0` follow `init.cpp`, including that **`+vunits`
+wins over `+vto_meter`** when both are present. EPSG:5754, Poolbeg height, is the one row in the
+dictionary whose unit has no PROJ identifier — `UNIT["m*0.3048007491", 0.3048007491]` — and it is
+carried as the bare factor rather than forced onto a named unit.
+
+### 7. Both axes change sign: `+proj=krovak +czech` was accepted and then ignored
+
+`+czech` asks for Krovak with the sign of both axes flipped — the projection's native convention is
+southing and westing, and the flag asks for the opposite. The setter for it has been on
+`KrovakProjection` since 1.4.3, but `czech` was absent from `Proj4Keyword`'s allow-list and nothing
+dispatched it, so the flag parsed, changed nothing, and raised no complaint.
+
+On `+proj=krovak +lat_0=49.5 +lon_0=42.5 +k=0.9999 +x_0=0 +y_0=0 +ellps=bessel +pm=ferro` at
+(16.849771944444445, 50.20901166666667):
+
+| | easting | northing |
+|---|---|---|
+| was, with `+czech` | `-568990.9954373120` | `-1050538.6308460608` |
+| is, with `+czech` | `568990.9954373120` | `1050538.6308460608` |
+| `proj` 9.8.1, with `+czech` | `568990.995437` | `1050538.630846` |
+| either build, without `+czech` | `-568990.9954373120` | `-1050538.6308460608` |
+
+**If you have `+czech` in a stored definition, your coordinates change sign on both axes.** That is the
+point of the flag and it is what PROJ does, but it is a change, so check anything downstream that
+assumed the old numbers. **If you do not use `+czech`, nothing moves** — plain `+proj=krovak` returns
+exactly what it returned before, and all five of its golden rows are byte-identical after the refactor
+that introduced `mod_krovak`. The same fix applies to `+proj=mod_krovak +czech`.
+
+The key is read for its **presence**, matching `pj_param`'s `t` sigil, so any value at all means on; it
+carries no number, so it is deliberately in neither the angle nor the double conversion table.
+
+### 8. `lcc` tested whether `+lat_2` was zero, where PROJ tests whether it was given
+
+**4,714.84 km** of northing: `+lat_2=0` and `+lat_0=0` on `lcc` are now told apart from silence.
+`lcc.cpp:88-95` tests whether the tokens were supplied; proj4j tested their values, so an explicit
+`+lat_2=0` built a cone tangent at `lat_1` instead of one secant at `lat_1` and the equator, and an
+explicit `+lat_0=0` was overwritten with `lat_1`.
+
+Measured against `proj` 9.8.1 at 10 E, 40 N on GRS80. No shipped definition moves: none of the 1,885
+`+proj=lcc` definitions carries `+lat_2=0`, and the 12 carrying `+lat_0=0` also carry a non-zero
+`+lat_2`.
+
+### 9. A pipeline step's `+units` was resolved through the wrong column of PROJ's unit table
+
+**`+units` and `+vunits` on a pipeline step read the column PROJ reads.** PROJ records each linear
+unit's conversion to metres twice — a `to_meter` string and a `factor` double (`9.8.1:src/proj.h:258`)
+— and on the five U.S. survey rows the two are different doubles. `+units` and `+vunits` are parsed
+from the string (`init.cpp:689` and `:726`); only `+proj=unitconvert` reads the factor. The pipeline
+layer read the factor for both, so a step written `+units=us-ft` or `+vunits=us-ft` was off by 3 ulps.
+
+Measured with `cct -d 12` at 9.8.1: `+proj=geocent +ellps=GRS80 +units=us-ft` gives
+`-8356380.535945920274`, which is `+to_meter=0.304800609601219` exactly and not
+`+to_meter=1200/3937`'s `-8356380.535945915617`; the same holds inside `+proj=pipeline +step`, because
+a step is built by `pj_init_ctx` like any other definition (`pipeline.cpp:496` → `create.cpp:303`).
+The gap between the two columns is 1 to 3 ulps on `us-in`, `us-ft`, `us-yd`, `us-ch` and `us-mi` and
+**exactly zero on the other sixteen linear rows and all three angular ones**, which is why nothing
+caught it.
+
+`+xy_in`, `+xy_out`, `+z_in` and `+z_out` still read the factor column, because that is the column
+PROJ reads for them — the rule is that each key reads its own column, not that one column wins.
+Nothing in the golden corpus or the conformance corpus moves: both exercise the CRS path, which was
+already correct. `PipelineUnitColumnTest` pins both columns and both directions, so swapping either
+back fails with the offending row named.
+
+### 10. Nineteen operators that used to be refused now answer, and nothing that already worked changes
+
+**Nothing here moves an existing coordinate.** Every name below was absent, so `+proj=<name>` was
+refused outright. A definition that was refused and now works cannot have returned a wrong number in
+the meantime.
+
+**Ten registry projections**, taking `Registry`'s registration count from **151 to 161**:
+
+| operator | what it is | notes |
+|---|---|---|
+| `+proj=airocean` | Fuller/Dymaxion icosahedral net | `+orient=vertical` (default) or `horizontal` |
+| `+proj=isea` | Icosahedral Snyder Equal Area | seven new parameter keys; inverse only where PROJ installs one |
+| `+proj=s2` | S2 cube | |
+| `+proj=healpix`, `+proj=rhealpix` | the HEALPix pair | |
+| `+proj=qsc` | quadrilateralized spherical cube | |
+| `+proj=chamb` | Chamberlin trimetric, positioned from three control points | forward only, as upstream; `+lat_3` and `+lon_3` are new keys |
+| `+proj=mod_krovak` | Krovak with upstream's tenth-degree polynomial correction | plain `+proj=krovak` is unchanged |
+| `+proj=oea` | oblated equal area | `+m`, `+n` and `+theta` are new keys |
+| `+proj=rouss` | Roussilhe stereographic | brings a new meridian-distance series, `MDist` |
+
+**Nine pipeline operators**, taking `PIPELINE_ONLY_OPERATORS` from 11 to
+`20`: `geoc`, `geogoffset`, `helmert`, `molobadekas`, `molodensky`,
+`noop`, `topocentric`, `vertoffset` and `xyzgridshift`. These are `PJ_CONVERSION` and
+`PJ_TRANSFORMATION` operators, so they route through `PipelineFactory` rather than through `Registry`,
+and a paired allow-list and deny-list is what stops the two routes from overlapping.
+
+**Between them these account for 319 conformance assertions** — 276 for the projections, 43 for the
+pipeline operators — and `krovak +czech` above takes 2 more. NKG's `urn:ogc:def:…` syntax takes a
+further 33, and 9 one-line parser and engine gaps take the rest, for 361 in all. The full split is in
+[conformance](#220-conformance). **Read the pair there rather than adding 370 to a number you
+remember**: the denominator moved by 9 at the same time.
+
+### Known limitations, measured and left as they are
+
+- **`oea` and `rouss` are accurate near their origin and nowhere else, and PROJ is no better.** Both
+  are series projections — a polynomial fitted about a centre, and a polynomial fitted about a centre
+  stops meaning anything a long way from it. Neither PROJ nor this port says so at the boundary; they
+  answer, and the answer is not a position. **Both are reproduced against PROJ 9.8.1 and pinned as they
+  are rather than worked around**, because diverging from PROJ to paper over a shared limitation would
+  hide the evidence.
+  - **`oea` misses 16 of 68 global round-trip probes.** The worst is (−135, −45), where the forward
+    answers **−1.5920900043274394e22** — bit-identical to PROJ 9.8.1 for the same input. Handing that
+    back to the inverse asks for the arc sine of −2.63e7, so the inverse refuses; PROJ 9.8.1 prints
+    `*`. Both engines decline, for the same reason.
+  - **`rouss` misses 63 of 68.** At (−179.9, −15) the series answers −4.9e7 m and inverts to a latitude
+    of **−21625.6 degrees** — sixty turns of the globe — **without refusing**. PROJ 9.8.1 prints
+    `21625d36'21.56"S` for the same round trip, agreeing to the digits the intermediate was written
+    with.
+  - The practical rule for both: use them near `+lat_0` and `+lon_0`, and check a known point before
+    you trust a distant one. There is no error you can catch to tell you that you have gone too far, in
+    either implementation.
+- **`+proj=isea` on an ellipsoid does not round-trip in PROJ 9.8.1 either**, by **14.5 km** at
+  (−100, 40) on GRS80 — 11.8 km of it in latitude and 8.5 km in longitude — while the same probe on a
+  sphere round-trips to 1e-9 degrees. Pinned as an upstream finding rather than worked around.
+- **`KrovakProjection` still does not override `hasInverse()`**, so both `krovak` and `mod_krovak`
+  report themselves as having no inverse despite having a working one. This predates the present change
+  and is out of scope here; it is already pinned by a test that asserts the wrong answer deliberately
+  and names the class whose declaration is wrong.
+- **Resolving an ESRI `D_` name does not yet make it usable.** Item 1 says why: the table says which
+  published frame a name names, and there is no path from a frame identity to a candidate operation.
+
+---
+
+## 2.2.0 conformance
+
+| | |
+|---|---|
+| **gie corpus** | **7,819 / 7,911 genuine passes** |
+| **GIGS** | **1,170 / 1,170**, unchanged |
+| corpus size | **7,923 assertions**, unchanged — no assertion appeared or disappeared |
+| the rest | 90 failing · 2 skipped · 94 out of block |
+| regressions | **0** |
+
+The branch point measured **7,449 / 7,902**. **Quote the pair, never one number of it** — the
+denominator is not a constant, and this release moves it.
+
+**What actually changed is the manifest, not the corpus.** `gie-corpus-index.tsv` is byte-identical at
+7,923 keys across 42 files. `gie-expected-failures.tsv` goes from **492 lines to 122**: **370 rows
+removed** — 361 `FAIL` and 9 `VACUOUS_EXPECTED_FAILURE` — and **none added**. A key absent from that
+file is expected to pass, so removing rows makes the gate stricter, not looser.
+
+**The denominator moved because nine rows stopped being vacuous.** A vacuous row is one where PROJ built
+the operation and rejected the coordinate while proj4j could not build the operation at all — both
+"failed", and a naive harness scores that a pass, so it is evidence about neither engine and is
+excluded from numerator and denominator alike. Nine of them became real measurements this release,
+each with its own cause:
+
+| row | why it stopped being vacuous |
+|---|---|
+| `builtins.gie` blocks 63, 64 | `airocean` now exists |
+| `builtins.gie` block 129 | `isea` now exists |
+| `4D-API_cs2cs-style.gie` block 19 | `helmert` now exists |
+| `builtins.gie` block 167 | `+lat_1=2D32` is parsed as DMS instead of refused |
+| `builtins.gie` block 84 | the degenerate cone constant is now reached and refused for PROJ's own reason, not for want of an operator |
+| `geotiff_grids.gie` blocks 20, 21 · `more_builtins.gie` block 22 | a missing vertical grid now refuses with the same cause PROJ gives |
+
+That is `7,902 → 7,911`. **Twelve vacuous rows remain and they are concentrated** — six in
+`gridshift.gie`, four in `defmodel.gie`, two in `more_builtins.gie` — all blocked on the two grid
+operators deferred to 2.3.0. Whoever lands those should expect the denominator to grow by up to
+twelve in the same change.
+
+**The arithmetic, so it can be checked rather than believed.** `7,923 − 12 vacuous = 7,911`, then
+`7,911 − 90 failing − 2 skipped = 7,819`. The same arithmetic applied to the branch point reproduces
+its published figure exactly — `7,923 − 21 = 7,902`, then `7,902 − 451 − 2 = 7,449`. That is the
+control that says the method is right rather than fitted.
+
+**Where the 361 removed `FAIL` rows went**, by the cause named in each removed row's own reason, so
+the parts sum to 361 exactly rather than to an estimate:
+
+| | rows |
+|---|---|
+| `airocean` | 92 |
+| `s2` | 56 |
+| `isea` | 40 |
+| NKG — the `urn:ogc:def:…` coordinate-operation syntax | 33 |
+| `healpix` | 26 |
+| `rhealpix` | 22 |
+| `qsc` | 16 |
+| `helmert` | 11 |
+| `oea`, `rouss`, `geogoffset` | 8 each |
+| `molodensky` | 6 |
+| `geoc` | 5 |
+| `chamb`, `mod_krovak`, `topocentric` | 4 each |
+| `noop` | 3 |
+| `molobadekas`, `vertoffset`, `xyzgridshift` | 2 each |
+| `krovak +czech` · `vgridshift` reading a vertical grid (`4D-API_cs2cs-style.gie` block 38) · GeoTIFF deformation-grid reading (`deformation.gie` block 1, all three channels in one `+grids=` file) | 2 each |
+| `+to_meter=2.0/0.2` · `+lon_wrap=180` · `geocent` honouring `+to_meter`/`+units`, which closed a 999 m departure | 1 each |
+| **total** | **361** |
+
+Read as three groups: **new projections 276**, **new pipeline operators 43**, **NKG 33**, and **9**
+one-line parser and engine gaps.
+
+**GIGS is unchanged at 1,170 / 1,170**, and the two rows that stay failing on purpose stay failing for
+the reason 2.1.0 gave. Nothing in this release touches them.
+
+---
+
+## 2.2.0 gates
+
+*Figures are from measurement on this tree in the pinned container (Temurin 21.0.11 / aarch64), or read
+out of a committed file at this commit; where one is not yet measured it says so.*
+
+| gate | state | figure |
+|---|---|---|
+| **ci** | **green** | **`3,029` tests / 0 failures / 6 skipped**. The branch point — the 2.1.0 release commit — measured 2,667 / 0 / 3, against 2.0.0's 2,320. `docker/run.sh`'s `CI_MIN_TESTS` floor **rises 2,600 → 3,000 in this change**; see below |
+| **conformance** | **green** | **7,819 / 7,911** against a committed 7,923-key index. The branch point measured 7,449 / 7,902 |
+| **golden** | **live, RED on purpose** | **11,944 UNCHANGED · 41,486 CHANGED · 0 ADDED · 0 REMOVED · 39,403 INTENDED · 2,083 UNEXPLAINED** of 53,430 rows, **54 of 54** rules pinned. The branch point read 11,994 · 41,436 · 0 · 0 · 39,149 · 2,287 and 49 of 49 |
+| **determinism** | **green** | 22 tests, 0 failures — the same 22 as the branch point. Nothing in this release touches `determinism.yaml` or the `Math`-versus-`StrictMath` question |
+| **bench** | **not run, and nothing starts it** | No figure in this section comes from it. See below |
+
+### The 254 golden rows that got claimed, and why that is the intended outcome
+
+Two separate things happened, and the arithmetic has to be read as two halves rather than one net
+figure. INTENDED goes 39,149 → 39,403, which is **+254**. UNEXPLAINED goes 2,287 → 2,083, which is
+**−204**. The difference between them, 50, is the number of rows that moved from UNCHANGED to CHANGED.
+
+**Fifty rows moved from UNCHANGED to CHANGED, and all fifty were claimed.** That is ten
+newly-registered projections at five golden probe rows each:
+
+| rule | rows |
+|---|---|
+| `PROJ-NEW-PROJECTIONS-REGISTERED` — 44 names and 220 rows becomes 49 and 245, as `healpix`, `qsc`, `rhealpix`, `s2` and `airocean` join its `keys:` list | +25 |
+| `PROJ-ISEA-NO-INVERSE-OFF-THE-DEFAULT-ORIENTATION`, new | 5 |
+| `PROJ-CHAMB-MOD-KROVAK-OEA-ROUSS-REGISTERED`, new | 20 |
+| **total** | **+50** |
+
+**A further 204 rows were already CHANGED and had never been explained.** Three new rules account for
+them, and this is the first release in which the backlog shrank because rows were *understood* rather
+than because they stopped moving:
+
+| rule | rows |
+|---|---|
+| `PROJ-CASS-EASTING-A4-SIGN-CORRECTED`, new | 156 |
+| `DICT-ESRI-OMERC-VARIANT-A-NEEDS-NO-UOFF`, new | 43 |
+| `PARSE-UNITS-LINK-NOW-RECOGNISED`, new | 5 |
+| **total** | **−204 from the backlog** |
+
+The rule count goes 49 → 54 and the pinned rows sum to exactly 39,403, which is the INTENDED figure.
+Count the rules with a grep anchored on the four-space indent — `grep -Eo '^ +expected_rows: [0-9]+'`
+picks up a commented `expected_rows: 944` in a note further down the file and reports one rule and
+944 rows too many.
+
+**A row moving to CHANGED with a rule that names its mechanism and pins its count is the intended
+outcome.** A row moving to CHANGED with no rule to claim it is what the gate exists to catch, and none
+did.
+
+### Red on golden is still the intended state
+
+For the reason 2.0.0 gave: the gate fails on any changed row that no rule claims with a named mechanism
+and a pinned count, so those are rows somebody must *explain*, not rows somebody must *undo*. It runs
+weekly and on demand.
+
+### The performance gate still does not run in CI
+
+`.github/workflows/bench.yaml` has one trigger, `workflow_dispatch` — no push, no pull request, no
+schedule. This was done in 2.1.0 for cost, not correctness, and nothing about it has been softened
+since: no `continue-on-error`, no saved figure loosened. **Nothing starts this job automatically.** A
+rise in the memory the library allocates per operation, and a change in how many `sin`, `cos` or `log`
+calls a transform makes, will go unnoticed until somebody runs `gh workflow run bench.yaml` or
+`./docker/run.sh bench`. The release checklist in `HOWTORELEASE.txt` calls for the local run, and that
+is the only cover before a tag.
+
+### Two workflow comments have been brought up to date
+
+`.github/workflows/conformance.yaml` recorded `7,584 / 7,905` and `.github/workflows/golden.yaml`
+recorded 50 rules and a pinned-row sum of 39,159. Both were measured partway through this release; the
+tree measures **7,819 / 7,911**, **54** rules and **39,403**. Both comments already said the right thing
+about method — quote the pair, the denominator is not a constant — and were simply stale on the numbers.
+They are corrected in this change.
+
+### The determinism evidence, unchanged and worth restating
+
+`StrictMathGoldenTableTest` and `NanBitPatternTest` were run outside CI on five JDK and
+instruction-set combinations — Temurin 8.0.502 x86-64, Temurin 11.0.32 on both x86-64 and aarch64,
+Temurin 21.0.11 aarch64, OpenJDK 26.0.2 aarch64, spanning both the native and the pure-Java
+`StrictMath` implementations — at **54,265 passing comparisons** each: **271,325 `StrictMath` and
+221,970 `FastStrictTrig` raw-bit comparisons, zero value mismatches**. The YAML itself has still never
+executed.
+
+### No CI run backs any figure here
+
+The workflow files are committed. Everything above was measured locally.
+
+---
+
+## 2.2.0 documentation corrections
+
+One, carried over from 2.1.0's notes because it was never fixed here.
+
+**2.1.0 moved a coordinate by 5,009,377 m and these release notes never said so.**
+`RectangularPolyconicProjection` dropped `+lat_0`: the class declared a field for it and never
+assigned it, so every read returned 0.0, and applying the parameter now shifts northing by the meridian
+arc for that latitude. **Anyone who passed `+lat_0` to `+proj=rpoly` before 2.1.0 was getting it
+ignored, and now gets it applied.** The 2.1.0 notes name the change once, in the preamble list at the
+top — *"`+lat_0` on `rpoly`"*, three words, no figure — and give it **no numbered compatibility item
+and no mention in upgrade guidance**, while every other parameter in that same list has a numbered item
+with a measurement: `+lat_ts` is item 2, `+south` is 3, `+zone` is 4, `sconics` is 6. The magnitude
+lived only in `golden/README.md`, where the change has its own rule,
+`PROJ-RPOLY-LAT0-NOW-APPLIED`, pinned at 5 rows with a band of 5.0e6 .. 5.1e6 m around the arithmetic
+that predicts it: the probe's `+lat_0` is 45°, and `0.7853981633974483 × 6378137 = 5,009,377.08 m`.
+**Why it stayed hidden is worth knowing, because the same trap will catch the next reader**: both notes
+files name the Java class and never the projection name near it, so searching either document for
+`rpoly` finds nothing, and searching for the magnitude finds only `golden/README.md`, which is not
+where a caller looks. The other half of that fix — restoring the commented-out `P->es = 0` — genuinely
+does move no coordinate, since `rpoly`'s formulae never read its ellipsoid. Recorded here rather than
+by re-sectioning the shipped 2.1.0 notes. `CHANGELOG.md` carries the same correction.
+
+---
+
+## 2.2.0 upgrade guidance
+
+1. **If you parse ESRI WKT, screen your documents for a `DATUM["D_...", ...]` with no `TOWGS84` before
+   you upgrade.** Those now throw. Item 1 has the magnitudes of what was being omitted — 124 m to
+   463 m at the probe points measured. Add an explicit `TOWGS84`, or set `EsriDatumPolicy.ALLOW` if you
+   would rather keep the old answers than change them today.
+2. **If you read `selectedOperation()` or `accuracy()` and cared that they described the arithmetic
+   that ran, they now do — and where they previously did not, your coordinates move.** Item 2. The
+   OSGB36 case is 3.085 mm; the mechanism is not bounded by that figure, and the same code path carries
+   a 1.784 m case where a grid is present.
+3. **If you read the first entry of a candidate list and assumed best accuracy first, stop.** Items 3
+   and 4. Ranking now follows PROJ's order, in which a larger extent can outrank a smaller accuracy
+   number, and where an authority preference applies, operations from a non-preferred authority are no
+   longer in the list at all.
+4. **If you relied on getting every candidate back regardless of geography, set
+   `SourceTargetCRSExtentUse.NONE`.** Item 5. Otherwise an area of interest is synthesised from the two
+   CRS extents and candidates that do not meet it are dropped.
+5. **If you compare, cache or hash the parameter list of a compound CRS**, 72 of the dictionary's
+   definitions now carry a height they used to drop. Item 6. No horizontal coordinate moves.
+6. **If you have `+czech` in a stored `krovak` or `mod_krovak` definition, both your axes change
+   sign.** Item 7. If you do not use `+czech`, nothing moves.
+7. **If you have a stored `lcc` definition that spells out `+lat_2=0` or `+lat_0=0`, read it again.**
+   Item 8. An explicit `+lat_2=0` now builds the secant cone PROJ builds, and an explicit `+lat_0=0`
+   now leaves the latitude of origin at the equator. No definition in the shipped dictionaries carries
+   either, so this falls on definitions written by hand.
+8. **If you write `+units=` or `+vunits=` on a pipeline step, the scale it resolves to may move by up
+   to 3 ulps.** Item 9. Only the five U.S. survey ids are affected, and `+xy_in`, `+xy_out`, `+z_in`
+   and `+z_out` are unchanged.
+9. **Do not add 370 to a conformance number you remember.** The denominator moved by 9 in the same
+   release. The pair is 7,819 / 7,911.
+10. **Do not read a clean API-compatibility report as a quiet release.** Items 2 through 5 change
+    behaviour without changing a single signature.
+
+---
+
 # neoProj4J 2.1.0 release notes
 
 Released 2026-08-14 to Maven Central under the same groupId and artifactId as 2.0.0 — see
@@ -345,7 +902,22 @@ container (Temurin 21.0.11 / aarch64).*
 | **conformance** | **green** | **7,449 / 7,902** against a committed 7,923-key index. Master measured 7,448 / 7,902 |
 | **golden** | **live, RED on purpose** | on this branch, **2,287 UNEXPLAINED** of 53,430 rows, **49 of 49** rules pinned. Master measured 12,002 UNCHANGED · 41,428 CHANGED · 0 ADDED · 0 REMOVED · 39,141 INTENDED · 2,287 UNEXPLAINED, and 48 of 48 rules — those six figures and that rule count are master's readings, not this branch's |
 | **determinism** | **green** | 22 tests, 0 failures; master measured the same 22 and 0. The count is a floor and upward drift is a notice, not a failure |
-| **bench**, and the **allocation** figures inside it | **green** | **0 breaches**; **245 gated, 0 EXCLUDED**, 245 arms, and **245 of 245** arms carry an allocation measurement. Measured 2026-08-14 on this branch in the pinned container (Temurin 21.0.11 / aarch64) from `./docker/run.sh bench`, in **21m16s**. One advisory, and it is an improvement rather than a breach: `TransformCacheBenchmark.createTransformUncached` at **96.000 B/op** against a ratchet of 112 |
+| **bench**, and the **allocation** figures inside it | **green, then turned off — see below** | **0 breaches**; **245 gated, 0 EXCLUDED**, 245 individual benchmarks, and **245 of 245** carry an allocation measurement. Measured 2026-08-14 on this branch in the pinned container (Temurin 21.0.11 / aarch64) from `./docker/run.sh bench`, in **21m16s**. One advisory, and it is an improvement rather than a breach: `TransformCacheBenchmark.createTransformUncached` at **96.000 B/op** against a saved figure of 112 |
+
+**Why the performance gate no longer runs in CI at all** (2026-08-14, and meant to be temporary).
+`.github/workflows/bench.yaml` used to run on every push and every pull request. It now has one
+trigger, `workflow_dispatch`: no push, no pull request, and no schedule either. The reason is cost,
+not correctness — the job is green, as the row above records, and it takes about 21 minutes of
+measurement per commit, which is longer than anyone was prepared to wait. Nothing was softened to
+achieve that: there is no `continue-on-error`, no saved number was loosened, and the job still fails
+on any breach.
+
+State the loss plainly, because it is not small. **Nothing starts this job automatically.** An
+increase in the memory the library allocates per operation, and a change in how many `sin`, `cos`
+or `log` calls a transform makes, will now go unnoticed until a person asks for a run — either
+`gh workflow run bench.yaml`, or `./docker/run.sh bench` locally, which `HOWTORELEASE.txt`'s
+release checklist calls for and which is the only remaining cover before a tag. Restore the
+triggers to get it back; do not soften the job instead.
 
 **Red on golden is still the intended state**, for the reason 2.0.0 gave: the gate fails on any changed
 row that no rule claims with a named mechanism and a pinned count, so those are rows somebody must
@@ -780,26 +1352,48 @@ control.
 
 ---
 
-## Conformance: 94.27 % of the gie corpus, and what the denominator excludes
+## Conformance: 93.5 % of the gie corpus, and what the denominator excludes
+
+*Every figure in this section is **2.0.0's**, read off tag `v2.0.0`. For what the corpus scores **now**,
+read [2.1.0 conformance](#210-conformance) instead — these are different releases and the numbers are
+not interchangeable.*
+
+*Restored 2026-08-14, for the same reason the 2.0.0 gate table below it was.* The 2.1.0 documentation
+pass overwrote this section's figures in place with 2.1.0's readings — `7,378 / 7,895 — 93.5 %` →
+`7,449 / 7,902 — 94.27 %` in both the heading and the table, `at least 29 of the 42` → `30 of the 42`,
+`515 failing` → `451`, `28 vacuous` → `21`, and the derivation `7,923 − 28 = 7,895` → `7,923 − 21 =
+7,902`, together with a line dating the measurement 2026-08-14, eleven days after 2.0.0 shipped.
+Nothing there was false; **2.0.0's own conformance measurement simply stopped existing in this
+document** and survived only at the tag, while the identical 2.1.0 figures already sat a few hundred
+lines above. Do not refresh these again; the current release's own section is the place for a new
+reading.
+
+**One thing the 2.1.0 pass changed here is a correction and stays**, and it is the two paragraphs on the
+1.4.3 baseline at the end of this section. Withdrawing a figure that nothing in the tree can reproduce
+is not the same act as overwriting a measurement with a later one, and the replacement upper bound is a
+property of tag `v1.4.3` and the corpus rather than of either release, so it reads the same in both.
+That is why this section's heading no longer opens `15.6 % → 93.5 %` as the tag's does: the first of
+those two numbers is withdrawn.
 
 | | |
 |---|---|
-| **gie corpus** | **7,449 / 7,902 genuine passes — 94.27 %** |
+| **gie corpus** | **7,378 / 7,895 genuine passes — 93.5 %** |
 | **GIGS** | **1,170 / 1,170 — 100 %**, all 20 files |
-| complete files | **30 of the 42** active corpus files are at 100 % |
-| the rest | 451 failing · 2 skipped · 21 vacuous · 94 excluded (out of block) |
+| complete files | **at least 29 of the 42** active corpus files are at 100 % |
+| the rest | 515 failing · 2 skipped · 28 vacuous · 94 excluded (out of block) |
 
 **The denominator is not the corpus size, and this is the honest part of the number.** The corpus holds
 **7,923 assertions** across 42 active files — 6,962 `expect` plus 961 `roundtrip` — counted with a port
 of gie's own lexer rather than with `grep`, because `grep '^expect'` models neither block boundaries nor
 left-trimming. From that:
 
-- **21 rows are *vacuous* `expect failure` rows and are excluded from both numerator and denominator.**
+- **28 rows are *vacuous* `expect failure` rows and are excluded from both numerator and denominator.**
   A vacuous row is one where proj4j could not construct the operation *at all*: PROJ built it and
   rejected the coordinate, proj4j failed to build it, both "failed", and a naive harness scores a pass.
   **That is failure-to-implement counting as conformance**, and it is excluded rather than banked.
-  7,923 − 21 = **7,902**, and 7,449 + 451 + 2 + 21 = 7,923 exactly. Measured 2026-08-14 with
-  `./docker/run.sh conformance`, from its own per-file table.
+  7,923 − 28 = **7,895**, and 7,378 + 515 + 2 + 28 = 7,923 exactly. **The vacuous count is not a
+  constant**: it falls as operators land, which is why 2.1.0 reports 21 and a denominator of 7,902.
+  Comparing this release's ratio with a later one means comparing two different denominators.
 - **2 skips are reported separately and are never passes.**
 - **94 out-of-block lines** in `DHDN_ETRS89.gie` (which closes `</gie-strict>` at line 161 of 375) are
   reported as `94 excluded (out of block)`, not as "not run".
@@ -853,24 +1447,32 @@ gate every push and pull request and are green. The fifth, `golden`, is **red on
 2026-08-05 it is no longer a push or pull-request check. Reading a red gate as a defect would be exactly
 backwards: they were all green once for the same reason a scan that cannot fail always passes.
 
-*The `ci`, `conformance`, `golden` and `determinism` rows were re-measured 2026-08-14 on this release
-branch in the pinned container (Temurin 21.0.11 / aarch64), from one
-`./docker/run.sh ci conformance golden determinism`. The `allocation` row was measured the same day,
-on the same branch, in the same container, by a second command: `./docker/run.sh bench`, which is
-opt-in and so has to be asked for on its own. That is two commands over one branch, not one command.
-There was no separate allocation run because there is no separate allocation check — the allocation
-figures are produced inside the bench run, which took 21m16s and reported 0 breaches. The `bench` row
-is the one exception: it states the pinned ratchet baseline as it stood on 2026-08-02, not a reading
-of this run.*
+*Every figure in the table below is **2.0.0's**, read off tag `v2.0.0` in the pinned container
+(Temurin 21.0.11 / aarch64). For what the gates measure **now**, read the
+[2.1.0 gates](#210-gates) table instead — these two tables are different releases and the numbers are
+not interchangeable.*
+
+*Restored 2026-08-14, and worth saying why.* During the 2.1.0 documentation pass four of these rows
+were **overwritten in place with 2.1.0's readings** — `ci` 2,320 → 2,667, `conformance` 7,441/7,900 →
+7,449/7,902, `golden`'s six headline figures and its rule count 42 → 49, and `bench`'s saved-count
+total 171 → 170. A preamble was added disclosing the re-measurement, so nothing here was ever a lie.
+It was worse than a lie in one specific way: **2.0.0's own measurements stopped existing in this
+document** and survived only at the tag, while the same 2.1.0 numbers already sat in the 2.1.0 table
+a few hundred lines above. A release-notes section that no longer reports what its release measured
+has stopped being release notes. The figures below are restored from `git show v2.0.0:RELEASE-NOTES.md`.
+Do not refresh them again; add a row to the current release's table instead.
 
 | gate | state | figure |
 |---|---|---|
-| **ci** | **green** | whole 7-module reactor, `BUILD SUCCESS` with javadoc, **2,667 tests / 0 failures / 3 skipped** in 251 report files (`core` 2,234 · `conformance` 345 · `db` 75 · `geoapi` 13). Master at `2fc5989`, measured the same way, is **2,640** |
-| **conformance** | **live, CI-wired, green** | baseline pair committed — `gie-expected-failures.tsv` (474 rows) and `gie-corpus-index.tsv` (**7,923 keys**). **7,449 / 7,902**, verdict `regressed 0, unexpected passes 0, new 0, disappeared 0` against the full index. Master at `2fc5989` is **7,448 / 7,902** |
-| **golden** | **live, RED, and no longer a push or PR check** | **11,994 UNCHANGED · 41,436 CHANGED · 0 ADDED · 0 REMOVED · 39,149 INTENDED · 2,287 UNEXPLAINED** over 53,430 rows; **49 of 49** rules pinned with `expected_rows` summing to 39,149 (this figure has read 38, 41, 42, 44 and 48 at various points — count `golden/rules.yaml`, do not assume) |
-| **allocation** | **live, green** | **0 breaches**; **245 gated, 0 EXCLUDED**, 245 / 245 arms, Tier 2 green. Was `172 gated / 9 excluded / 181 arms`: `BulkTransformBenchmark` joined the gate (+64) and `crs-parse` rejoined Tier 1 (−9 exclusions) |
+| **ci** | **green** | whole 7-module reactor, `BUILD SUCCESS` with javadoc, **2,320 tests / 0 failures / 4 skipped** in 223 report files (`core` 1,917 · `conformance` 345 · `db` 52 · `geoapi` 6) |
+| **conformance** | **live, CI-wired, green** | baseline pair committed — `gie-expected-failures.tsv` (545 rows) and `gie-corpus-index.tsv` (**7,923 keys**). **7,441 / 7,900**, verdict `regressed 0, unexpected passes 0, new 0, disappeared 0` against the full index |
+| **golden** | **live, blocking, RED** | **12,012 UNCHANGED · 41,418 CHANGED · 0 ADDED · 0 REMOVED · 39,127 INTENDED · 2,291 UNEXPLAINED** over 53,430 rows; **42 of 42** rules pinned with `expected_rows` (was 38, then 41) |
+| **allocation** | **live, green** | **0 breaches**; **245 gated, 0 EXCLUDED**, 245 / 245 individual benchmarks, Tier 2 green. Was `172 gated / 9 excluded / 181 arms`: `BulkTransformBenchmark` joined the gate (+64) and `crs-parse` rejoined Tier 1 (−9 exclusions) |
 | **determinism** | **runs per leg, green** | **22** tests, 0 failures, 0 skips (was 15; the count is a floor, and the workflow now reports upward drift as a notice rather than failing) |
-| **bench** | baseline captured 2026-08-02 | **170 per-benchmark ratchets, all enforced, none reported-only**; 25 rules; 8 CRS pairs × 19 operations pinned; 2 remaining `TBD`s are `targetBytesPerOp` policy cells on rules whose ratchet is a real number |
+| **bench** | baseline captured 2026-08-02 | **171 saved per-benchmark byte counts, all enforced, none reported-only** — one per benchmark, each a number a run may match or come in under but never exceed; 25 rules; 8 CRS pairs × 20 operations pinned; 2 remaining `TBD`s are `targetBytesPerOp` policy cells on rules whose saved number is a real figure |
+
+*The `bench` workflow was **turned off on 2026-08-14**, after 2.0.0 and after 2.1.0. That is not a
+2.0.0 fact and it is not recorded here; it is under [2.1.0 gates](#210-gates), where it happened.*
 
 **Why golden being red is the intended state.** The gate exits non-zero on any `UNEXPLAINED` row: a row
 whose behaviour changed and for which no rule in `golden/rules.yaml` claims responsibility with a stated
@@ -993,11 +1595,15 @@ advertisement.
 Each is a **refusal**, not a silent omission: proj4j reports `PROJECTION_NOT_IMPLEMENTED` rather than
 producing something.
 
-- **The DGGS group — `airocean`, `s2`, `isea`.** Verified absent from `Registry`. Together they account
-  for **188 failing assertions in `builtins.gie`** (`airocean` 92, `s2` 56, `isea` 40) — the three
-  largest single blocks left in the corpus, and all three are **declined on ratio**: they are
-  discrete-global-grid systems whose implementation cost is disproportionate to any consumer need on
-  record. If you need them, use PROJ.
+- **`s2`.** Verified absent from `Registry`, **56 failing assertions in `builtins.gie`**, **declined
+  on ratio**: a discrete-global-grid system whose implementation cost is disproportionate to any
+  consumer need on record. If you need it, use PROJ. *Implemented in 2.2.0, which reverses the ratio
+  judgement this entry records; see CHANGELOG.md's 2.2.0 section.* Its two former companions in this
+  entry, `airocean` and `isea`, were implemented first — in 2.2.0 as well, not in the "Unreleased"
+  section an earlier revision of this line pointed at. The
+  figures this entry used to give for them, 92 and 40, counted only the rows scored `FAIL`; the
+  corpus totals including the rows that were `VACUOUS` for want of the operator are **94 and 41**,
+  and those are the numbers the two ports move.
 - **`+proj=helmert` as a user-facing operator.** It exists only as the hidden static
   `+exact +convention=position_vector` helper the `cs2cs` emulation builds. Deliberately not exposed,
   because the user-facing operator additionally carries `convention=coordinate_frame`, `transpose` and
@@ -1010,14 +1616,22 @@ producing something.
   2026-08-14 from `conformance/src/test/resources/gie-expected-failures.tsv`, whose `reason` column
   attributes each row: `grep helmert` returns 13 rows, 11 `FAIL` and 2 `VACUOUS_EXPECTED_FAILURE`.
   The figure previously read "3 in `GDA.gie` and 1 in `4D-API_cs2cs-style.gie`", which missed the
-  whole `more_builtins.gie` block.
+  whole `more_builtins.gie` block. *Implemented in 2.2.0, with `molobadekas`, `convention`,
+  `transpose` and the rates — which are **eight**, not the seven this entry says: `dx dy dz drx dry
+  drz dtheta ds`, plus `t_epoch`.*
 - **`gridshift` (the unified operator) and `defmodel`.** Both need the GeoTIFF grid reader wired into
-  the pipeline layer; the reader itself exists (below).
+  the pipeline layer; the reader itself exists (below). *Still absent in 2.2.0 — but that reason was
+  false when written, and repeating it would send a reader looking in the wrong place. The grid layer
+  is not the obstacle: `gridshift` needs an iterative inverse that switches grids mid-loop plus
+  biquadratic NADCON5 interpolation, and `defmodel` needs a JSON deformation-model reader.
+  `PipelineFactory`'s javadoc carries the real reasons. Deferred to 2.3.0.*
 - **`+proj=deformation +grids=`** — the single-file three-channel Geodetic TIFF Grid form. The two-grid
-  form (`+xy_grids=` / `+z_grids=`) works.
+  form (`+xy_grids=` / `+z_grids=`) works. *`+grids` landed in 2.2.0, on the same generic grid layer
+  `xyzgridshift` runs on.*
 - **`nkg`** — 33 assertions. Unblocked in *data* terms but not in operators: the transformations are
   concatenations whose "method name" is itself a PROJ pipeline (`PROJ:PROJString`), needing
-  `deformation` plus a transformed time dimension.
+  `deformation` plus a transformed time dimension. *Wired in 2.2.0; all 33 assertions read, and the
+  three grids are vendored rather than fetched.*
 - **The time dimension is not transformed.** No `+proj=unitconvert +t_in`, no `+proj=set +t`. Note the
   distinction: `+t_epoch` / `+t_final` on `hgridshift` and `vgridshift` **are** honoured, so a
   time-*gated* grid shift behaves as upstream's does; it is time as a transformed *ordinate* that is
