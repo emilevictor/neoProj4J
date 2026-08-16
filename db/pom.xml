@@ -61,7 +61,7 @@
              mismatch; it never regenerates. That is the mandated degradation path: a machine with no
              sqlite3, no cmake, no Python and no PROJ checkout builds successfully and cannot
              silently use a stale or hand-edited artifact. -->
-        <proj4j.db.sha256>8a82064783a07132f31e42ffe51cdc2bbb48c3835a01ab015485dfe7a456d389</proj4j.db.sha256>
+        <proj4j.db.sha256>eb822e439c000ba0c62fd4818d5c32940b497cf87a7c438833b46946b9de1321</proj4j.db.sha256>
 
         <!-- Packaged-jar ceiling. A data bump that blows the budget must fail the build here rather
              than surprise a downstream Spark image. -->
