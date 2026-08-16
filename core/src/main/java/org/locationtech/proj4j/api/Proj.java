@@ -384,6 +384,96 @@ public final class Proj {
         return CrsOperation.create(source.withContext(ctx), target.withContext(ctx), ctx);
     }
 
+    /**
+     * The PROJ definition of a coordinate operation the authority database publishes under a name,
+     * under {@link #defaultContext()}.
+     *
+     * @param identifier an OGC URN naming a coordinate operation, e.g.
+     *                   {@code "urn:ogc:def:coordinateOperation:NKG::ITRF2000_TO_DK"}
+     * @return the PROJ definition; never null
+     * @throws CrsCreationException if the identifier is not a URN, names no operation, or names one
+     *                              that cannot be expressed
+     * @see #createOperationDefinition(String, ProjContext)
+     * @since 2.2.0
+     */
+    public static String createOperationDefinition(String identifier) {
+        return createOperationDefinition(identifier, defaultContext);
+    }
+
+    /**
+     * The PROJ definition of a coordinate operation the authority database publishes under a name.
+     *
+     * <p>This is {@code proj_create()} on a {@code coordinateOperation} URN, which is a genuinely
+     * different question from {@link #createCrsToCrs(String, String)}. There, you name two CRSs and
+     * the library picks an operation between them. Here, the <b>authority</b> has already named the
+     * operation and you are asking for that one and no other &mdash; which is how the Nordic
+     * countries publish their national transformations, and how PROJ's own test corpus asserts them.
+     *
+     * <p>It returns the <b>definition</b>, a {@code +proj=pipeline ...} string, rather than something
+     * executable, and that is deliberate: it is exactly what {@code projinfo -o PROJ} prints for the
+     * same URN, so the two can be compared directly, and it is the input
+     * {@link org.locationtech.proj4j.pipeline.PipelineFactory#create(String)} takes. Run it with:
+     *
+     * <pre>{@code
+     * String def = Proj.createOperationDefinition(
+     *         "urn:ogc:def:coordinateOperation:NKG::ITRF2000_TO_DK", ctx);
+     * Pipeline p = new PipelineFactory(new Registry()).create(def);
+     * }</pre>
+     *
+     * <p>Only a {@code coordinateOperation} URN is accepted. A bare {@code "NKG:ITRF2000_TO_DK"} is
+     * refused on purpose, because upstream resolves the two-token form as a <b>CRS</b>
+     * ({@code io.cpp:7779}) and quietly treating it as an operation here would make this library
+     * answer a question PROJ does not.
+     *
+     * <p>An operation the authority publishes but this library cannot express raises
+     * {@link ErrorCause#UNSUPPORTED_OPERATION_METHOD} naming the method or step that stopped it,
+     * rather than an approximation. See {@link DatabaseOperationFactory} for which kinds are emitted
+     * and why the rest are refused.
+     *
+     * @param identifier an OGC URN naming a coordinate operation
+     * @param context    the context whose {@link ProjContext#database()} is read; null means
+     *                   {@link #defaultContext()}
+     * @return the PROJ definition; never null
+     * @throws CrsCreationException with {@link ErrorCause#API_MISUSE} if the text is not a
+     *                              coordinate-operation URN,
+     *                              {@link ErrorCause#DATABASE_UNAVAILABLE} if no database is
+     *                              attached, {@link ErrorCause#NO_OPERATION_AVAILABLE} if the
+     *                              database has no such code, or
+     *                              {@link ErrorCause#UNSUPPORTED_OPERATION_METHOD} if it has it and
+     *                              cannot express it
+     * @since 2.2.0
+     */
+    public static String createOperationDefinition(String identifier, ProjContext context) {
+        ProjContext ctx = context == null ? defaultContext : context;
+        if (identifier == null) {
+            throw new CrsCreationException(ErrorCause.API_MISUSE, "the identifier is null");
+        }
+        AuthorityUrn urn = AuthorityUrn.parse(identifier);
+        if (urn == null) {
+            throw new CrsCreationException(ErrorCause.API_MISUSE, "\"" + identifier
+                    + "\" is not an OGC URN. Expected something like"
+                    + " urn:ogc:def:coordinateOperation:NKG::ITRF2000_TO_DK");
+        }
+        if (!urn.isCoordinateOperation()) {
+            throw new CrsCreationException(ErrorCause.API_MISUSE, "\"" + identifier
+                    + "\" names a \"" + urn.type() + "\", not a coordinateOperation"
+                    + ("crs".equals(urn.type()) ? ". Use createCrs for that" : ""));
+        }
+        if (!ctx.hasDatabase()) {
+            throw new CrsCreationException(ErrorCause.DATABASE_UNAVAILABLE, "cannot resolve \""
+                    + identifier + "\": no authority database is configured"
+                    + " (ProjContext.Builder.database(..)). Add the proj4j-db artifact.");
+        }
+        somethingBuilt.set(true);
+        String definition = DatabaseOperationFactory.projDefinition(ctx.database(), urn);
+        if (definition == null) {
+            throw new CrsCreationException(ErrorCause.NO_OPERATION_AVAILABLE, "the "
+                    + ctx.database().name() + " database has no coordinate operation "
+                    + urn.authorityCode());
+        }
+        return definition;
+    }
+
     // --------------------------------------------------------------- inspecting the candidates
 
     /**
@@ -403,31 +493,45 @@ public final class Proj {
      * <h4>The ranking, in full</h4>
      *
      * <p>The database returns rows in {@code (kind, authority, code)} order and <b>never</b> by
-     * accuracy: it has no policy. This is the policy, and it is a <b>total order</b>, so the result
-     * cannot depend on which index a row was found through or on classpath ordering. Applied in
-     * sequence, first difference wins:
+     * accuracy: it has no policy. This is the policy. It is ported criterion by criterion from PROJ
+     * 9.8.1's {@code SortFunction::compare}, in that function's own sequence, and it is a <b>total
+     * order</b>, so the result cannot depend on which index a row was found through or on classpath
+     * ordering. Applied in sequence, first difference wins:
      *
      * <ol>
-     * <li><b>Not deprecated</b> before deprecated. The authority has said not to use it.</li>
-     * <li><b>Not superseded</b> before superseded &mdash; but only by a replacement that connects the
-     *     <em>same</em> CRS pair and is itself a candidate here. A replacement for a different pair is
-     *     not a substitute, and treating it as one silently discards a usable operation.</li>
-     * <li><b>Executable method</b> before one this library cannot run. An operation whose method maps
-     *     to an operator Proj4J does not implement is not a candidate in any useful sense, whereas a
-     *     missing grid is a deployment fact a caller can fix by adding a file. This tier is also what
-     *     makes the {@code EPSG:4267} answer stable: {@code EPSG:8555} is tied with {@code EPSG:1241}
-     *     at 0.15&nbsp;m and is what PROJ 9.8.1 itself selects, but it is NADCON 5, whose grid feeds
-     *     the unified {@code +proj=gridshift} operator that Proj4J does not implement.</li>
-     * <li><b>Non-ballpark</b> before ballpark.</li>
-     * <li><b>All grids reachable</b> before any grid missing.</li>
-     * <li><b>Smaller accuracy</b> first. An <em>absent</em> accuracy sorts after every present one and
-     *     is never treated as zero: an invented accuracy is precisely what would let a ballpark
-     *     candidate win.</li>
-     * <li><b>Smaller area of use</b> first, so a continental grid does not outrank a national one.
-     *     Antimeridian wrap is handled rather than normalised, and an extent with no bounding box
-     *     sorts last rather than being read as the whole world.</li>
+     * <li><b>The usability tier</b>, in this order: usable, then missing a grid, then an unsupported
+     *     method, then ballpark, then superseded, then deprecated. Ordered by what a caller can do
+     *     about it &mdash; a missing grid is fixed by adding a file, an unimplemented method is a
+     *     capability boundary, a ballpark runs and does nothing, and the last two are the authority
+     *     telling you not to. This tier is also what makes the {@code EPSG:4267} answer stable:
+     *     {@code EPSG:8555} is tied with {@code EPSG:1241} at 0.15&nbsp;m and is what PROJ 9.8.1
+     *     itself selects, but it is NADCON 5, whose grid feeds the unified {@code +proj=gridshift}
+     *     operator that Proj4J does not implement. A superseded operation is only demoted by a
+     *     replacement that connects the <em>same</em> CRS pair and is itself a candidate here; a
+     *     replacement for a different pair is not a substitute, and treating it as one silently
+     *     discards a usable operation.</li>
+     * <li><b>Grids the database can account for</b>, on disk or with a published URL, before grids it
+     *     knows nothing about.</li>
+     * <li><b>A published accuracy</b>, whatever it says, before none. An absent accuracy is never
+     *     treated as zero: an invented accuracy is precisely what would let a ballpark candidate
+     *     win.</li>
+     * <li>Where <b>neither</b> accuracy is known, the one that uses a grid first.</li>
+     * <li><b>Larger area of use</b> first. This reads backwards until you see what it is for: an
+     *     accuracy figure only means anything where the operation applies at all, so covering the
+     *     job beats being precise about a corner of it. Antimeridian wrap is handled rather than
+     *     normalised; area is measured as PROJ measures it, weighted by latitude so a degree of
+     *     longitude in the Arctic is not counted as a degree at the equator; and an extent with no
+     *     bounding box counts as zero, never as the whole world.</li>
+     * <li><b>Smaller accuracy</b> first &mdash; now, below area, which is where PROJ puts it.</li>
+     * <li>Where accuracies are <b>equal</b>, the one <em>without</em> grids first: it needs no
+     *     files.</li>
+     * <li><b>Fewer steps</b> in a concatenated operation.</li>
+     * <li><b>Shorter name.</b> Upstream's own comment on this one ends in a question mark.</li>
+     * <li>The single hardcoded authority preference PROJ carries, for
+     *     {@code NTF (Paris) to NTF (1)} over {@code (2)}.</li>
      * <li><b>Authority reference</b> {@code (kind, authority, code)}, then forward before inverted.
-     *     Nothing is left tied.</li>
+     *     Nothing is left tied. PROJ ends on a name comparison instead; see
+     *     {@link CrsOperationCandidate#compareTo} for that divergence and the three others.</li>
      * </ol>
      *
      * <p>Both directions are enumerated, from two calls to
@@ -924,12 +1028,13 @@ public final class Proj {
     private static Crs fromWkt(String definition, String text, ProjContext ctx) {
         CrsDefinition def;
         try {
-            def = new WktReader(ctx.axisOrderPolicy()).readDefinition(text);
+            def = new WktReader(ctx.axisOrderPolicy(), ctx.database()).readDefinition(text);
         } catch (WktParseException e) {
             throw new CrsCreationException(ErrorCause.INVALID_CRS_SYNTAX,
                     "cannot read as WKT: " + e.getMessage(), e);
         }
-        CoordinateReferenceSystem crs = CrsDefinitions.toCrs(def, ctx.axisOrderPolicy());
+        CoordinateReferenceSystem crs = CrsDefinitions.toCrs(def, ctx.axisOrderPolicy(),
+                ctx.database(), ctx.esriDatumPolicy());
         // PROJ's own axis test is textual -- it asks whether "AXIS[" appears at all -- and it has to
         // be, because the reader synthesises the standard axes when a document omits them. Using the
         // parsed axes here would report every WKT CRS as authoritative, including the ones where
@@ -942,12 +1047,13 @@ public final class Proj {
     private static Crs fromProjJson(String definition, String text, ProjContext ctx) {
         CrsDefinition def;
         try {
-            def = new ProjJsonReader(ctx.axisOrderPolicy()).readDefinition(text);
+            def = new ProjJsonReader(ctx.axisOrderPolicy(), ctx.database()).readDefinition(text);
         } catch (RuntimeException e) {
             throw new CrsCreationException(ErrorCause.INVALID_CRS_SYNTAX,
                     "cannot read as PROJJSON: " + e.getMessage(), e);
         }
-        CoordinateReferenceSystem crs = CrsDefinitions.toCrs(def, ctx.axisOrderPolicy());
+        CoordinateReferenceSystem crs = CrsDefinitions.toCrs(def, ctx.axisOrderPolicy(),
+                ctx.database());
         boolean declared = containsIgnoreCase(text, "\"axis\"");
         return new Crs(definition, Crs.Source.PROJJSON, ctx, crs, def, declared,
                 axisNote(ctx.axisOrderPolicy(), declared, true, crs));

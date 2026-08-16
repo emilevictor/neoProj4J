@@ -41,6 +41,36 @@ public class Wkt1EsriReaderTest {
     }
 
     /**
+     * Reads {@code wkt} the way PROJ 9.8.1 reads it: the ESRI reference frame reduced to its
+     * ellipsoid, with the shift to WGS 84 absent.
+     * <p>
+     * Used by the three tests below whose subject is a <em>projection method</em> and whose datum
+     * is incidental, so that they keep asserting the thing they were written to assert. Each of
+     * them also pins the refusal that {@link EsriDatumPolicy#REJECT} — the default — produces for
+     * the same input, so both numbers are recorded and neither can move silently.
+     */
+    private static String projAsProj981(String wkt) {
+        return CrsDefinitions.toProjParameterString(new WktReader().readDefinition(wkt),
+                AxisOrderPolicy.LEGACY, null, EsriDatumPolicy.ALLOW);
+    }
+
+    /**
+     * Asserts that the default policy refuses {@code wkt}, and that the message names the frame
+     * and the parameter string that would otherwise have been produced.
+     */
+    private static void assertRefused(String wkt, String frame, String wouldHaveGiven) {
+        try {
+            proj(wkt);
+            fail("expected a refusal for the unplaceable ESRI frame \"" + frame + "\"");
+        } catch (WktParseException e) {
+            String m = e.getMessage();
+            assertTrue(m, m.contains("\"" + frame + "\""));
+            assertTrue(m, m.contains("ESRI datum name proj4j cannot place"));
+            assertTrue(m, m.contains(wouldHaveGiven));
+        }
+    }
+
+    /**
      * PROJ's rule: a WKT1 root with a {@code GEOGCS["GCS_...]} is ESRI; so is one with neither
      * {@code AXIS[} nor {@code AUTHORITY[}. A GDAL string with axes or authorities is not.
      */
@@ -187,8 +217,14 @@ public class Wkt1EsriReaderTest {
                 + "PARAMETER[\"False_Northing\",0.0],PARAMETER[\"Central_Meridian\",21.0],"
                 + "PARAMETER[\"Scale_Factor\",1.0],PARAMETER[\"Latitude_Of_Origin\",0.0],"
                 + "UNIT[\"Meter\",1.0]]";
+        // PROJ 9.8.1's own answer, which is also 2.1.0's. Kept, because the subject here is the
+        // Gauss-Kruger method mapping, not the frame.
         assertEquals("+proj=tmerc +lat_0=0 +lon_0=21 +k_0=1 +x_0=4500000 +y_0=0 +ellps=krass "
-                + "+units=m +no_defs", proj(wkt));
+                + "+units=m +no_defs", projAsProj981(wkt));
+        // And what the default does with the same document instead: refuse. D_Pulkovo_1942 is EPSG
+        // geodetic datum 6284; at 37.6E 55.75N the shift PROJ applies and this string omits is
+        // 117.802 m.
+        assertRefused(wkt, "D_Pulkovo_1942", "+ellps=krass");
     }
 
     /** ESRI's {@code Double_Stereographic} is Oblique Stereographic, {@code +proj=sterea}. */
@@ -202,10 +238,13 @@ public class Wkt1EsriReaderTest {
                 + "PARAMETER[\"Central_Meridian\",5.387638888888889],"
                 + "PARAMETER[\"Scale_Factor\",0.9999079],"
                 + "PARAMETER[\"Latitude_Of_Origin\",52.15616055555555],UNIT[\"Meter\",1.0]]";
-        String p = proj(wkt);
+        String p = projAsProj981(wkt);
         assertTrue(p, p.startsWith("+proj=sterea "));
         assertTrue(p, p.contains("+k_0=0.9999079"));
         assertTrue(p, p.contains("+ellps=bessel"));
+        // D_Amersfoort is EPSG geodetic datum 6289. The default refuses rather than emit the
+        // ellipsoid with no shift.
+        assertRefused(wkt, "D_Amersfoort", "+ellps=bessel");
     }
 
     /** ESRI's Swiss CRS degenerates to {@code +proj=somerc}, as PROJ's exporter does. */
@@ -220,14 +259,18 @@ public class Wkt1EsriReaderTest {
                 + "PARAMETER[\"Scale_Factor\",1.0],PARAMETER[\"Azimuth\",90.0],"
                 + "PARAMETER[\"Longitude_Of_Center\",7.439583333333333],"
                 + "PARAMETER[\"Latitude_Of_Center\",46.95240555555556],UNIT[\"Meter\",1.0]]";
-        String p = proj(wkt);
+        String p = projAsProj981(wkt);
         assertTrue(p, p.startsWith("+proj=somerc "));
         assertTrue(p, p.contains("+lat_0=46.9524055555556"));
         assertTrue(p, p.contains("+lon_0=7.43958333333333"));
         assertTrue("alpha and gamma are absorbed by somerc", !p.contains("+alpha"));
 
-        // The projection centre must land on the false origin, to the millimetre.
-        CoordinateReferenceSystem crs = new WktReader().read(wkt);
+        // D_CH1903 is EPSG geodetic datum 6149; at 7.44E 46.95N the omitted shift is 163.878 m.
+        assertRefused(wkt, "D_CH1903", "+ellps=bessel");
+
+        // The projection centre must land on the false origin, to the millimetre. Built from the
+        // PROJ-equivalent parameter string, because reading the document itself is now refused.
+        CoordinateReferenceSystem crs = new CRSFactory().createFromParameters("ch1903lv03", p);
         CoordinateReferenceSystem ch1903 = new CRSFactory().createFromParameters("ch1903geog",
                 "+proj=longlat +ellps=bessel");
         ProjCoordinate out = new BasicCoordinateTransform(ch1903, crs).transform(
