@@ -16,6 +16,9 @@
 package org.locationtech.proj4j.vertical;
 
 import java.io.Serializable;
+import java.math.BigDecimal;
+import java.math.MathContext;
+import java.math.RoundingMode;
 
 /**
  * A vertical coordinate reference system — the right-hand half of a compound CRS such as
@@ -82,9 +85,12 @@ public final class VerticalCrs implements Serializable {
     private final String legacyGeoidGrids;
     private final String geoidCrs;
     private final String verticalUnits;
+    private final double verticalToMetre;
     private final boolean depth;
 
     /**
+     * A vertical CRS whose unit has a PROJ id, so that {@code +vunits} can name it.
+     *
      * @param authority        the authority, conventionally {@code "EPSG"}; may be {@code null}
      * @param code             the authority code, e.g. {@code "5773"}; may be {@code null}
      * @param name             the human-readable name, e.g. {@code "EGM96 height"}
@@ -98,13 +104,60 @@ public final class VerticalCrs implements Serializable {
     public VerticalCrs(final String authority, final String code, final String name,
                        final String geoidGrids, final String legacyGeoidGrids,
                        final String geoidCrs, final String verticalUnits, final boolean depth) {
+        this(authority, code, name, geoidGrids, legacyGeoidGrids, geoidCrs,
+                verticalUnits == null || verticalUnits.isEmpty() ? "m" : verticalUnits,
+                Double.NaN, depth);
+    }
+
+    /**
+     * A vertical CRS whose unit may have no PROJ id, in which case the factor is carried
+     * instead and {@link #projTokens(boolean)} emits {@code +vto_meter}.
+     *
+     * <p>This mirrors {@code 9.8.1:src/iso19111/crs.cpp}'s
+     * {@code VerticalCRS::_exportToPROJString} exactly, which asks the axis unit for its PROJ
+     * id and, <em>only</em> when that comes back empty, falls back to
+     * {@code +vto_meter=<conversionToSI>}. {@code EPSG:5754} ("Poolbeg height", 0.3048007491 m)
+     * is the case in the shipped EPSG WKT dictionary that needs it:
+     * {@code projinfo EPSG:4326+5754 -o PROJ} is
+     * {@code +proj=longlat +datum=WGS84 +vto_meter=0.3048007491 +no_defs +type=crs}.
+     *
+     * @param authority        the authority, conventionally {@code "EPSG"}; may be {@code null}
+     * @param code             the authority code; may be {@code null}
+     * @param name             the human-readable name
+     * @param geoidGrids       the {@code +geoidgrids} list PROJ emits, or {@code null}
+     * @param legacyGeoidGrids the GTX equivalent from {@code grid_alternatives}, or {@code null}
+     * @param geoidCrs         the {@code +geoid_crs} value, or {@code null}
+     * @param verticalUnits    the {@code +vunits} id, or {@code null} when the unit has none
+     * @param verticalToMetre  the metres-per-unit factor, used only when {@code verticalUnits}
+     *                         is {@code null}; {@code NaN} or a non-positive value with no unit
+     *                         id falls back to metres
+     * @param depth            whether the single axis is down-positive
+     * @since 2.2.0
+     */
+    public VerticalCrs(final String authority, final String code, final String name,
+                       final String geoidGrids, final String legacyGeoidGrids,
+                       final String geoidCrs, final String verticalUnits,
+                       final double verticalToMetre, final boolean depth) {
         this.authority = authority;
         this.code = code;
         this.name = name;
         this.geoidGrids = emptyToNull(geoidGrids);
         this.legacyGeoidGrids = emptyToNull(legacyGeoidGrids);
         this.geoidCrs = emptyToNull(geoidCrs);
-        this.verticalUnits = verticalUnits == null || verticalUnits.isEmpty() ? "m" : verticalUnits;
+        final String id = emptyToNull(verticalUnits);
+        final boolean usableFactor = verticalToMetre > 0.0 && !Double.isInfinite(verticalToMetre);
+        // Exactly one of the two describes the unit, and "neither" means metres. A vertical CRS
+        // that carried both would let a later reader pick the one that happens to be wrong.
+        if (id != null) {
+            this.verticalUnits = id;
+            this.verticalToMetre = Double.NaN;
+        } else if (usableFactor) {
+            this.verticalUnits = null;
+            this.verticalToMetre = verticalToMetre;
+        } else {
+            this.verticalUnits = "m";
+            this.verticalToMetre = Double.NaN;
+        }
         this.depth = depth;
     }
 
@@ -172,9 +225,25 @@ public final class VerticalCrs implements Serializable {
         return geoidCrs;
     }
 
-    /** @return the {@code +vunits} id; never {@code null}, defaulting to {@code "m"}. */
+    /**
+     * @return the {@code +vunits} id, or {@code null} when the unit has no PROJ id and
+     *         {@link #verticalToMetre()} describes it instead. Never {@code null} for a
+     *         {@code VerticalCrs} built through the eight-argument constructor, which
+     *         defaults to {@code "m"}.
+     */
     public String verticalUnits() {
         return verticalUnits;
+    }
+
+    /**
+     * The metres-per-unit factor for a vertical unit PROJ's {@code pj_list_linear_units()}
+     * cannot name, which is exported as {@code +vto_meter}.
+     *
+     * @return the factor, or {@code NaN} when {@link #verticalUnits()} names the unit instead
+     * @since 2.2.0
+     */
+    public double verticalToMetre() {
+        return verticalToMetre;
     }
 
     /** @return whether the axis is down-positive, i.e. a depth rather than a height. */
@@ -189,6 +258,11 @@ public final class VerticalCrs implements Serializable {
 
     /**
      * The tokens this vertical CRS contributes to a proj-string, in PROJ's own order.
+     *
+     * <p>The order is {@code VerticalCRS::_exportToPROJString}'s
+     * ({@code 9.8.1:src/iso19111/crs.cpp}): {@code +geoidgrids}, then {@code +geoid_crs}, then
+     * exactly one of {@code +vunits} and {@code +vto_meter}. The axis direction is not among
+     * them, upstream or here — see the class javadoc.
      *
      * @param useReadableGridName {@code true} to name the GTX file this library can read,
      *                            {@code false} to reproduce PROJ's GeoTIFF spelling exactly
@@ -206,14 +280,35 @@ public final class VerticalCrs implements Serializable {
         if (sb.length() > 0) {
             sb.append(' ');
         }
-        sb.append("+vunits=").append(verticalUnits);
+        if (verticalUnits != null) {
+            sb.append("+vunits=").append(verticalUnits);
+        } else {
+            sb.append("+vto_meter=").append(number(verticalToMetre));
+        }
         return sb.toString();
     }
+
+    /**
+     * Fifteen significant digits, no exponent, no trailing zeros — the same rule
+     * {@code io/wkt/WktFormat.number} applies, restated here because that method is
+     * package-private to a package this one must not depend on. PROJ emits
+     * {@code +vto_meter=0.3048007491} for {@code EPSG:5754} and this reproduces it.
+     */
+    private static String number(final double v) {
+        if (v == Math.rint(v) && Math.abs(v) < 1e15) {
+            return Long.toString((long) v);
+        }
+        return new BigDecimal(v, SIGNIFICANT_15).stripTrailingZeros().toPlainString();
+    }
+
+    private static final MathContext SIGNIFICANT_15 = new MathContext(15, RoundingMode.HALF_UP);
 
     @Override
     public String toString() {
         return "VerticalCrs[" + getIdentifier() + " " + name
                 + (geoidGrids == null ? "" : ", geoidgrids=" + geoidGrids)
-                + ", vunits=" + verticalUnits + (depth ? ", down-positive" : "") + "]";
+                + (verticalUnits != null ? ", vunits=" + verticalUnits
+                        : ", vto_meter=" + number(verticalToMetre))
+                + (depth ? ", down-positive" : "") + "]";
     }
 }

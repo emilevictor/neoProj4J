@@ -333,6 +333,44 @@ public final class CrsDefinition {
         }
     }
 
+    /**
+     * The vertical component of this CRS: itself if it is vertical, the bound CRS's source's
+     * vertical component, or a compound CRS's first vertical component. {@code null} for a
+     * geographic, geocentric, projected or engineering CRS, and for a compound CRS that
+     * declares no vertical part.
+     * <p>
+     * The exact mirror of {@link #horizontalComponent()}, and deliberately so: between them the
+     * two account for every component of a compound CRS that this library can act on, and a
+     * reader can tell at a glance that neither silently swallows the other's case.
+     *
+     * @throws WktParseException if the definition graph nests more than
+     *                           {@link WktLimits#MAX_CRS_DEPTH} deep, on the same terms as
+     *                           {@link #horizontalComponent()}
+     */
+    public CrsDefinition verticalComponent() {
+        return verticalComponent(1);
+    }
+
+    private CrsDefinition verticalComponent(int depth) {
+        checkDepth(depth);
+        switch (kind) {
+            case BOUND:
+                return baseCrs == null ? null : baseCrs.verticalComponent(depth + 1);
+            case COMPOUND:
+                for (int i = 0; i < components.size(); i++) {
+                    CrsDefinition c = components.get(i).verticalComponent(depth + 1);
+                    if (c != null) {
+                        return c;
+                    }
+                }
+                return null;
+            case VERTICAL:
+                return this;
+            default:
+                return null;
+        }
+    }
+
     public String toString() {
         return kind + "[" + name + "]";
     }
