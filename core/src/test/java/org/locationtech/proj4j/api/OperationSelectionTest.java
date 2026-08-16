@@ -75,6 +75,18 @@ public class OperationSelectionTest {
      * <p>Not ballpark, and that is a separate claim worth making explicitly: nine operations exist and
      * none of them is a ballpark offset, so an answer of "ballpark" here would misdescribe the data as
      * well as failing the caller.
+     *
+     * <p><b>What changed in 2.2.0, and what did not.</b> The selected operation is still
+     * {@code EPSG:1241} at 0.15&nbsp;m &mdash; that is the whole point of this test and it is not
+     * negotiable. What moved is its <em>rank</em>, from 0 to 1. The comparator now ranks by area before
+     * accuracy magnitude, exactly as PROJ's {@code SortFunction::compare} does, so the Canadian NTv1
+     * operation {@code EPSG:1312} heads the list;
+     * {@code projinfo -s EPSG:4267 -t EPSG:4269 --spatial-test intersects} agrees, listing
+     * {@code 1313, 1312, 1241, 8555, ...}. {@link BestOperationPolicy#REQUIRE_BEST} then passes over
+     * the 2.0&nbsp;m head of the list because it is a degradation relative to {@code EPSG:8555} at
+     * 0.15&nbsp;m, and takes the first usable candidate that is not. So an assertion of
+     * {@code rank() == 0} here would now be asserting that this library disagrees with PROJ about the
+     * order of the list, which is not what this test is for.
      */
     @Test
     public void withADatabaseTheNad27PairSelectsEpsg1241At015m() {
@@ -95,11 +107,26 @@ public class OperationSelectionTest {
                 + "ballpark: " + op.describe(), op.isBallparkTransformation());
         assertFalse(op.ballparkReason().isPresent());
 
-        // Selection is not merely metadata: it is ranked first, and the ranking is reported.
-        assertEquals(0, op.selectedOperation().get().rank());
+        // Selection is not merely metadata: it carries its position in the list, and it is usable.
+        // Rank 1, not 0 -- see the note above. EPSG:1312 heads the list and was passed over.
+        assertEquals(1, op.selectedOperation().get().rank());
         assertTrue(op.selectedOperation().get().isUsable());
         assertEquals(CrsOperationCandidate.Rejection.NONE,
                 op.selectedOperation().get().rejection());
+
+        // The list itself is untouched: rank 0 is still the operation projinfo lists first among the
+        // executable ones, and a caller reading candidates() sees PROJ's order, not the selection.
+        assertEquals("EPSG:1312", op.candidates().get(0).authorityCode());
+
+        // And passing over rank 0 is accounted for, not silent. A caller that gets EPSG:1241 while
+        // candidates() reports EPSG:1312 first can find out why without reading this source file.
+        assertTrue("REQUIRE_BEST must say that it passed over the head of the list: "
+                        + op.warnings(),
+                containing(op.warnings(), "passed over the highest-ranked usable candidate"));
+        assertTrue("and must name the operation it passed over: " + op.warnings(),
+                containing(op.warnings(), "EPSG:1312"));
+        assertTrue("and must name the rejected operation that set the bar: " + op.warnings(),
+                containing(op.warnings(), "EPSG:8555"));
 
         // And the transformation still works, with all-finite output.
         assertTrue(op.transform(new ProjCoordinate(LON, LAT)).hasValidXandYOrdinates());
@@ -431,8 +458,16 @@ public class OperationSelectionTest {
      * fixable-by-adding-a-file, then a capability boundary, then ballpark.
      *
      * <p>On core's test classpath the real CTABLE V2 {@code conus} is present and
-     * {@code ntv1_can.dat} arrives with {@code proj4j-epsg}, so exactly two of the nine are usable, and
-     * the 0.15&nbsp;m one wins.
+     * {@code ntv1_can.dat} arrives with {@code proj4j-epsg}, so exactly two of the nine are usable.
+     *
+     * <p><b>Which of those two comes first changed in 2.2.0</b>, when the comparator was brought to
+     * parity with PROJ's {@code SortFunction::compare}: area now outranks accuracy magnitude, so
+     * {@code EPSG:1312} (2.0&nbsp;m, all of Canada) comes before {@code EPSG:1241} (0.15&nbsp;m,
+     * CONUS and its EEZ). That is PROJ 9.8.1's own order for this pair &mdash;
+     * {@code projinfo -s EPSG:4267 -t EPSG:4269 --spatial-test intersects} lists
+     * {@code 1313, 1312, 1241, 8555, ...} &mdash; and it is only a sensible answer because PROJ then
+     * picks per coordinate. Until it does so here too (Stream D step 3), the ranked list says
+     * "Canada first" for a pair whose caller is as likely to be in Texas.
      */
     @Test
     public void candidatesAreRankedByWhatACallerCanDoAboutThem() {
@@ -440,14 +475,12 @@ public class OperationSelectionTest {
         List<CrsOperationCandidate> ranked =
                 Proj.candidateOperations("EPSG:4267", "EPSG:4269", ctx);
 
-        assertEquals("EPSG:1241", ranked.get(0).authorityCode());
-        assertEquals(0.15, ranked.get(0).accuracy().get().metres(), 0.0);
+        assertEquals("EPSG:1312", ranked.get(0).authorityCode());
+        assertEquals(2.0, ranked.get(0).accuracy().get().metres(), 0.0);
         assertTrue(ranked.get(0).isUsable());
 
-        // A usable 2.0 m operation outranks an unavailable 0.5 m one, because it is the one you can
-        // have. Whether choosing it is a *degradation* is a separate question about accuracy.
-        assertEquals("EPSG:1312", ranked.get(1).authorityCode());
-        assertEquals(2.0, ranked.get(1).accuracy().get().metres(), 0.0);
+        assertEquals("EPSG:1241", ranked.get(1).authorityCode());
+        assertEquals(0.15, ranked.get(1).accuracy().get().metres(), 0.0);
         assertTrue(ranked.get(1).isUsable());
 
         // The ballpark offset is last of all: executable, and useless.
@@ -632,6 +665,54 @@ public class OperationSelectionTest {
         assertTrue("the degradation must be on the record, not only in the exception that was not "
                 + "thrown: " + op.warnings(), containing(op.warnings(), "EPSG:8555"));
         assertTrue(containing(op.warnings(), "allowed the degradation to"));
+    }
+
+    /**
+     * <b>The two policies return different operations for the same pair, and the stricter one returns
+     * the better operation.</b>
+     *
+     * <p>This reads backwards for about as long as it takes to notice that "strict" constrains the
+     * quality of the answer, not the size of the search. {@code EPSG:1312} at 2.0&nbsp;m heads the list
+     * because PROJ ranks area before accuracy magnitude and it covers all of Canada;
+     * {@code EPSG:1241} at 0.15&nbsp;m is one row down. {@link BestOperationPolicy#ALLOW_DEGRADED} has
+     * been told rank is enough and takes the head. {@link BestOperationPolicy#REQUIRE_BEST} cannot take
+     * it &mdash; it is a degradation relative to the 0.15&nbsp;m {@code EPSG:8555} that this library
+     * cannot execute &mdash; so it keeps going down the list and finds one that is not.
+     *
+     * <p>Until 2.2.0 {@code REQUIRE_BEST} refused here instead, which is the defect this pins against:
+     * refusing while holding a candidate that satisfies the policy is not strictness, it is a wrong
+     * answer. The list is identical under both policies, so this is a difference in selection only.
+     */
+    @Test
+    public void theStricterPolicyReturnsTheBetterOperationAndTheListIsTheSame() {
+        CrsOperation strict = Proj.createCrsToCrs("EPSG:4267", "EPSG:4269",
+                withDatabase(FakeProjDatabase.nad27ToNad83()));
+        CrsOperation lenient = Proj.createCrsToCrs("EPSG:4267", "EPSG:4269",
+                ProjContext.builder()
+                        .database(FakeProjDatabase.nad27ToNad83())
+                        .bestOperationPolicy(BestOperationPolicy.ALLOW_DEGRADED)
+                        .build());
+
+        assertEquals("REQUIRE_BEST must pass over the 2.0 m head of the list: " + strict.describe(),
+                "EPSG:1241", strict.selectedOperation().get().authorityCode());
+        assertEquals(0.15, strict.accuracy().get().metres(), 0.0);
+
+        assertEquals("ALLOW_DEGRADED asked for rank order and must still get it: "
+                        + lenient.describe(),
+                "EPSG:1312", lenient.selectedOperation().get().authorityCode());
+        assertEquals(2.0, lenient.accuracy().get().metres(), 0.0);
+
+        // The ranked list is a property of the pair, not of the policy. Both callers see PROJ's order.
+        assertEquals(codes(strict.candidates()), codes(lenient.candidates()));
+        assertEquals("EPSG:1312", strict.candidates().get(0).authorityCode());
+        assertEquals("EPSG:1312", lenient.candidates().get(0).authorityCode());
+
+        // Only the strict path substituted, so only the strict path has to account for it.
+        assertTrue("REQUIRE_BEST must record the substitution: " + strict.warnings(),
+                containing(strict.warnings(), "passed over the highest-ranked usable candidate"));
+        assertFalse("ALLOW_DEGRADED substituted nothing and must not claim it did: "
+                        + lenient.warnings(),
+                containing(lenient.warnings(), "passed over the highest-ranked usable candidate"));
     }
 
     /**
@@ -913,6 +994,102 @@ public class OperationSelectionTest {
         assertTrue("the engine must be able to reach the file selection chose: " + engineReachable,
                 engineReachable.contains("conus"));
         assertTrue(op.selectedOperation().get().grids().get(0).probedNames().contains("conus"));
+    }
+
+    /**
+     * <b>The grid branch of the rewrite.</b> {@code EPSG:15851} is published NAD27 to the WGS 84
+     * hub, so it can be installed as {@code +nadgrids=conus} on the source CRS &mdash; and this
+     * asserts that it <em>is</em>, rather than that selection and the legacy datum model happen to
+     * name the same file.
+     *
+     * <p>The distinction matters because proj4j's own {@code +datum=NAD27} already expands to a
+     * list of four optional grids of which {@code conus} is the first. An assertion that the answer
+     * looks like a CONUS shift would pass whether or not selection was honoured; what cannot pass
+     * by coincidence is the note naming the operation, the file and the side.
+     */
+    @Test
+    public void aHubPublishedGridIsInstalledOnTheCrsThatExecutes() {
+        ProjContext ctx = withDatabase(FakeProjDatabase.nad27ToWgs84());
+        CrsOperation op = Proj.createCrsToCrs("EPSG:4267", "EPSG:4326", ctx);
+
+        assertTrue("an operation must have been selected: " + op.describe(),
+                op.selectedOperation().isPresent());
+        assertEquals("EPSG:15851", op.selectedOperation().get().authorityCode());
+
+        assertTrue("the selected operation must be the one that executes, and say so: "
+                + op.describe(), op.executionNote().isPresent());
+        String note = op.executionNote().get();
+        assertTrue(note, note.contains("EPSG:15851"));
+        assertTrue(note, note.contains("+nadgrids=conus"));
+        assertTrue("NAD27 is the source here, so the token belongs on the source: " + note,
+                note.contains("source"));
+
+        // No warning that the engine is doing something else, because it is not.
+        assertFalse("a rewritten operation must not also claim to be unexecuted: " + op.warnings(),
+                containing(op.warnings(), "not executed directly"));
+
+        // And the shift is real: CONUS moves San Francisco by around 100 m, so an installed grid
+        // is distinguishable from no grid at this tolerance.
+        ProjCoordinate shifted = op.transform(new ProjCoordinate(LON, LAT));
+        assertTrue("the grid must actually be applied: " + shifted,
+                Math.abs(shifted.x - LON) > 1.0e-5 || Math.abs(shifted.y - LAT) > 1.0e-5);
+    }
+
+    /**
+     * <strong>A grid slot an earlier slot already carries must not count against the operation when
+     * ranking, or Alaska loses to Quebec.</strong>
+     * <p>
+     * {@code EPSG:1243} declares two slots, {@code alaska.las} and {@code alaska.los}, and only the
+     * first has a {@code grid_alternatives} row &mdash; as 84 of the 85 distinct {@code grid2_name}s
+     * in the real index do not. PROJ never weighs a second slot at all: {@code gridsNeeded()}
+     * collapses the pair to one {@code us_noaa_alaska.tif} before {@code gridsKnown_} is computed. If
+     * this library weighs both, the second looks unaccounted for, {@code EPSG:1243} drops a tier
+     * below PROJ criterion 6, and {@code EPSG:1573} &mdash; Quebec, a fraction of Alaska's area
+     * &mdash; sorts above it. A smaller area winning is the opposite of the rule.
+     * <p>
+     * <b>The pair has to be Alaska and Quebec, not CONUS and Quebec, and that is not cosmetic.</b>
+     * The legacy CTABLE {@code conus} is on this module's test classpath, so {@code conus.las}
+     * resolves, availability is copied to the carried slot, and {@code EPSG:1241} is accounted for
+     * whether or not the skip exists &mdash; a CONUS-based assertion here passes with the fix
+     * reverted and measures nothing. {@code alaska} is not on the classpath, which is what puts the
+     * carried slot on the failing branch. The same defect shows on CONUS against the real database,
+     * where no grid resolves; {@code RealDatabaseSelectionTest} pins that end.
+     */
+    @Test
+    public void aGridSlotCarriedByAnEarlierSlotDoesNotCostTheOperationATier() {
+        ProjContext ctx = withDatabase(FakeProjDatabase.nad27ToNad83());
+        List<String> ranked = codes(Proj.candidateOperations("EPSG:4267", "EPSG:4269", ctx));
+
+        int alaska = ranked.indexOf("EPSG:1243");
+        int quebec = ranked.indexOf("EPSG:1573");
+        assertTrue("both must be candidates: " + ranked, alaska >= 0 && quebec >= 0);
+
+        // The precondition the assertion depends on, asserted rather than assumed: alaska.las is
+        // genuinely unresolved here, and alaska.los is genuinely carried by it. If a future change
+        // put the alaska grid on this classpath, this test would go quiet the way a CONUS-based one
+        // already does, and this leg says so out loud instead.
+        List<GridInfo> grids = byCode(Proj.candidateOperations("EPSG:4267", "EPSG:4269", ctx),
+                "EPSG:1243").grids();
+        assertEquals("EPSG:1243 must still declare two slots: " + grids, 2, grids.size());
+        assertFalse("alaska.las must be unresolved for this test to exercise anything: " + grids,
+                grids.get(0).isAvailable());
+        assertTrue("slot 1 is the one with the grid_alternatives row: " + grids,
+                grids.get(0).knownUrl().isPresent());
+        assertFalse("slot 2 has no row of its own -- that is the whole point: " + grids,
+                grids.get(1).knownUrl().isPresent());
+
+        assertTrue("EPSG:1243 covers Alaska and its EEZ and EPSG:1573 covers Quebec, so the larger "
+                        + "area ranks first; getting this backwards means the carried alaska.los "
+                        + "slot was counted as an unknown grid. Ranked: " + ranked,
+                alaska < quebec);
+
+        // And nothing is being waved through: EPSG:1462 (Quebec, GS2783v1.QUE, a single slot with no
+        // grid_alternatives row at all) genuinely has an unaccounted-for grid and must still sit
+        // below both. Without this leg the assertion above would also pass if gridsKnown() had
+        // simply been made to return true always.
+        int unknownGrid = ranked.indexOf("EPSG:1462");
+        assertTrue("EPSG:1462 is not a carried slot, it is an unaccounted-for grid, and must still "
+                + "lose its tier: " + ranked, unknownGrid > alaska && unknownGrid > quebec);
     }
 
     // ------------------------------------------------------------------ helpers

@@ -109,7 +109,38 @@ public class Units {
     public final static Unit FEET = new Unit("foot", "feet", "ft", 0.3048);
     public final static Unit INCHES = new Unit("inch", "inches", "in", 0.0254);
 
-    // U.S. units
+    // U.S. units.
+    //
+    // THESE FIVE DECIMALS ARE CORRECT AND MUST NOT BE "FIXED" TO 1200/3937 AND FRIENDS.
+    // They look like rounded transcriptions of the exact ratios and they are not: they are
+    // PROJ's own string column, which is the column +units= actually reads.
+    //
+    // PROJ's pj_units rows carry the factor TWICE, in two fields that do not agree
+    // (9.8.1:src/units.cpp:14-27, struct at 9.8.1:src/proj.h:258):
+    //
+    //   {"us-ft", "0.304800609601219", "U.S. Surveyor's Foot", 1200 / 3937.0}
+    //             ^^^^^^^^^^^^^^^^^^^ to_meter, a string        ^^^^^^^^^^^^ factor, a double
+    //
+    // +units= and +vunits= read the STRING: init.cpp:689 does `s = units[i].to_meter`, then
+    // pj_strtod(s) with an optional `/denominator`. So `+units=us-ft` in PROJ means exactly
+    // strtod("0.304800609601219"), which is the literal below. The `factor` field is read by
+    // a different path -- +proj=unitconvert, via get_unit_conversion_factor()
+    // (unitconvert.cpp:411,425) -- and proj4j tracks that one separately in
+    // pipeline/PipelineUnits.java. Two PROJ columns, two proj4j tables, on purpose.
+    //
+    // The gap is 3 ulps for us-ft and us-yd, 1 ulp for us-in, us-ch and us-mi. It is PROJ's,
+    // not ours, and it is visible in the shipped 9.8.1 binary:
+    //
+    //   $ echo "-134 55 0" | cct -d 12 +proj=geocent +ellps=GRS80 +units=us-ft
+    //     -8356380.535945920274  ...     <- the string, i.e. these literals
+    //   $ echo "-134 55 0" | cct -d 12 +proj=geocent +ellps=GRS80 +to_meter=1200/3937
+    //     -8356380.535945915617  ...     <- the factor
+    //
+    // Changing us-ft here to 1200/3937.0 was measured on the golden corpus: it moves 270 REG
+    // rows (all OK->OK, fx/fy only, 5.8e-11..1.5e-8) AWAY from PROJ's +units=us-ft answer, and
+    // 0 conformance rows. It is a regression against the parity rule, not a fix. All 21 ids in
+    // this table were checked against 9.8.1's string column bitwise; all 21 agree.
+    // LinearUnitParsingTest.usSurveyFootIsProjsStringColumnNotItsFactor pins this.
     public final static Unit US_MILES = new Unit("U.S. mile", "U.S. miles", "us-mi", 1609.347218694437);
     public final static Unit US_CHAINS = new Unit("U.S. chain", "U.S. chains", "us-ch", 20.11684023368047);
     public final static Unit US_YARDS = new Unit("U.S. yard", "U.S. yards", "us-yd", 0.914401828803658);

@@ -19,9 +19,13 @@
         JMH. That is deliberate: `core` must remain dependency-free, and JMH lives only here.
 
         Tier 1 (allocation bytes/op) and Tier 2 (deterministic transcendental-call counts) are
-        blocking PR gates and are implemented by
-        org.locationtech.proj4j.benchmark.gate.GateChecker. Tier 3 (absolute ns/op) is nightly-only
-        and deliberately NOT a PR gate - see README.md for the reasoning.
+        implemented by org.locationtech.proj4j.benchmark.gate.GateChecker and run in
+        .github/workflows/bench.yaml. Since 2026-08-14 that workflow is turned off for the time
+        being: its only trigger is workflow_dispatch, so no push, no pull request and no schedule
+        starts it. Neither tier blocks a merge and nothing runs either one automatically; both
+        still fail the run they are in. Start one by hand with `gh workflow run bench.yaml`, or run
+        the same checks locally with `./docker/run.sh bench`. Tier 3 (absolute ns/op) is
+        nightly-only and deliberately NOT a gate at all - see README.md for the reasoning.
     </description>
 
     <properties>

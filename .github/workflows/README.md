@@ -14,7 +14,11 @@ Five workflows:
   compares raw-bit output between architectures.
 - **`golden.yaml`** — the golden-master behavioural regression sweep. **Manual and weekly only**; it
   is not a PR or push check. See below.
-- **`bench.yaml`** — Tiers 1 and 2 of the performance gate.
+- **`bench.yaml`** — Tiers 1 and 2 of the performance gate. **Turned off for now: manual only.** No
+  push trigger, no pull-request trigger, no schedule. See below.
+
+**Three of the five run on a pull request: `ci.yaml`, `conformance.yaml` and `determinism.yaml`.**
+`golden.yaml` and `bench.yaml` do not.
 
 > **Why `golden.yaml` and `bench.yaml` exist, and what their absence had cost.** `golden` and
 > `benchmark` are absent from the root pom's default `<modules>` — deliberately, so `mvn install`
@@ -25,16 +29,25 @@ Five workflows:
 > * `golden/pom.xml` states a signal — *"if a change to core breaks the default-profile compile of
 >   `golden/src/main`, that is a signal, not an inconvenience"* — that **could not fire, because
 >   nothing in CI compiled `golden/src/main`**.
-> * `benchmark/pom.xml` calls its Tier 1 and Tier 2 checks *"blocking PR gates"*. **No job invoked
->   `GateChecker`.**
+> * `benchmark/pom.xml` called its Tier 1 and Tier 2 checks *"blocking PR gates"*. **No job invoked
+>   `GateChecker`.** (That wording is gone from the pom, 2026-08-14.)
 >
 > Both jobs were **blocking and red** when added, on real findings, and that was the intended state.
-> They have since gone different ways. **`bench` / `gate` is GREEN and still blocking** — the
-> baselines were captured and committed, and the job was re-run to confirm it. **`golden` was
-> de-scoped from the PR and push checks** in commit `052e627`: it is red on a real 2,287-row triage
-> backlog that nobody is working through right now, so rather than leave a permanently failing check
-> on every pull request, its triggers are `schedule` (weekly) and `workflow_dispatch` only. The job
-> itself is unchanged and still fails on the backlog when invoked.
+> **Neither runs on a pull request today, for two different reasons.**
+>
+> **`golden` was de-scoped from the PR and push checks** in commit `052e627`: it is red on a real
+> 2,083-row triage backlog that nobody is working through right now, so rather than leave a
+> permanently failing check on every pull request, its triggers are `schedule` (weekly) and
+> `workflow_dispatch` only. The job itself is unchanged and still fails on the backlog when invoked.
+>
+> **`bench` / `gate` is GREEN and was turned off anyway, on 2026-08-14, and that is temporary.** The
+> baselines were captured and committed and the job was re-run to confirm it; the reason it came off
+> the PR path is cost, not correctness — about 21 minutes of measurement on every commit. Its
+> triggers are now `workflow_dispatch` and nothing else: no push, no pull request, **and no
+> schedule**. Nothing starts it automatically. Say plainly what that costs: an increase in memory
+> allocated per operation, or a change in the number of `sin`/`cos`/`log` calls a transform makes,
+> now goes unnoticed until somebody runs the job by hand (`gh workflow run bench.yaml`) or runs
+> `./docker/run.sh bench` locally, which the release checklist calls for.
 >
 > Neither may be made `continue-on-error`, and a catch-all rule in `rules.yaml` is equally banned —
 > `golden/README.md` says so explicitly, `GoldenRules.java` names the catch-all as the exact failure
@@ -56,11 +69,11 @@ Five workflows:
 | `ci.yaml` | `determinism` — `en_US/UTF-8/UTC/arm64` | advisory | push, PR | Cross-architecture *smoke*: `core`'s suite still passes on AArch64. **Superseded for the `StrictMath` claim** by `determinism.yaml`, which compares bits rather than pass/fail. | ~4 min |
 | `determinism.yaml` | `bits` (6 legs: x86-64 × aarch64, JDK 11/17/21) | **blocking** | push, PR | Each leg asserts the committed 54,265-result raw-bit golden for `StrictMath` and `FastStrictTrig`. Six green legs = six architecture/JDK combinations produced identical bits. | ~3–5 min per leg |
 | `determinism.yaml` | `cross-arch` | **blocking** | push, PR | (a) every leg reported; (b) **at least one leg shows `Math` diverging** from the golden — the non-vacuity check, which cannot be made inside a leg; (c) reports the NaN-payload carve-out across architectures. | ~1 min |
-| `conformance.yaml` | `corpus` | **blocking** — green today | push, PR | `mvn -Pconformance -pl conformance -am verify` with `-Dtest='…conformance.**.*Test'`: the full vendored gie/GIGS sweep (**7,449 / 7,902**, `regressed 0`), diffed against the checked-in expected-outcome manifest. Catches any pass→fail regression. | sweep itself **0.7 s**, whole reactor **8 s** warm; the 90-min timeout is all cold cache, untuned |
+| `conformance.yaml` | `corpus` | **blocking** — green today | push, PR | `mvn -Pconformance -pl conformance -am verify` with `-Dtest='…conformance.**.*Test'`: the full vendored gie/GIGS sweep (**7,819 / 7,911**, `regressed 0`), diffed against the checked-in expected-outcome manifest. Catches any pass→fail regression. | sweep itself **0.7 s**, whole reactor **8 s** warm; the 90-min timeout is all cold cache, untuned |
 | `conformance.yaml` | `vendored-corpus-matches-upstream` | **blocking** | push, PR | The vendored corpus is byte-for-byte what PROJ `9.8.1` (`f08fa86…`) produces: manifest verified with `shasum -a 256 -c`, `sync-upstream.sh` re-run against a real PROJ checkout, then `git diff --exit-code`. | ~4–6 min (a full PROJ clone dominates) |
 | `conformance.yaml` | `upstream-drift` | advisory | weekly cron (Mon 04:17 UTC), `workflow_dispatch` | What syncing from PROJ **`master`** instead of the pin would change. A news feed, so upstream corpus changes are known before re-pin time. Never fails the build. | ~4–6 min |
-| `golden.yaml` | `golden` | **not a PR or push check** — de-scoped in `052e627`; runs weekly and on demand, and is **expected to fail** on the 2,287-row backlog | `schedule` (weekly), `workflow_dispatch` | `mvn -Pgolden -pl golden -am verify`: generate the table from the working tree, merge-join against `baseline/1.4.3`, apply `rules.yaml`. Fails on any `UNEXPLAINED` row, `FIGURES_MOVED`, `DEAD_RULE`, `PENDING_RULE_FIRED`, `EXPIRED_RULE` or `COUNT_MISMATCH`. | ~20 s of sweep on top of the reactor build |
-| `bench.yaml` | `gate` | **blocking** — **green today** | push, PR, `workflow_dispatch` | `run-gate.sh --quick --require-baseline`: Tier 1 allocation bytes/op and Tier 2 deterministic transcendental call counts, over **245 arms** in 10 shards, **245 gated, 0 EXCLUDED**. | **21.4 min** measured for `--quick` (Temurin 21 / aarch64, in the container, 2026-08-03; was 15.8 min at 181 arms); a full run is ~90 min. Still never timed on a runner |
+| `golden.yaml` | `golden` | **not a PR or push check** — de-scoped in `052e627`; runs weekly and on demand, and is **expected to fail** on the 2,083-row backlog | `schedule` (weekly), `workflow_dispatch` | `mvn -Pgolden -pl golden -am verify`: generate the table from the working tree, merge-join against `baseline/1.4.3`, apply `rules.yaml`. Fails on any `UNEXPLAINED` row, `FIGURES_MOVED`, `DEAD_RULE`, `PENDING_RULE_FIRED`, `EXPIRED_RULE` or `COUNT_MISMATCH`. | ~20 s of sweep on top of the reactor build |
+| `bench.yaml` | `gate` | **not a check at all right now** — turned off 2026-08-14, temporarily; green when last run | `workflow_dispatch` only (no push, no PR, no schedule) | `run-gate.sh --quick --require-baseline`: Tier 1 allocation bytes/op and Tier 2 deterministic transcendental call counts, over **245 individual benchmarks** in 10 shards, **245 gated, 0 EXCLUDED**. | **21.4 min** measured for `--quick` (Temurin 21 / aarch64, in the container, 2026-08-03; was 15.8 min at 181 individual benchmarks); a full run is ~90 min. Still never timed on a runner |
 
 ## Jobs expected to fail today, and why
 
@@ -71,19 +84,33 @@ Five workflows:
 
 - **~~`build-and-test` / the JDK 17 leg~~ — FIXED. The three tests now SKIP, with the reason
   printed, and a skip is reported as a skip.** `mvn -B clean install` exits **0** with javadoc
-  enabled across the whole default reactor. Per-module surefire counts measured 2026-08-14 on the
-  2.1.0 release branch with `./docker/run.sh ci`, which runs the job's exact command: `core`
-  **2,234** with 2 skipped, `db` **75**, `geoapi` **13**, `epsg` and `grids-us-legacy` 0 (no test
-  sources), and `conformance` **345** with 1 skipped — only its unit tests, because the corpus sweep
+  enabled across the whole default reactor. Per-module surefire counts measured 2026-08-16 on the
+  2.2.0 integration tree with `./docker/run.sh ci`, which runs the job's exact command: `core`
+  **2,573** with 5 skipped, `db` **88**, `geoapi` **14**, `epsg` and `grids-us-legacy` 0 (no test
+  sources), and `conformance` **354** with 1 skipped — only its unit tests, because the corpus sweep
   is behind `-Pconformance` and is `conformance.yaml`'s business, not this job's. The run reports
-  **2,667** in total with **3** skipped, across 251 report files — read that total off the run rather
-  than adding the modules up — and `docker/run.sh`'s `CI_MIN_TESTS` floor of
-  2,600 is set against it. Master at `2fc5989`, measured the same way, is **2,640**.
+  **3,029** in total with **6** skipped, across 276 report files — read that total off the run rather
+  than adding the modules up — and `docker/run.sh`'s `CI_MIN_TESTS` floor was **raised 2,600 → 3,000
+  in this change** to sit against it, because at 2,600 the floor no longer failed when `db` (88
+  tests) dropped out. It is a floor and not a ceiling: it is `-lt`, and added test methods can only
+  move the count away from it.
 
-  The 3 skips are not the three tests this bullet is about, which now run: 2 are
+  **The tree these figures come from is not a release branch.** They were taken on the 2.2.0
+  integration worktree while several parity streams were in flight, so the per-module numbers are a
+  snapshot of that tree, not of any tagged commit. The readings they replace: on 2026-08-15 the same
+  worktree read `core` 2,512 / `db` 88 / `geoapi` 13 / `conformance` 354 / **2,967** total with 6
+  skipped across 273 report files; on 2026-08-14 the 2.1.0 release branch read `core` 2,234 / `db`
+  75 / `conformance` 345 / **2,667** total with 3 skipped across 251 report files; and master at
+  `2fc5989` read **2,640** the same way. **None of those three was re-measured here** — they are
+  recorded as prior readings, not as current facts, and the only figures in this bullet that were
+  actually run are the 2026-08-16 ones.
+
+  The 6 skips are not the three tests this bullet is about, which now run: 2 are
   `NoGeoApiInCoreTest`'s assumptions that `geoapi` is compiled and `core` is packaged, neither of
-  which is true when surefire runs on a clean first build, and 1 is `GieConformanceTest` aborting
-  because the corpus profile is off.
+  which is true when surefire runs on a clean first build; 3 are `EsriDatumTableTest`'s assumption
+  that a PROJ checkout at its pinned SHA is present, which it is not inside the container
+  (`EsriDatumTableTest:328`); and 1 is `GieConformanceTest` aborting because the corpus profile is
+  off.
 
   The finding as recorded was: the JDK **17** leg failed on three `core` tests that have nothing to
   do with the build — `FastStrictTrigAllocationTest.directCallsAllocateNothing`,
@@ -137,29 +164,31 @@ Five workflows:
   `theFixedSitesStayFixedUnderATurkishDefaultLocale` pins this site. There are no bare
   `toLowerCase()` or `toUpperCase()` calls left anywhere in `core/src/main/java`.
 
-  **`advisory: true` stays on that matrix entry — `ci.yaml:389`.** The defect is fixed, but no job in
+  **`advisory: true` stays on that matrix entry — `ci.yaml:390`.** The defect is fixed, but no job in
   this directory has executed on a runner (see the note at the end of this file), so nothing has
   shown this leg green. Removing the marker now would assert a pass nobody has observed, which is the
   failure this file exists to prevent. **One green run of that leg is what justifies removing it.**
 - **`conformance` / `corpus`** is no longer in this list. The job's exact command has been run
-  locally and is green — **7,449 / 7,902 genuine passes with `regressed 0`**, re-measured
-  2026-08-14 on the 2.1.0 release branch with `./docker/run.sh conformance` (master at `2fc5989`
-  reads 7,448 / 7,902; it read 7,378 / 7,895 on 2026-08-01 and
+  locally and is green — **7,819 / 7,911 genuine passes with `regressed 0`**, re-measured
+  2026-08-16 with `./docker/run.sh conformance` (the same tree read 7,584 / 7,905 on 2026-08-14,
+  after `+proj=airocean` and `+proj=isea` were registered, and 7,449 / 7,902 before those two;
+  master at `2fc5989` reads 7,448 / 7,902; it read 7,378 / 7,895 on 2026-08-01 and
   7,441 / 7,900 on 2026-08-02; both the numerator and the denominator have moved every time, so
-  quote the pair, never one of them). It has been shown to go red both on an injected
+  quote the pair, never one of them -- the denominator grew by 3 on 2026-08-14 because three `expect
+  failure` rows were vacuous only for want of the operator). It has been shown to go red both on an injected
   regression and on an absent baseline. See the section at the end of this file. The *YAML* has
   still never executed on a runner; treat the first run as its first test.
 - **`jdk-ea`** goes yellow rather than red whenever Adoptium has no `27-ea` build. That is the
   correct outcome for an advisory signal; bump the version each time a JDK GAs.
 
 - **`golden` / `golden`.** Not a PR or push check any more — see the de-scope note at the top of this
-  file — but when it is run, weekly or on demand, it is **expected to fail**, on **2,287
+  file — but when it is run, weekly or on demand, it is **expected to fail**, on **2,083
   `UNEXPLAINED` rows**. The gate is that the golden *report* is unchanged against the baseline, not
   that the test passes; a doc that implies `golden` should be green is wrong. Its current assertion
-  reads (exit 1), measured 2026-08-14 on the 2.1.0 release branch with `./docker/run.sh golden`:
+  reads (exit 1), measured 2026-08-16 on this tree with `./docker/run.sh golden`:
 
   ```
-  11,994 UNCHANGED · 41,436 CHANGED · 0 ADDED · 0 REMOVED · 39,149 INTENDED · 2,287 UNEXPLAINED
+  11944 UNCHANGED, 41486 CHANGED, 0 ADDED, 0 REMOVED; 39403 INTENDED, 2083 UNEXPLAINED
   ```
 
   **The headline held at 2,291 across four readings while the line underneath it moved every time,
@@ -175,6 +204,7 @@ Five workflows:
   | 2026-08-14 | 12,002 | 41,428 | 39,141 | **2,287** |
   | 2026-08-14 (2.1.0 branch, before the somerc rule) | 11,996 | 41,434 | 39,147 | **2,287** |
   | 2026-08-14 (2.1.0 branch, after it) | 11,994 | 41,436 | 39,149 | **2,287** |
+  | 2026-08-16 (2.2.0 integration tree) | 11,944 | 41,486 | 39,403 | **2,083** |
 
   For the first four readings, rows moved from UNCHANGED into CHANGED and were **all** absorbed by
   rules; on the fifth, 3 more moved and 7 were newly claimed, so 4 came out of the backlog. On the
@@ -182,8 +212,18 @@ Five workflows:
   `NUM-KARNEY-LATITUDE-CORE`, claimed all 6, so INTENDED gained exactly 6 and the backlog did not
   move in either direction. The seventh is the same shape at smaller scale: the somerc transcendental
   change moved 2 rows out of UNCHANGED, `NUM-SOMERC-FDLIBM-TRANSCENDENTALS` claimed both by name with
-  `expected_rows: 2`, and INTENDED gained exactly 2 while the backlog again stayed put. Two of
-  the earlier ones are `LambertAzimuthalEqualAreaProjection`'s `Math.hypot` → `MathHelpers.norm2`
+  `expected_rows: 2`, and INTENDED gained exactly 2 while the backlog again stayed put.
+
+  **The eighth is the first reading where the backlog moved because rows were explained.** Every
+  earlier fall in UNEXPLAINED came from rows that stopped changing. Here 50 rows moved out of
+  UNCHANGED — ten newly-registered projections at five probe rows each — and three rules claimed all
+  50, which is the familiar shape. What is new is the other half: three further rules
+  (`PROJ-CASS-EASTING-A4-SIGN-CORRECTED` 156 rows, `DICT-ESRI-OMERC-VARIANT-A-NEEDS-NO-UOFF` 43,
+  `PARSE-UNITS-LINK-NOW-RECOGNISED` 5) named the mechanism behind **204 rows that had been changing
+  all along with nothing to account for them**. INTENDED therefore gains 254 while UNEXPLAINED falls
+  by 204, and the two halves have to be read separately — the net is not one movement.
+
+  Two of the earlier ones are `LambertAzimuthalEqualAreaProjection`'s `Math.hypot` → `MathHelpers.norm2`
   conversion, claimed
   by the rule `NUM-LAEA-HYPOT-TO-NORM2` with `expected_rows: 2` and both keys **enumerated** —
   `proj4-epsg.csv:00619` (EPSG:4326→2163) and `proj4-epsg.csv:01495` (EPSG:4326→3409). **A stable
@@ -198,14 +238,17 @@ Five workflows:
   not to this workflow. `golden/README.md`'s triage sections break it down by owner. **No
   `FIGURES_MOVED`, no `COUNT_MISMATCH`, no `DEAD_RULE`, no `EXPIRED_RULE`, no `PENDING_RULE_FIRED`**
   in the same run.
-  There are **49 rules** as of 2026-08-14 — this file has said 38, 41, 42, 44 and 48 at various
-  points, so count rather than quote. All 49 are `status: active` and all 49 carry a pinned integer
-  `expected_rows` summing to 39,149, counted with anchored patterns (`grep -cE '^  - id:'`,
+  There are **54 rules** as of 2026-08-16 — this file has said 38, 41, 42, 44, 48 and 49 at various
+  points, so count rather than quote. All 54 are `status: active` and all 54 carry a pinned integer
+  `expected_rows` summing to 39,403, counted with anchored patterns (`grep -cE '^  - id:'`,
   `grep -cE '^    status: active'`, `grep -cE '^    expected_rows: [0-9]+'`, which agree), with the
-  gate's own `rules.yaml: 49/49 rules carry a pinned expected_rows` line as a third. The job goes green when
+  gate's own `rules.yaml: 54/54 rules carry a pinned expected_rows` line as a third. The job goes green when
   the backlog is claimed, one rule at a time.
 
-- **`bench` / `gate` is no longer in this list — it is GREEN.** Re-derived 2026-08-03 in the container
+- **`bench` / `gate` is no longer in this list — it is GREEN, and since 2026-08-14 it is also
+  switched off.** It runs only when someone starts it by hand, so it will not appear on a pull
+  request or on a pushed commit and it is not missing when it does not. Everything below is the
+  state of the job itself, which is unchanged. Re-derived 2026-08-03 in the container
   (`./docker/run.sh bench`, which runs the job's exact command):
   **`GATE PASSED (0 warning(s))`, exit 0, 0 breaches, 245 gated, 0 EXCLUDED, 245 arms**, with the
   non-vacuity line `245 of 245 arms carry an allocation measurement`, in **21 m 23 s**.
@@ -337,12 +380,14 @@ truncated, so the tags stay unreachable and the answer does not change. Note als
 currently has no tags at all (`git ls-remote --tags origin` is empty), so this fix only takes effect
 once the local tags are pushed; see `HOWTORELEASE.txt`.
 
-**The `push` trigger is filtered to `master`/`main` in all five workflows.** With an unfiltered
-`push` alongside `pull_request`, a single commit on a PR branch fires each workflow twice — ten runs
-across this directory per commit. `concurrency` cannot collapse them: the two events carry different
+**Where there is a `push` trigger at all, it is filtered to `master`/`main`.** That is `ci.yaml`,
+`conformance.yaml` and `determinism.yaml`; `golden.yaml` and `bench.yaml` have no `push` trigger.
+With an unfiltered `push` alongside `pull_request`, a single commit on a PR branch fires a workflow
+twice. `concurrency` cannot collapse them: the two events carry different
 `github.ref` values (`refs/heads/<branch>` vs `refs/pull/<n>/merge`) and therefore land in different
-concurrency groups. A topic branch is now covered by `pull_request` alone, `master`/`main` by `push`
-alone.
+concurrency groups. A topic branch is covered by `pull_request` alone, `master`/`main` by `push`
+alone. The rule applies to any workflow here that regains a `push` trigger, which is why the note
+stays after two of the five lost theirs.
 
 **`git add --intent-to-add` before `git diff --exit-code`.** A plain `git diff` sees only
 modifications and deletions; a file *added* upstream would be untracked and the check would pass

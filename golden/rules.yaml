@@ -281,7 +281,7 @@ rules:
       UnsupportedParameterException became an InvalidValueException. It is still broken, for a
       different reason, and calling that 'intended' would launder an unimplemented projection
       into a declared change." That was correct at the time and is now spent: labrd is
-      implemented (see PROJ-NEW-PROJECTIONS-REGISTERED, whose 44-name list now carries it), so
+      implemented (see PROJ-NEW-PROJECTIONS-REGISTERED, whose 49-name list now carries it), so
       the row set is `EXC:UnsupportedParameterException: crs-tgt: azi parameter is not
       supported` -> `OK`, which is precisely this rule's predicate. The definition is
       `proj=labrd lat_0=-18d54 lon_0=46d26'13.95" azi=18d54 k_0=0.9995 x_0=400000 y_0=800000`;
@@ -1081,7 +1081,13 @@ rules:
   - id: PROJ-NEW-PROJECTIONS-REGISTERED
     status: active
     expires: 2027-06-30
-    # PINNED at 220 = 44 projection names x 5 probes. Was 180 = 36 x 5.
+    # PINNED at 245 = 49 projection names x 5 probes. Was 225 = 45 x 5, 220 = 44 x 5, and 180 = 36 x 5.
+    #
+    # The 1 added on 2026-08-14: airocean. Its sibling `isea` landed in the same change and is
+    # deliberately NOT here -- isea's forward works but its inverse refuses on the canonical
+    # parameter set, so it ends at EXC:ProjectionException, not OK, and this rule's predicate
+    # declines it. It has its own rule, PROJ-ISEA-NO-INVERSE-OFF-THE-DEFAULT-ORIENTATION, for the
+    # same reason PROJ-MOD-STER-GS50-DOMAIN-REFUSED exists separately below.
     #
     # THE TRIPWIRE DID ITS OTHER JOB. The pin at 180 did not fail -- it held at exactly 180 --
     # and the 8 names that landed after it showed up as 40 UNEXPLAINED rows carrying the
@@ -1096,52 +1102,70 @@ rules:
     # that reason. labrd is now implemented, world:madagascar builds, and those 5 REG rows are
     # claimed by PARSE-NO-KEYWORD-ALLOWLIST above -- the prediction and its resolution are both
     # on the record.
-    expected_rows: 220
+    #
+    # The 4 added on 2026-08-14: healpix qsc rhealpix s2 -- the cube-and-sphere polyhedral batch.
+    # All 20 rows carry the same `EXC:InvalidValueException` -> `OK` transition as the other 44,
+    # with the baseline message `crs-tgt: Unknown projection: <name>`, so they belong to this rule
+    # rather than to a new one; a separate rule would have been a DEAD_RULE competing for the same
+    # predicate. Counted from golden-report.tsv: 5 probes each for proj/healpix, proj/qsc,
+    # proj/rhealpix and proj/s2, all UNEXPLAINED before this edit.
+    #
+    # THAT 240 WAS MEASURED AGAINST PLAIN MASTER AND IS NOT THE FIGURE HERE. The icosahedral change
+    # landed first and had already taken this rule from 220 to 225 by adding airocean, so the four
+    # names above make it 245 = 49 x 5, not 240. Both re-pins are right about their own five rows
+    # and neither knew about the other; 245 is the only figure that is right about all of them.
+    expected_rows: 245
     reason: |
       The synthetic matrix carries all 188 of 9.8.1's PROJ_HEAD names precisely so that a projection
       arriving is visible as a status transition rather than as nothing at all -- golden/README.md,
-      "The synthetic matrix is not optional". This rule is that transition, for the 36 names the
-      Tier A / Tier B / mod_ster / interrupted / `ups` / `builtins` port batches added. Every
+      "The synthetic matrix is not optional". This rule is that transition, for the names the
+      Tier A / Tier B / mod_ster / interrupted / `ups` / `builtins` and polyhedral port batches
+      have added -- 36 at first, then 44, then 45, and 49 now; the enumerated list below is the
+      figure to count, not this sentence. Every
       claimed row moves from `EXC:InvalidValueException` with the baseline message
       `crs-tgt: Unknown projection: <name>` to `OK`.
 
-      The 44 names, each `SYN proj/<name>` and each 5 probes:
-        adams_ws2 alsk calcofi ccon col_urban comill eck3 eqearth gs48 gstmerc igh igh_o imoll
-        imoll_o imw_p kav7 labrd lcca lee_os mbt_s mbtfps mil_os natearth natearth2 nell_h ocea
-        patterson peirce_q putp1 putp3 putp3p putp6 putp6p som spilhaus times tissot tobmerc
-        tpeqd ups wag6 webmerc wink1 wink2
+      The 49 names, each `SYN proj/<name>` and each 5 probes:
+        adams_ws2 airocean alsk calcofi ccon col_urban comill eck3 eqearth gs48 gstmerc healpix
+        igh igh_o imoll imoll_o imw_p kav7 labrd lcca lee_os mbt_s mbtfps mil_os natearth
+        natearth2 nell_h ocea patterson peirce_q putp1 putp3 putp3p putp6 putp6p qsc rhealpix s2
+        som spilhaus times tissot tobmerc tpeqd ups wag6 webmerc wink1 wink2
 
       WHAT THIS RULE DOES AND DOES NOT VOUCH FOR. The baseline side is all-NaN by construction --
       the CRS could not be built -- so there is no baseline number for this rule to absorb and no
       numeric regression can hide behind it. Equally, it makes NO claim that the coordinate now
-      produced is right. That question belongs to gie, per this file's opening policy: 22 of these
-      36 names have `.gie` coverage and the conformance module is where their values are judged. All
-      this rule records is that the name resolves where it previously did not, which is a change
-      somebody intended.
+      produced is right. That question belongs to gie, per this file's opening policy: the
+      conformance module is where these names' values are judged, and every one of the 49 is
+      exercised there. (This clause used to read "22 of these 36 names have `.gie` coverage". That
+      count was true of the original 36 and has not been re-derived on the same footing since, so
+      it has been dropped rather than rescaled: searching the `.gie` sources for `proj=<name>`
+      finds all 49, which is a different measurement, not an updated one. It was last re-run over
+      all 49 names on 2026-08-16, after the pin reached 245, and every name was found -- the
+      earlier passes of this paragraph said 48, which was the list length before airocean and the
+      four polyhedral names had both been folded in.) All this rule records is that the name
+      resolves where it previously did not, which is a change somebody intended.
 
-      SCOPED BY AN EXPLICIT 36-NAME LIST, not by `status_from`/`status_to` alone, and the reason is
+      SCOPED BY AN EXPLICIT 49-NAME LIST, not by `status_from`/`status_to` alone, and the reason is
       the one PARSE-NO-KEYWORD-ALLOWLIST learned the hard way: an `InvalidValueException -> OK`
       predicate with nothing else on it would also have claimed `SYN proj/omerc` (5 rows, baseline
       message `fwd: Infinite longitude`, a projection that DID exist in 1.4.3 and whose kernel was
       rewritten), the four `SYN ellps/*` keys (20 rows, `Unknown ellipsoid`), and the six
       `inv: Infinite longitude` rows on `epsg:5472`, `esri:102766`, `esri:65061`, `esri:65161`,
       `nad27:5400` and `proj/poly` -- all four of which are different mechanisms with different
-      owners. Naming the 36 keeps them apart and makes a 37th arrival show up as a COUNT_MISMATCH
+      owners. Naming the 49 keeps them apart and makes a 50th arrival show up as a COUNT_MISMATCH
       rather than be swallowed.
     match:
       classifications: [CHANGED]
       sections: [SYN]
-      keys: ["proj/adams_ws2", "proj/alsk", "proj/calcofi", "proj/ccon", "proj/col_urban",
-             "proj/comill", "proj/eck3",
-             "proj/eqearth", "proj/gs48", "proj/gstmerc", "proj/igh", "proj/igh_o",
-             "proj/imoll", "proj/imoll_o", "proj/imw_p",
-             "proj/kav7", "proj/labrd", "proj/lcca", "proj/lee_os", "proj/mbt_s",
-             "proj/mbtfps", "proj/mil_os",
-             "proj/natearth", "proj/natearth2", "proj/nell_h", "proj/ocea", "proj/patterson",
-             "proj/peirce_q",
-             "proj/putp1", "proj/putp3", "proj/putp3p", "proj/putp6", "proj/putp6p", "proj/som",
-             "proj/spilhaus", "proj/times", "proj/tissot", "proj/tobmerc", "proj/tpeqd",
-             "proj/ups", "proj/wag6", "proj/webmerc", "proj/wink1", "proj/wink2"]
+      keys: ["proj/adams_ws2", "proj/airocean", "proj/alsk", "proj/calcofi", "proj/ccon",
+             "proj/col_urban", "proj/comill", "proj/eck3", "proj/eqearth", "proj/gs48",
+             "proj/gstmerc", "proj/healpix", "proj/igh", "proj/igh_o", "proj/imoll",
+             "proj/imoll_o", "proj/imw_p", "proj/kav7", "proj/labrd", "proj/lcca", "proj/lee_os",
+             "proj/mbt_s", "proj/mbtfps", "proj/mil_os", "proj/natearth", "proj/natearth2",
+             "proj/nell_h", "proj/ocea", "proj/patterson", "proj/peirce_q", "proj/putp1",
+             "proj/putp3", "proj/putp3p", "proj/putp6", "proj/putp6p", "proj/qsc", "proj/rhealpix",
+             "proj/s2", "proj/som", "proj/spilhaus", "proj/times", "proj/tissot", "proj/tobmerc",
+             "proj/tpeqd", "proj/ups", "proj/wag6", "proj/webmerc", "proj/wink1", "proj/wink2"]
       status_from: "EXC:org.locationtech.proj4j.InvalidValueException"
       status_to: "OK"
     expect:
@@ -1189,6 +1213,59 @@ rules:
       classifications: [CHANGED]
       sections: [SYN]
       keys: ["proj/gs50"]
+      status_from: "EXC:org.locationtech.proj4j.InvalidValueException"
+      status_to: "EXC:org.locationtech.proj4j.ProjectionException"
+    expect:
+      dimensions: [fx, fy, fz, ix, iy, iz]
+      allow_status_change: true
+      allow_inside_change: true
+      allow_nonfinite: true
+
+  # ---------------------------------------------------------------------------------------------
+  - id: PROJ-ISEA-NO-INVERSE-OFF-THE-DEFAULT-ORIENTATION
+    status: active
+    expires: 2027-06-30
+    # PINNED at 5 = `SYN proj/isea` x 5 probes. Structural: `isea` appears in exactly one golden
+    # key, because no shipped CRS definition in any of the five dictionaries uses `+proj=isea`.
+    # `grep -rEoh '\+?proj=(omerc|isea|airocean)'` over epsg/esri/world/nad83/nad27 returns
+    # 46 `+proj=omerc` and 3 bare `proj=omerc` and NOTHING for either icosahedral name -- the
+    # optional plus and the omerc control are both deliberate, because these dictionaries are
+    # split on the leading `+` and a bare-anchored grep scores a confident zero. Measured
+    # 2026-08-14 in the worktree that first registered the operator.
+    expected_rows: 5
+    reason: |
+      `+proj=isea` is registered for the first time, so the baseline's
+      `crs-tgt: Unknown projection: isea` is gone. It does NOT reach `OK`, which is why this rule
+      exists rather than a 46th name on PROJ-NEW-PROJECTIONS-REGISTERED above: the forward
+      succeeds and the inverse refuses, so the row ends at `EXC:ProjectionException`.
+
+      THAT REFUSAL IS PROJ 9.8.1's OWN AND IS THE POINT OF THE PORT. The synthetic matrix gives
+      every `proj/<name>` key the same canonical parameters --
+      `+ellps=GRS80 +lat_0=45 +lon_0=10 +lat_1=30 +lat_2=60 +x_0=0 +y_0=0 +units=m` -- and
+      `9.8.1:src/projections/isea.cpp` only assigns `P->inv` when the configuration is the default
+      plane one: `+mode=plane`, aperture 3, resolution 4, azimuth 0 and an orientation of `isea` or
+      `pole`. `+lat_0` and `+lon_0` override the orientation, so the canonical set is none of
+      those and upstream installs no inverse at all.
+
+      Measured, not inferred. With that exact string, `proj -f "%.9f"` forwards three probes
+      happily and `proj -I` answers `*  *` on all three -- upstream declining, in its own words.
+      proj4j raises `ProjectionException` with `ErrorCause.COORDINATE_OUT_OF_DOMAIN` and a message
+      naming the five conditions, which is what "a failure must never be expressed as a plausible
+      coordinate" requires and is the same shape as PROJ-MOD-STER-GS50-DOMAIN-REFUSED above.
+
+      Only `fx`, `fy` and `fz` move: `ix`, `iy` and `iz` are NaN on both sides, NaN in the baseline
+      because the CRS could not be built and NaN now because the inverse refuses. So the baseline
+      side is all-NaN by construction and this rule absorbs no numeric regression. It makes no
+      claim about the forward coordinates either -- those are gie's question, and `isea` has 41
+      corpus assertions across `gie/builtins.gie` blocks 128-131 that judge them.
+
+      `allow_inside_change` IS SET, for the reason spelled out at PROJ-MOD-STER-GS50-DOMAIN-REFUSED:
+      `-` is what GoldenGenerator writes when no CRS existed to ask, and `F` is a real answer from a
+      real projection. "Not asked" -> "asked, and no" is part of this change.
+    match:
+      classifications: [CHANGED]
+      sections: [SYN]
+      keys: ["proj/isea"]
       status_from: "EXC:org.locationtech.proj4j.InvalidValueException"
       status_to: "EXC:org.locationtech.proj4j.ProjectionException"
     expect:
@@ -2709,10 +2786,97 @@ rules:
       do not bury the ~1,700 rows of structural change underneath them.
 
       The band is deliberately tight -- 1e-6 in raw column units, i.e. 1 micrometre for a projected
-      target and ~0.1 m for the always-degrees inverse columns -- because the measured magnitude
-      distribution is bimodal with an empty valley between 1e-5 and 1e-3. Everything above the band
-      stays UNEXPLAINED on purpose: that is the backlog. It also refuses status changes, inside
-      changes and non-finite endpoints, so it cannot absorb anything structural.
+      target and ~0.1 m for the always-degrees inverse columns. Everything above the band stays
+      UNEXPLAINED on purpose: that is the backlog. It also refuses status changes, inside changes
+      and non-finite endpoints, so it cannot absorb anything structural.
+
+      THIS PARAGRAPH USED TO SAY THE BAND WAS TIGHT "BECAUSE THE MEASURED MAGNITUDE DISTRIBUTION IS
+      BIMODAL WITH AN EMPTY VALLEY BETWEEN 1e-5 AND 1e-3". THAT WAS FALSE AND IS CORRECTED HERE,
+      2026-08-16, because a wrong empirical claim in a reason is a defect on its own -- and this one
+      is load-bearing: a valley is the only thing that would make a ceiling in it self-evident.
+      Counted over every CHANGED row in golden-report.tsv carrying a finite magnitude:
+
+        1e-6 .. 1e-5       55 rows      12 INTENDED       43 UNEXPLAINED
+        1e-5 .. 1e-4      233 rows     225 INTENDED        8 UNEXPLAINED
+        1e-4 .. 1e-3   13,175 rows  13,157 INTENDED       18 UNEXPLAINED
+        1e-3 .. 1e-2      746 rows     688 INTENDED       58 UNEXPLAINED
+
+      13,408 rows in the supposed valley, and 1e-4 .. 1e-3 is the densest decade in the whole
+      distribution -- it is where PROJ-TMERC-PODER-ENGSAGER-DEFAULT's 14,037 rows live, that rule
+      having measured its own median at 2.53e-4 m. The distribution is not bimodal about 1e-6 either.
+      The only gap anywhere near here is narrow, one-sided and does not survive the INTENDED rows:
+      on the UNEXPLAINED side alone nothing sits between 9.719e-6 and 1.968e-5, a factor of 2.02,
+      while 225 INTENDED rows occupy 1e-5 .. 1e-4.
+
+      SO THE 1e-6 CEILING IS NOT JUSTIFIED BY A VALLEY. It is justified by being far enough below
+      every neighbouring rule's floor to take nothing from them, and it stays until the
+      numerical-core owner replaces this rule per the paragraph above. Do not read the absence of
+      UNEXPLAINED rows below 1e-6 as evidence the ceiling is in the right place: this rule's matcher
+      is `classifications: [CHANGED]` and nothing else, so every row under the ceiling is claimed by
+      construction and that bucket is empty by definition, not by measurement.
+
+      WIDENING THE CEILING TO 1e-5 WAS INVESTIGATED ON 2026-08-16 AND DECLINED. It would claim all
+      43 UNEXPLAINED rows in 1e-6 .. 1e-5 -- and steal none, since no rule ordered after this one
+      claims anything in that band -- so it is mechanically available. It is still wrong on two
+      counts.
+
+      FIRST, THE MECHANISM PREDICTS 23 OF THE 43 AND THE OTHER 20 ARE INTERLEAVED WITH THEM, so no
+      ceiling separates the two populations. The candidate mechanism is the meridional arc: a tmerc
+      northing is k0*(M(phi) - M(phi0)), two evaluations of a function whose old es-series form
+      (ProjectionMath.enfn/mlfn) is wrong by up to 4,936 nm on GRS80 -- measured here at phi = 71.5
+      deg by 16-point Gauss-Legendre against a(1-e2)*integral(1-e2 sin^2 t)^-1.5, which confirms the
+      4,920 nm this reason cites above. Predicted movement per row is then
+      k0*(err(phi0) - err(phi))/to_meter, and it was evaluated against the measurement row by row:
+
+        23 rows      PROJ4_SPCS_EPSG_nad83.csv and PROJ4_SPCS_nad27.csv, fy the largest moved
+                     dimension, predicted/measured 0.990 .. 1.049 across GRS80 and Clarke 1866,
+                     latitudes 41.5 .. 71 deg, on and off the central meridian
+        14 rows      fx largest: 4 REG esri:102016/102019 aeqd, 2 REG epsg:4394 cass, 8
+                     proj4-epsg.csv tmerc at 2 deg from the central meridian
+         4 rows      REG epsg:4188, fz largest, a longlat -> longlat height with no arc in it
+         2 rows      proj4-epsg.csv:01262/01263, lcc, which uses tsfn/phi2 and not the arc at all
+
+      The 23 span 1.03e-6 .. 9.72e-6 and the other 20 sit inside that same span -- 1.545e-6 aeqd,
+      1.796e-6 tmerc fx, 2.127e-6 lcc, 3.904e-6 cass, 5.762e-6 fz, 6.010e-6 tmerc fx. Interleaved,
+      not separated. A 1e-5 ceiling would claim 43 rows on a mechanism covering 23 of them, which is
+      the trade golden/README.md refuses: a rule asserting an intent nobody stated is worse than an
+      UNCHANGED row.
+
+      TWO OF THE 43 HAVE SINCE BEEN CLAIMED AND THE CENSUS ABOVE IS LEFT AS IT WAS MEASURED. The
+      "3.904e-6 cass" row and its twin are `REG epsg:4394` probes 1 and 2, and
+      PROJ-CASS-EASTING-A4-SIGN-CORRECTED at the end of this file now claims them on a mechanism
+      that predicts their magnitude to 0.002% -- the sign of Cassini-Soldner's A^4 easting term, not
+      the arc. So the 1e-6 .. 1e-5 decade reads 55 rows / 14 INTENDED / 41 UNEXPLAINED as of
+      2026-08-16, and the candidate-arc tally is 23 predicted of 41 rather than of 43. The numbers
+      above are not rewritten because they are a dated measurement and this is what changed since;
+      the conclusion is untouched and slightly strengthened, since two of the 20 interleaved rows
+      turned out to have a different mechanism entirely. The 55 / 14 / 41 is re-measured off
+      golden-report.tsv after the two new rules landed, not adjusted by hand.
+
+      AND THE "TWO ARC EVALUATIONS SO ~9.8e-6 m" CEILING THAT MADE 1e-5 LOOK PRINCIPLED IS WRONG BY
+      A FACTOR OF TWO. err(phi) is essentially one-signed over 0 .. 90 deg -- measured min -8.4 nm at
+      17.5 deg, max +4,936 nm at 71.5 deg -- so a difference of two evaluations is bounded by the
+      spread, 4,944 nm, not by the sum, 9,872 nm. The mechanism cannot produce more than 4.944e-6 m
+      on GRS80. The cluster appears to reach 9.72e-6 only because these SPCS targets are in US survey
+      feet: 9.719e-6 ft is 2.96e-6 m, comfortably inside the bound. Two errors -- a doubled bound and
+      an unconverted unit -- happened to cancel.
+
+      SECOND, WIDENING WOULD LAUNDER ROWS A NEIGHBOURING RULE DECLINES ON PURPOSE. 33 of the 43 are
+      section CSV: 23 SPCS and 10 proj4-epsg.csv. PROJ-TMERC-PODER-ENGSAGER-DEFAULT, ordered three
+      rules earlier and covering 1e-6 .. 1e-2, excludes "Section CSV in its entirety ... 157 of them
+      are below this rule's ceiling and would have been claimed; they are not, because 'still moving'
+      beats 'would have matched'", and golden/README.md marks the 1,308 CSV rows "reserved; do not
+      rule" pending a user decision on the 1,163-row proj4-epsg.csv re-pin. This rule's matcher has
+      no `sections:` clause, so a wider ceiling here would silently take what that rule refused --
+      the same laundering this file's ordering discipline exists to prevent.
+
+      THE 26 ROWS ABOVE 1e-5 ARE SOMEBODY ELSE'S AND STAY ON THE BACKLOG, and there is a better
+      candidate than this rule for them: all 26 are fx-largest, and on the 18 proj4-epsg.csv tmerc
+      rows fx grows monotonically with distance from the central meridian -- 1.97e-5 m at 3.1 deg,
+      7.6e-5 at 4 deg, 2.7e-4 at 5 deg, 8.47e-4 at 6.000 deg. TransverseMercatorProjection's own
+      javadoc tabulates Evenden/Snyder minus Poder/Engsager as "about 0.9 mm" at 6 deg; 0.85 mm
+      measured at 6.000 deg is that table to one significant figure. They belong to the tmerc
+      stream and to the reserved CSV re-pin, not here.
 
       Note the short expiry. This is a migration-window rule, not a specification.
     match:
@@ -3122,3 +3286,458 @@ rules:
     expect:
       dimensions: [fx, fy, ix, iy, iz]
       magnitude: {min: 3.39e4, max: 3.74e4}
+
+  # ---------------------------------------------------------------------------------------------
+  - id: PROJ-CHAMB-MOD-KROVAK-OEA-ROUSS-REGISTERED
+    status: active
+    expires: 2027-06-30
+    # PINNED at 20 = four names x five probes, and enumerable: `SYN proj/chamb`, `SYN
+    # proj/mod_krovak`, `SYN proj/oea` and `SYN proj/rouss`, probes 0..4 each. Measured from
+    # golden/target/golden/golden-report.tsv in this worktree BEFORE the rule was written, and the
+    # whole-run arithmetic closes on its own: UNCHANGED 11994 -> 11974, CHANGED 41436 -> 41456,
+    # ADDED and REMOVED still 0, UNEXPLAINED 2287 -> 2307. Twenty rows left UNCHANGED and twenty
+    # arrived, so nothing else in the 53,430 moved -- in particular `SYN proj/krovak`, whose five
+    # rows this change edits the source of, does NOT move and was already CHANGED for an unrelated
+    # reason.
+    expected_rows: 20
+    reason: |
+      Four PROJ 9.8.1 operators the Registry did not resolve now resolve, so their twenty synthetic
+      rows stop being `EXC:InvalidValueException` ("Unknown projection: ..."). This rule vouches
+      for the fact that they now build; each row's numbers are vouched for by the gie corpus, which
+      is where the twenty-six assertions these four operators own are now checked to PROJ's own
+      digits.
+
+      Every SYN row is `+proj=<name>` plus InputSet.CANONICAL,
+      `+ellps=GRS80 +lat_0=45 +lon_0=10 +lat_1=30 +lat_2=60 +x_0=0 +y_0=0 +units=m`, at five probes.
+      The four names land in three different states, and each matches what proj 9.8.1 does with the
+      identical string:
+
+      `SYN proj/rouss` and `SYN proj/mod_krovak` -> OK, with numbers.
+        echo "10 45" | proj -f "%.9f" +proj=mod_krovak +ellps=GRS80 +lat_0=45 +lon_0=10 \
+             +lat_1=30 +lat_2=60 +x_0=0 +y_0=0 +units=m
+          -5.270616269  -1660352.071123898
+      and this run's probe 0 is -5.270616269468382, -1660352.0711238978. Same for rouss at probe 1,
+      longitude -11.213203435596423, latitude 30: proj gives -2073683.266433114 -1439598.960911903
+      and this run gives -2073683.2664331137, -1439598.9609119026. rouss probe 0 is the projection
+      origin and is exactly (0, 0) on both sides.
+
+      `SYN proj/oea` -> `EXC:ProjectionException`, and PROJ refuses the same string for the same
+      reason. CANONICAL carries no `+n` and no `+m`, and oea.cpp:64-72 bounds both at `> 0` with
+      pj_param's `d` sigil, which answers 0 for an absent key:
+        echo "10 45" | proj +proj=oea +ellps=GRS80 +lat_0=45 +lon_0=10 +lat_1=30 +lat_2=60
+          proj_create: Error 1027 (Invalid value for an argument):
+          oea: Invalid value for n: it should be > 0
+      Only the `status` column moves on these five: both sides are all-NaN, so this rule vouches
+      for nothing numeric on them. The exception class changes because the reason changes -- from
+      "there is no such projection" to "these parameters are not usable" -- which is the honest
+      one.
+
+      `SYN proj/chamb` -> `EXC:CrsTransformException`, but the FORWARD numbers are recorded and are
+      PROJ's. The status is the inverse leg's: chamb has no inverse anywhere, upstream included
+      (chamb.cpp defines only `chamb_s_forward` and never assigns `P->inv`), so
+      `ChamberlinTrimetricProjection.hasInverse()` is false and the round-trip half of the probe
+      throws. The forward at probe 0 is 39703.5106962626, -782516.4806961259 against proj's
+      39703.510696263 -782516.480696126 on the same string. `fz` moves from NaN to 0 for the same
+      reason it does on the other three: a height column exists once a forward runs.
+
+      WHY `SYN proj/krovak` IS NOT IN THIS RULE. KrovakProjection is edited by this change --
+      mod_krovak is the same setup function with a boolean, as it is upstream, so the polynomial
+      correction sits behind an `isModified()` the base class answers false to. Its five rows are
+      byte-identical to the previous run and remain claimed by whichever rule already had them.
+      That is the control for the refactor: if the extra branch had cost a bit, these twenty would
+      have been twenty-five.
+    match:
+      sections: [SYN]
+      keys: ["proj/chamb", "proj/mod_krovak", "proj/oea", "proj/rouss"]
+      classifications: [CHANGED]
+      status_from: "EXC:org.locationtech.proj4j.InvalidValueException"
+    expect:
+      dimensions: [fx, fy, fz, ix, iy, iz]
+      allow_status_change: true
+      allow_inside_change: true
+      allow_nonfinite: true
+
+  # ---------------------------------------------------------------------------------------------
+  - id: DICT-ESRI-OMERC-VARIANT-A-NEEDS-NO-UOFF
+    status: active
+    expires: 2027-06-30
+    # PINNED at 43 = 38 REG + 5 CSV, and every one of the 43 is enumerable.
+    #
+    #   REG  esri:24571, esri:26931, esri:102120, esri:102121, esri:102122, esri:102123,
+    #        esri:102631                                    probes 0..4        35 rows
+    #   REG  esri:26731                                     probes 0, 2, 4      3 rows
+    #   CSV  PROJ4_SPCS_EPSG_nad83.csv:00002 .. :00006      probe 0 only        5 rows
+    #
+    # WHY esri:26731 CONTRIBUTES 3 AND NOT 5. Its probes 1 and 3 end at
+    # EXC:CrsTransformException, not OK, and are already claimed by
+    # FAILCLOSED-NAD27-OUTSIDE-GRID-REPORTED at the top of this file -- the NAD27 grid has nothing
+    # to say at those two points, and that refusal happens whichever omerc variant runs. This
+    # rule's status_to: "OK" declines them on the predicate, so the count does not depend on rule
+    # order. 8 codes x 5 probes = 40, minus those 2, is the 38.
+    #
+    # MEASURED, NOT DERIVED. Two golden runs over the same tree, differing only in whether
+    # epsg/src/main/resources/proj4/nad/esri carries the eight +no_uoff, with the reports diffed
+    # row by row: exactly 43 of the 41,486 CHANGED rows differ between them, 38 REG and 5 CSV.
+    #
+    # THE FOUR HEADLINE COUNTS DO NOT MOVE, AND THAT IS THE POINT WORTH KNOWING. All 43 rows were
+    # already CHANGED and already UNEXPLAINED before the dictionary fix; the fix changes their
+    # magnitudes and nothing else. So UNCHANGED stays 11944 and CHANGED stays 41486 either way,
+    # and this rule's whole effect on the run is INTENDED 39199 -> 39242 and
+    # UNEXPLAINED 2287 -> 2244. Anyone reconciling this release's arithmetic should not look for
+    # 43 rows arriving from the UNCHANGED side, because none did.
+    expected_rows: 43
+    reason: |
+      Eight `+proj=omerc` entries in the shipped ESRI dictionary declared EPSG method 9815, Hotine
+      Oblique Mercator variant B, where PROJ 9.8.1's own definition of the same code declares
+      method 9812, variant A. They now carry `+no_uoff` and `+gamma`, which is what 9.8.1 emits:
+
+        projinfo -o PROJ EPSG:26931
+          +proj=omerc +no_uoff +lat_0=57 +lonc=-133.666666666667
+                      +alpha=323.130102361111 +gamma=323.130102361111 +k=0.9999 ...
+
+      and the same for EPSG:24571, EPSG:26731 and ESRI:102120, 102121, 102122, 102123, 102631.
+
+      THE MECHANISM, AND WHY IT IS A SHIFT. 9.8.1:src/projections/omerc.cpp computes one constant
+      at setup time and subtracts it from one coordinate:
+
+        if (no_off) Q->u_0 = 0;
+        else        Q->u_0 = fabs(Q->ArB * atan(sqrt(D * D - 1.) / cos(alpha_c)));
+
+      and in the forward, after `u` and `v` are found,
+
+        u -= Q->u_0;
+        xy.x = v * Q->cosrot + u * Q->sinrot;
+        xy.y = u * Q->cosrot - v * Q->sinrot;
+
+      with `sinrot`/`cosrot` being sin and cos of `gamma`. `u_0` depends only on the parameters, so
+      running variant A where variant B ran adds the same vector to every point:
+      `(dx, dy) = u_0 * (sin gamma, cos gamma)`. That is what the rows show. Recovering the angle
+      from the measured shift returns `gamma` to ten digits -- `atan2(dx, dy)` is 323.1301023611
+      for esri:26731 and esri:26931, 337.2555555556 for the four Michigan GeoRef codes, and
+      323.1301023542 for esri:102631, whose `+gamma=-36.8698976458333` is the same angle written
+      negative.
+
+      SEVEN OF THE EIGHT MOVE BY A PURE TRANSLATION, AND THE EIGHTH DOES NOT. A missing origin
+      shift is a translation and nothing else, so the shift vector should be identical at all five
+      probes, and for seven codes it is -- identical to within one to four last bits, a relative
+      spread of about 1e-16, which is the rounding floor and not a signal:
+
+        esri:26731   |shift| = 22864206.423 US survey feet
+        esri:26931   |shift| =  6968872.110 metres
+        esri:102120  |shift| = 17369726.947 US survey feet
+        esri:102121  |shift| = 17369726.434 US survey feet
+        esri:102122  |shift| =  5294303.362 metres
+        esri:102123  |shift| =  5294303.206 metres
+        esri:102631  |shift| = 22863707.917 US survey feet
+
+      esri:24571 is the exception and has to be described separately: PROJ gives it
+      `+alpha=323.0257905` with `+gamma=323.130102361111`, an angle 0.1043° away, and when both are
+      supplied omerc.cpp derives `gamma0` from `alpha` while taking the rotation from `gamma`
+      (`if (alp) { gamma0 = aasin(sin(alpha_c) / D); if (!gam) gamma = alpha_c; }`). So supplying
+      `+gamma` changes the rotation as well as zeroing `u_0`, and the movement is a rotation plus a
+      translation: over the five probes the shift spreads by about 100 units on a 27,491-unit
+      magnitude, a relative spread of 3.7e-3 -- four thousand times the floor the other seven sit
+      at. Nothing about esri:24571's movement is constant, and the rule does not claim it is.
+
+      THIS MAKES THE REPORTED DEVIATION LARGER, AND IT IS STILL A CORRECTNESS FIX. The golden
+      baseline is released proj4j 1.4.3, and 1.4.3 was wrong about these codes in a third way of
+      its own -- neither variant A nor variant B. So moving from one wrong answer to the right one
+      increases the distance from the baseline. The five CSV rows are the clean demonstration,
+      because their expected values are committed alongside them in
+      core/src/test/resources/PROJ4_SPCS_EPSG_nad83.csv, from the original PROJ4 test83 data:
+
+        row :00003, EPSG:4269 (57.0, -133.666666666667) -> ESRI:102631
+          committed expected      2685941.919   1886799.668
+          1.4.3 baseline         16404166.667 -14374753.296
+          this tree, before fix  16404166.667 -16404166.667
+          this tree, after fix    2685941.9168  1886799.6665
+          cs2cs 9.8.1             2685941.9168  1886799.6665
+
+      All five of those CSV rows now agree with their committed expected values, and with 9.8.1,
+      to a few millimetres -- inside the 0.1 tolerance the CSV itself declares. What grew is the
+      divergence from 1.4.3. The error shrank to nothing.
+
+      Those five rows used to be commented out, four of them tagged "Bug in Proj4J Obl Merc". Both
+      the comment characters and the tag are removed in this release, because the bug was never in
+      the omerc kernel -- fed the old shipped definition, PROJ 9.8.1 reproduces the wrong answer bit
+      for bit. This moved no golden row: MetaCrsCsv strips a leading '#' and reads the row anyway,
+      so all five were already in the baseline. What changed is that core's MetaCRSTest now runs
+      them too.
+
+      WHY EIGHT AND NOT ALL SEVENTEEN. The dictionary holds 17 `+proj=omerc` entries and the other
+      nine are genuinely variant B: 2056, 2057, 21780, 21781, 23700, 29700, 29871, 29872, 29873.
+      PROJ 9.8.1 emits no `+no_uoff` for any of them -- 2056, 21780, 21781 and 23700 it answers as
+      `+proj=somerc` altogether, and 2057, 29700 and the three 2987x are omerc with `+gamma` and no
+      offset suppression. Those nine correctly carry no `+no_uoff` here and do not move. A sweep
+      that added `+no_uoff` wherever it saw `omerc` would have broken all 45 of their rows, so the
+      eight are named one at a time and a ninth arrival is a COUNT_MISMATCH rather than something
+      that gets absorbed.
+
+      WHAT THIS RULE DOES NOT VOUCH FOR. It claims whole rows, and on esri:24571 a row carries more
+      movement than this fix caused: its `fz` and `iz` differ from baseline by about 9.3e-10, and
+      `ix`/`iy` by around 1e-14, in both runs alike -- byte-identical with and without the eight
+      `+no_uoff`. Those are last-bit differences from other work in this release and this rule is
+      not their explanation, only their current owner. The `dimensions` list has to sanction them
+      because the alternative is that the rule declines the row and 43 goes back to being
+      UNEXPLAINED. The magnitude band is set from the measured spread of the 43: the smallest is
+      5725.107 at esri:24571 probe 1 and the largest 17596536.818 at esri:26731 probe 4.
+    match:
+      classifications: [CHANGED]
+      sections: [REG, CSV]
+      keys: ["esri:24571", "esri:26731", "esri:26931",
+             "esri:102120", "esri:102121", "esri:102122", "esri:102123", "esri:102631",
+             "PROJ4_SPCS_EPSG_nad83.csv:00002", "PROJ4_SPCS_EPSG_nad83.csv:00003",
+             "PROJ4_SPCS_EPSG_nad83.csv:00004", "PROJ4_SPCS_EPSG_nad83.csv:00005",
+             "PROJ4_SPCS_EPSG_nad83.csv:00006"]
+      status_from: "OK"
+      status_to: "OK"
+    expect:
+      dimensions: [fx, fy, fz, ix, iy, iz]
+      magnitude: {min: 1.0e3, max: 2.0e7}
+
+  # ---------------------------------------------------------------------------------------------
+  # THE TWO CASSINI RULES BELOW ARE ORDERED LAST, after NUM-KARNEY-LATITUDE-CORE, and that is what
+  # keeps every other pin in this file still. 191 of the 205 `REG`/`SYN` rows whose target is
+  # `+proj=cass` are CHANGED; 30 of them are claimed by NUM-KARNEY-LATITUDE-CORE and were before
+  # these rules existed. Placed anywhere ahead of that rule these two would take some of its 30 and
+  # turn 19309 into a COUNT_MISMATCH. Placed at the very end of the file they can only take rows no
+  # rule wanted, so no existing expected_rows moves at all -- verified by diffing the run's matched
+  # counts before and after.
+  #
+  # THE TWO BANDS ARE DISJOINT -- 1e-6 .. 1e4 below and 1e5 .. 1e7 for the `link` rule -- so their
+  # relative order does not affect either count either. The narrower rule is written first anyway,
+  # to match this file's convention.
+  #
+  # SECTION `CSV` IS DELIBERATELY OUT OF SCOPE and 29 more cass rows stay UNEXPLAINED because of it:
+  # 28 that the sign rule below would otherwise claim and 1 that the `link` rule would.
+  # golden/README.md marks the 1,308 `CSV` rows "reserved; do not rule" pending the user's decision
+  # on the 1,163-row proj4-epsg.csv re-pin, and NUM-KARNEY-LATITUDE-CORE's reason cites that
+  # reservation as a reason not to widen its own ceiling. The same reservation binds here. The
+  # mechanism below explains those 29 rows just as well as the 161 -- the closed form predicts all
+  # 28 sign rows and the `link` ratio is exact on the 1 -- so when the reserved re-pin lands, the
+  # two `sections:` clauses can be widened and the pins raised 156 -> 184 and 5 -> 6.
+  - id: PARSE-UNITS-LINK-NOW-RECOGNISED
+    status: active
+    expires: 2027-06-30
+    # PINNED at 5, and all five are one key: `REG epsg:3140`, probes 0..4. epsg:3140 is the ONLY
+    # definition carrying `+units=link` in all 9,013 shipped CRS --
+    # `grep -rhoE '\+units=[a-z0-9-]+'` over the five dictionaries returns 6,456 `m`, 760 `us-ft`,
+    # 143 `ft` and exactly 1 `link` -- which is why a defect in the unit table shows up on cass rows
+    # and nowhere else. The sixth affected row, `CSV proj4-epsg.csv:01241`, also targets EPSG:3140
+    # and is left UNEXPLAINED under the reserved-CSV rule above.
+    expected_rows: 5
+    reason: |
+      1.4.3 SILENTLY TREATED `+units=link` AS METRES, so every EPSG:3140 coordinate came out a
+      factor of 0.201168 too small. This is a unit-table defect, not a Cassini one, and it is
+      written as its own rule for that reason.
+
+      THE MECHANISM, BOTH SIDES. 1.4.3's `Proj4Parser` did read the parameter --
+      `Units.findUnits(s)` then `setFromMetres(1.0 / unit.value)` -- and `Units.LINKS` did exist,
+      declared `new Unit("link", "links", "link", 0.201168)`. What was missing is that `LINKS` was
+      not in the `Units.units` ARRAY that `findUnits` searches. That array held DEGREES, five metric
+      units, four imperial and four US units, and `findUnits` ends
+
+        return METRES;
+
+      with no error and no log line, so an unknown name resolves to metres and the caller cannot
+      tell. `link` was one of eight declared units left out of the array; `chain`, `us-chain`,
+      `fathom`, `point`, `radian`, `arc minute` and `arc second` were the others. This tree's
+      `Units.LINEAR_UNITS` carries PROJ's full linear list including `LINKS`, so `findUnits("link")`
+      now returns it.
+
+      Upstream applies it in `fwd_finalize`, `coo.xy.x = P->fr_meter * (P->a * coo.xy.x + P->x0)`,
+      with `fr_meter = 1 / to_meter` -- so `+x_0` is in metres and the finished coordinate is in
+      links.
+
+      THE MAGNITUDE IS A PURE SCALE FACTOR AND IT IS EXACT. On the northing, which the Cassini
+      easting fix below does not touch, current / baseline is 4.970969538 on all five probes, and
+      1 / 0.201168 = 4.970969537898672 -- agreement to every digit printed. So the rows moved by
+      being rescaled, not by being recomputed.
+
+      AND THE NEW VALUE IS PROJ 9.8.1's, CHECKED DIRECTLY. At probe 0 (178E, 18S):
+
+        $ echo "178 -18 0" | cs2cs -f "%.6f" +proj=longlat +datum=WGS84 \
+            +to +proj=cass +lat_0=-18 +lon_0=178 +x_0=109435.392 +y_0=141622.272 \
+                +a=6378306.3696 +b=6356571.996 +towgs84=98,390,-22,0,0,0,0 +units=link +no_defs
+        545954.517791   703214.595585 0.000000
+
+      This tree writes 545954.517791 / 703214.595585 -- identical. Drop `+units=link` from that same
+      command and 9.8.1 answers 109828.578435 / 141464.273765, which is the 1.4.3 baseline row to
+      every digit. Two runs of one binary, differing in one parameter, reproduce both sides of the
+      diff: that is the whole of the mechanism.
+
+      WHY THE BAND STARTS AT 1e5. The five magnitudes are 5.6e5 .. 2.7e6, all of them `fx` or `fy`
+      in links. A floor of 1e5 keeps this rule out of the Cassini easting rule below (whose ceiling
+      is 1e4) and far out of NUM-KARNEY-LATITUDE-CORE's 1e-6, so none of the three can absorb
+      another's rows even if reordered.
+
+      `fz` and `iz` are listed because they also move on probes 1..4: `fz` by 9.3e-10 m, ULP drift on
+      the `+towgs84` height, and `iz` by 1.5e-5 .. 4.1e-5 m, which is the round trip's height landing
+      differently now that the horizontal inverse converges. Neither is a vertical change and both
+      are far under the band, which is set on the maximum over the moved dimensions -- here always
+      `fx` or `fy`.
+
+      NOT FIXED HERE, AND REPORTED RATHER THAN FIXED: `findUnits` still returns METRES for a name it
+      does not know rather than refusing. That is the property that let this defect survive a
+      release silently, and this tree's javadoc records it at Units.java:61. Changing it is a
+      fail-closed API decision with its own row movement and belongs in its own commit.
+    match:
+      sections: [REG]
+      keys: ["epsg:3140"]
+      tgt_proj: [cass]
+      classifications: [CHANGED]
+      status_from: "OK"
+      status_to: "OK"
+    expect:
+      dimensions: [fx, fy, fz, ix, iy, iz]
+      allow_status_change: false
+      allow_inside_change: false
+      allow_nonfinite: false
+      magnitude: {min: 1.0e5, max: 1.0e7}
+
+  # ---------------------------------------------------------------------------------------------
+  - id: PROJ-CASS-EASTING-A4-SIGN-CORRECTED
+    status: active
+    expires: 2027-06-30
+    # PINNED at 156 = 152 REG + 4 SYN, and the shape of the 156 is the evidence, not a row list.
+    # Thirty-nine keys:
+    #
+    #   36 keys        probes 1, 2, 3, 4 only        144 rows
+    #   epsg:8044, epsg:8045    probes 0..4            10 rows
+    #   epsg:3381      probes 3, 4 only                 2 rows
+    #
+    # WHICH ROWS DO *NOT* MOVE IS THE PART THAT CONFIRMS THE MECHANISM, because the term below
+    # carries a factor of lam^5 * tan^2(phi) and therefore has to vanish in exactly two places:
+    #
+    #   probe 0 is the CRS's own (lon_0, lat_0), so lam = 0 and the term is identically zero. 28 of
+    #     the 30 cass rows NUM-KARNEY-LATITUDE-CORE claims are probe 0, at magnitudes 4.4e-16 ..
+    #     7.6e-7, i.e. under its 1e-6 ceiling.
+    #   the two exceptions are epsg:8044 and epsg:8045, and they are exceptions for a reason that
+    #     is not an exception at all: both carry `+pm=ferro`, so their probe 0 is 17.6667 deg off
+    #     the central meridian, not on it. `cs2cs` puts probe 0 of epsg:8044 at x = 1,305,172 m.
+    #   epsg:3381 probes 1 and 2 sit at latitude -0.0237 deg, where tan^2(phi) = 1.7e-7 kills the
+    #     term instead. Their fx moves 7.56e-7 m -- and those are precisely the other two of
+    #     NUM-KARNEY-LATITUDE-CORE's 30, at exactly that rule's ceiling.
+    #
+    # So the 30 rows this rule does not claim are the 30 the mechanism predicts it must not, and the
+    # split falls on the 1e-6 floor without that floor having been chosen to make it fall there.
+    expected_rows: 156
+    reason: |
+      PROJ 9.8.1 CORRECTED THE SIGN OF THE A^4 TERM IN THE CASSINI-SOLDNER FORWARD EASTING and
+      proj4j 1.4.3 predates the fix. `9.8.1:src/projections/cass.cpp:41` reads
+
+        xy.x = nu * A * (1. - A2 * T * (C1 + (8. - T + 8. * C) * A2 * C2));
+
+      where 1.4.3's `CassiniProjection.project` read `(C1 - (8. - t + 8. * c) * a2 * C2)`. The
+      upstream change is `78d89828`, "cass: fix forward computation of easting (fixes #3432)"; this
+      tree's `CassiniProjection` carries the `+` and says so in its javadoc.
+
+      THE CLOSED FORM, AND IT IS TESTED ROW BY ROW. Subtracting the two spellings leaves one term:
+
+        x_plus - x_minus = -2 * C2 * nu * A^5 * T * (8 - T + 8C)
+
+      with A = lam*cos(phi), T = tan^2(phi), C = es*cos^2(phi)/(1-es), nu = 1/sqrt(1-es sin^2 phi),
+      scaled by a and divided by the CRS's to_meter. That expression was evaluated in a throwaway
+      script -- not by this library -- from each definition's own ellipsoid and each probe's
+      datum-shifted latitude and longitude, the shift taken from `cs2cs` 9.8.1, and compared with
+      the measured `fx` movement of all 156 rows:
+
+        predicted / measured    min 0.998141    median 1.000000    max 1.000487
+        156 of 156 within 1%,  154 of 156 within 0.1%
+
+      The only two rows outside 0.1% are two of the four `+datum=potsdam` rows discussed below, and
+      they are the two rows whose baseline and current values BOTH sit a couple of hundred metres off
+      PROJ, so a fractional slip of 0.2% in a delta is the expected consequence of that and not a
+      failure of the closed form. Across all 220 cass rows the agreement is 214 of 220 within 2%,
+      counting the 28 rows where the term and the movement are both exactly zero.
+
+      A single term of a single projection's forward, with no free parameters, accounting for every
+      row's magnitude.
+
+      IT IS NOT THE DATUM END, AND THAT WAS THE OTHER HYPOTHESIS. The corrected term is in `xy.x`
+      alone, so it must move the easting and leave the northing alone -- and it does. Over the 186
+      cass rows whose easting moves at all and which are not the `+units=link` key, |d fy| / |d fx|
+      has median 1.54e-9, p90 9.08e-8 and maximum 2.98e-5, and NOT ONE row has the northing moving
+      even a thousandth of what the easting moves. A datum or ellipsoid change would move both
+      together. The other 28 of the 214 non-link rows have `d fx` EXACTLY zero -- they are the probe-0
+      rows, where the term vanishes -- so their ratio is undefined rather than large. Counted the
+      other way round: `fy` clears 1e-6 m on only 9 of the 220 cass rows in the report, and 6 of
+      those 9 are the two `+units=link` keys above.
+
+      THE NEW VALUES ARE PROJ 9.8.1's. Replaying all 220 cass rows through `cs2cs` 9.8.1 -- WGS84
+      hub to the definition text, at the committed probes -- this tree reproduces 185 of the 190
+      previously-unexplained rows in both `fx` and `fy`, where the 1.4.3 baseline reproduced 10.
+
+      THE FIVE THAT DO NOT MATCH 9.8.1 ARE `+datum=potsdam` AND THEY ARE STILL THIS RULE'S. Four are
+      `REG epsg:3068` probes 1..4, whose easting is 49 m .. 200 m and northing 91 m .. 228 m away from
+      `cs2cs`; the fifth is a CSV row out of scope. That residue is a datum-side disagreement about Potsdam, it is the SAME on both
+      legs of the diff, and it therefore cancels in the movement -- epsg:3068's four rows are among
+      the 156 whose `fx` delta the closed form predicts to better than 1%. Worth writing down
+      because it is the honest reading: this rule claims that these rows MOVED for the reason given,
+      not that they have arrived at the right answer. The Potsdam residue is somebody else's row and
+      it is not in this file because it does not move.
+
+      WHY THE ROUND-TRIP COLUMNS MOVE TOO, and why `ix`/`iy` are in `dimensions`. Two further
+      changes in the same file act on the inverse: the meridian arc moved to `MeridianArc`, the port
+      of `9.8.1:src/mlfn.cpp` with a closed-form inverse, and `cass.cpp:75-82`'s
+      `pj_generic_inverse_2d` refinement at a 1e-12 residual is now performed, where 1.4.3 stopped
+      at the truncated D^4 series. Measured as |(ix,iy) - (lon,lat)| in degrees over the 219 of the
+      220 cass rows that have a finite inverse on both sides (the 220th is the CSV row discussed at
+      the end):
+
+        1.4.3 baseline      median 1.18e-6      p90 0.124        max 2.92
+        this tree           median 1.43e-14     p90 4.39e-11     max 1.35e-7
+
+      The excluded row is the worst of the lot on the baseline side and leaving it out understates the
+      improvement rather than flattering it: 1.4.3 answered that inverse instead of refusing it, and
+      the answer it gave was 64.9 degrees from the point it started at.
+
+      190 of the 219 improve by more than a factor of two. Twelve get very slightly worse and all
+      twelve are probe 0, going from an exact 0 to between 4.4e-16 and 7.3e-15 degrees, which is one
+      Newton step declining to leave a value that was already right alone -- 1e-15 degrees is 0.1
+      nanometres. The inverse is now an inverse of the forward by construction, which is the property
+      `roundtrip` asserts and the reason upstream added the refinement.
+
+      THE BAND IS 1e-6 .. 1e4 IN RAW COLUMN UNITS. The observed 156 span 3.90e-6 .. 2257.94; the
+      floor is NUM-KARNEY-LATITUDE-CORE's ceiling, so the two rules partition the cass rows rather
+      than competing for them, and the ceiling is four orders of magnitude under
+      PARSE-UNITS-LINK-NOW-RECOGNISED's floor. The band is wide because the mechanism is: lam^5
+      spans five orders of magnitude between a probe 1 deg off the central meridian and one 18 deg
+      off. What keeps the rule narrow is not the band but `tgt_proj: [cass]`, which can reach at
+      most the 205 `REG`/`SYN` rows the 41 cass-target cases have.
+
+      THIS RETIRES TWO ROWS NUM-KARNEY-LATITUDE-CORE's OWN REASON LISTS AS UNATTRIBUTED. That
+      reason's 1e-6 .. 1e-5 census names "3.904e-6 cass" among the 20 rows its candidate arc
+      mechanism failed to predict -- `REG epsg:4394` probes 1 and 2, at 3.9035e-6 and 3.9160e-6.
+      They are the two smallest rows here and the closed form above predicts both to 0.002%.
+      The arc was the wrong candidate for them; the easting sign is the right one.
+
+      TWO THINGS FOUND AND DELIBERATELY NOT FIXED, both recorded here rather than acted on.
+
+      First, `CSV proj4-epsg.csv:01241` probe 0 -- the one cass row that changes STATUS, from OK to
+      `ProjectionException`, and therefore the one this rule could not claim even if the `CSV` section
+      were in scope. Its target is EPSG:3140 and the forward now lands 9.7e7 links from the origin,
+      where `GenericInverse2D` gives up: "generic 2D inverse did not converge in 15 iterations".
+      PROJ 9.8.1 REFUSES THE SAME POINT -- `cs2cs` answers `*  * inf` there -- and its forward,
+      -97161737.620276, is this tree's forward to the last digit. So the refusal matches upstream and
+      the row is not evidence of a defect; golden/README.md already carries it as the suite's one
+      non-ETM OK-to-exception row, unattributed, pointing at `util/GenericInverse2D`.
+
+      Second, nothing is left to fix in `CassiniProjection` itself. The `+hyperbolic` variant is
+      present and read by presence, as upstream reads it, and NO shipped definition uses it -- and
+      EPSG:3140, Vanua Levu, is exactly the CRS that should, since EPSG method 9833 is defined for it.
+      Its dictionary entry does not carry the flag, so the tree computes the non-hyperbolic
+      Cassini-Soldner for it, as 9.8.1 does from the same text and as 1.4.3 did. That is a dictionary
+      question about one CRS, not a projection defect and not this rule's.
+    match:
+      sections: [REG, SYN]
+      tgt_proj: [cass]
+      classifications: [CHANGED]
+      status_from: "OK"
+      status_to: "OK"
+    expect:
+      dimensions: [fx, fy, fz, ix, iy, iz]
+      allow_status_change: false
+      allow_inside_change: false
+      allow_nonfinite: false
+      magnitude: {min: 1.0e-6, max: 1.0e4}

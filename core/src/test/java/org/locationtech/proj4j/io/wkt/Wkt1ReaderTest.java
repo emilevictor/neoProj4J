@@ -332,7 +332,17 @@ public class Wkt1ReaderTest {
         }
     }
 
-    /** CASE 37: a COMPD_CS yields its horizontal component, and says so. */
+    /**
+     * CASE 37: a COMPD_CS yields its horizontal component <em>and</em> its vertical one.
+     * <p>
+     * Until 2.2.0 the second half of that sentence was not true and this test asserted
+     * {@code +proj=longlat +datum=WGS84 +no_defs} — the height definition was read into the
+     * {@link CrsDefinition} and then dropped on the floor. PROJ 9.8.1 answers
+     * {@code +proj=longlat +datum=WGS84 +vunits=m +no_defs +type=crs} for the same compound,
+     * so the token below is parity, not a new opinion. This VERT_CS carries no AUTHORITY, so
+     * there is no code for {@code VerticalCrsRegistry} to look a geoid grid up by and the unit
+     * is all it can contribute; {@link CompoundCrsFromDocumentTest} covers the identified case.
+     */
     @Test
     public void compoundCrsUsesItsHorizontalComponent() {
         String wkt = "COMPD_CS[\"WGS 84 + ODN height\"," + WGS84_GEOGCS
@@ -342,7 +352,8 @@ public class Wkt1ReaderTest {
         assertEquals(CrsDefinition.Kind.COMPOUND, def.getKind());
         assertEquals(2, def.getComponents().size());
         assertEquals(CrsDefinition.Kind.GEOGRAPHIC, def.horizontalComponent().getKind());
-        assertEquals("+proj=longlat +datum=WGS84 +no_defs", proj(wkt));
+        assertEquals(CrsDefinition.Kind.VERTICAL, def.verticalComponent().getKind());
+        assertEquals("+proj=longlat +datum=WGS84 +vunits=m +no_defs", proj(wkt));
     }
 
     /** A BOUNDCRS's abridged transformation becomes {@code +towgs84}. */

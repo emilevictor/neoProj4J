@@ -75,4 +75,54 @@
         </plugins>
     </build>
 
+    <profiles>
+        <!-- Regeneration of EsriDatumTable.java from PROJ's own ESRI alias table. Manual only:
+             `mvn install` compiles the checked-in file and needs no PROJ checkout and no network.
+
+             The invocation, verified to exit 0, and to be re-run followed by a `git diff` that must
+             report no change (git's exit-code flag is spelled in core/src/gen/esri-datum-table.sh,
+             because an XML comment cannot contain two consecutive hyphens):
+
+               mvn -Pregen-esri-datums -pl core generate-sources -Dproj.checkout=/path/to/PROJ
+
+             `generate-sources` is both the phase the execution binds to and the phase named on the
+             command line, so it fires. Naming an earlier phase would be BUILD SUCCESS having run
+             nothing, after which a clean `git diff` would report "reproducible" for a regeneration
+             that never happened. That mistake was made once in db/pom.xml and is recorded there.
+
+             There is no checksum gate on this artifact and no CI leg that regenerates it, unlike
+             db/. It does not need one: EsriDatumTableTest re-derives every row from
+             `git show 9.8.1:data/sql/esri.sql` whenever a PROJ checkout is reachable, and skips
+             loudly, naming the property to set, when one is not. That covers the stale-or-edited
+             risk on any developer machine with a checkout, which is where regeneration happens. -->
+        <profile>
+            <id>regen-esri-datums</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.1.1</version>
+                        <executions>
+                            <execution>
+                                <id>gen-esri-datum-table</id>
+                                <phase>generate-sources</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>${project.basedir}/src/gen/esri-datum-table.sh</executable>
+                                    <arguments>
+                                        <argument>${proj.checkout}</argument>
+                                        <argument>${project.basedir}/src/main/java/org/locationtech/proj4j/io/wkt/EsriDatumTable.java</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
 </project>

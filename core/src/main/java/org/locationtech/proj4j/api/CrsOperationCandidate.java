@@ -22,6 +22,7 @@ import java.util.Optional;
 
 import org.locationtech.proj4j.spi.DbExtent;
 import org.locationtech.proj4j.spi.DbObjectRef;
+import org.locationtech.proj4j.spi.DbObjectType;
 import org.locationtech.proj4j.spi.DbOperation;
 
 /**
@@ -78,10 +79,21 @@ public final class CrsOperationCandidate implements Comparable<CrsOperationCandi
         NONE,
 
         /**
-         * The authority's method maps to a PROJ operator Proj4J does not implement &mdash;
-         * {@code gridshift}, {@code xyzgridshift}, {@code tinshift}, {@code velocity_grid},
-         * {@code defmodel}, a deformation pipeline needing a time dimension, or a concatenated
-         * operation. Becomes {@link org.locationtech.proj4j.ErrorCause#UNSUPPORTED_OPERATION_METHOD}.
+         * The authority's method maps to a PROJ operator this facade will not run for a
+         * {@link Crs}-to-{@link Crs} datum change &mdash; {@code gridshift}, {@code xyzgridshift},
+         * {@code tinshift}, {@code velocity_grid}, {@code defmodel}, a deformation pipeline needing
+         * a time dimension, or a concatenated operation. Becomes
+         * {@link org.locationtech.proj4j.ErrorCause#UNSUPPORTED_OPERATION_METHOD}.
+         *
+         * <p>"Will not run here" and "is not implemented" are not the same thing, and this list
+         * mixes both. {@code tinshift} and, since 2.2.0, {@code xyzgridshift} exist in the pipeline
+         * engine and can be reached through {@code +proj=pipeline}; they are refused here for
+         * reasons of their own &mdash; xyzgridshift works in geocentric cartesian metres and a
+         * {@code Crs} is two-dimensional by construction, so there is no height to convert with.
+         * {@code gridshift} and {@code defmodel} are not implemented anywhere in this library. The
+         * wording here used to call all of them unimplemented, which stopped being true as the
+         * pipeline engine grew operators; the per-operator reason lives in
+         * {@code OperationSelector.operatorNote} and is reported in the exception message.
          */
         UNSUPPORTED_METHOD,
 
@@ -335,34 +347,122 @@ public final class CrsOperationCandidate implements Comparable<CrsOperationCandi
     // ------------------------------------------------------------------------------- ordering
 
     /**
-     * The total order described on {@link Proj#candidateOperations(Crs, Crs)}. Consistent with
-     * {@link #equals(Object)} only in the sense that no two distinct candidates ever compare equal:
-     * the final tiebreak is the authority reference and the direction, so the sort is stable
-     * regardless of input order.
+     * The total order described on {@link Proj#candidateOperations(Crs, Crs)}, ported criterion by
+     * criterion from PROJ 9.8.1's {@code SortFunction::compare}
+     * ({@code src/iso19111/operation/coordinateoperationfactory.cpp}), whose own comment says
+     * <em>"the order of the comparisons is extremely important"</em>. It is taken literally here: the
+     * chain below is upstream's sequence, in upstream's sequence, and each step names the upstream
+     * criterion it came from. Reasoning about which criterion <em>ought</em> to dominate is how the
+     * two orders drift apart.
+     *
+     * <p>The one thing to know before reading it: PROJ has <b>two</b> accuracy criteria and they
+     * straddle area. Whether an accuracy is <em>known</em> is asked before area; how <em>good</em> it
+     * is, after. So a 21&nbsp;m operation covering all of Great Britain outranks a 1&nbsp;m one
+     * covering one estuary, and that is deliberate on both sides: an accuracy figure is only
+     * meaningful where the operation applies at all.
+     *
+     * <h4>Deliberate divergences from 9.8.1</h4>
+     *
+     * <ul>
+     * <li><b>The usability tier comes first</b>, where PROJ spreads the same information over its
+     *     criteria 1 ({@code isPROJExportable}), 2 ({@code isApprox}) and 5
+     *     ({@code gridsAvailable}). Folding them into one tier keeps the ranked list readable as an
+     *     answer to "what can I do about this?", which is what {@link #describe()} is for. The tier
+     *     order agrees with PROJ everywhere except one pair: PROJ ranks an unusable method
+     *     <em>above</em> a ballpark, this ranks it below. See {@link #usabilityPenalty()} for why,
+     *     and note that {@link OperationSelector} picks by category rather than by rank, so the
+     *     disagreement does not change what gets selected.</li>
+     * <li><b>The final tiebreak is {@link #ref()}, not PROJ's {@code return a_name > b_name}.</b>
+     *     Upstream's last criterion is a name comparison, deliberately inverted so that
+     *     {@code "Amersfoort to WGS 84 (4)"} precedes {@code "(3)"}. It is a guess, it is documented
+     *     upstream as arbitrary, and it is not a total order: two operations can share a name. This
+     *     library treats determinism as a gate rather than a preference, so it ends on the authority
+     *     reference and then the direction, which cannot tie. Every criterion above it is PROJ's.</li>
+     * <li><b>Criterion 12 (the IOGP 373-07-7 ETRF2000 hub rule) is not ported.</b> Two reasons. It
+     *     needs the names of the operation's source and target CRSs, which the index does not carry
+     *     on a {@link DbOperation}; and upstream's first branch tests
+     *     {@code uses_ETRF2000_ && ... && !uses_ETRF2000_}, a contradiction, so only its mirror
+     *     branch can ever fire. Porting half a rule faithfully is worse than not porting it.</li>
+     * <li><b>Criterion 14 (fewer PROJ pipeline steps) is not ported</b>: candidates are not exported
+     *     to PROJ pipeline strings here, so there is no step count to compare. Criterion 13, the
+     *     authority's own step count, is ported and carries the same intent.</li>
+     * <li><b>Criterion 15 ({@code BALLPARK_GEOGRAPHIC_OFFSET_FROM} similar-CRS preference) is not
+     *     ported</b>: it only fires when two candidates are both ballpark offsets, and exactly one
+     *     ballpark is ever synthesised per CRS pair — the shipped database contains no ballpark rows
+     *     at all.</li>
+     * <li>PROJ's criteria 3 and 4 (ballpark-vertical, and the {@code NULL_}/{@code BALLPARK_} name
+     *     prefixes) are already applied upstream of the sort, by {@link OperationSelector}, which
+     *     classifies those names as {@link Rejection#BALLPARK}.</li>
+     * </ul>
      *
      * @param other the candidate to compare against
      * @return a negative number if this candidate ranks better
      */
     @Override
     public int compareTo(CrsOperationCandidate other) {
-        // 1. Usability tier. See usabilityPenalty() for the order and why it is that order.
+        // [proj4j, PROJ 1+2+5] Usability tier. See usabilityPenalty() and the divergence note above.
         int c = Integer.compare(usabilityPenalty(), other.usabilityPenalty());
         if (c != 0) {
             return c;
         }
-        // 2. Accuracy ascending; unknown after every known figure, never treated as zero.
-        c = compareAccuracy(accuracy, other.accuracy);
+        // [PROJ 6] A grid the database can at least name a source for beats one we know nothing
+        //          about, even when neither is on disk.
+        c = Integer.compare(gridsKnown() ? 0 : 1, other.gridsKnown() ? 0 : 1);
         if (c != 0) {
             return c;
         }
-        // 3. The tighter area of use, because a continental grid claiming the world is not more
-        //    specific than a national one. No bounding box sorts last, never as the whole world.
+        // [PROJ 7] A known accuracy beats an unknown one. Note this asks only *whether* it is known.
+        c = compareAccuracyKnown(accuracy, other.accuracy);
+        if (c != 0) {
+            return c;
+        }
+        // [PROJ 8] Both unknown: prefer the one that at least uses a grid, since a parameterless
+        //          operation of unstated accuracy is doing nothing at all.
+        if (accuracy == null && other.accuracy == null) {
+            c = Integer.compare(hasGrids() ? 0 : 1, other.hasGrids() ? 0 : 1);
+            if (c != 0) {
+                return c;
+            }
+        }
+        // [PROJ 9] The larger non-zero area of use, in upstream's exact branch shape, asymmetric
+        //          zero handling included. See compareArea.
         c = compareArea(areaOfUse, other.areaOfUse);
         if (c != 0) {
             return c;
         }
-        // 4. The authority reference, which is a total order, then direction. Nothing is left tied,
-        //    so the result cannot depend on the order the database returned rows in.
+        // [PROJ 10] Now, and only now, the accuracy magnitude, ascending.
+        c = compareAccuracyMagnitude(accuracy, other.accuracy);
+        if (c != 0) {
+            return c;
+        }
+        // [PROJ 11] Same accuracy: prefer the one *without* grids, which needs no files to run.
+        if (accuracy != null && other.accuracy != null
+                && Double.compare(accuracy.metres(), other.accuracy.metres()) == 0) {
+            c = Integer.compare(hasGrids() ? 1 : 0, other.hasGrids() ? 1 : 0);
+            if (c != 0) {
+                return c;
+            }
+        }
+        // [PROJ 13] The fewer intermediate steps, the better.
+        c = Integer.compare(stepCount(), other.stepCount());
+        if (c != 0) {
+            return c;
+        }
+        // [PROJ 16] The shorter name, the better. Upstream's own comment ends in a question mark;
+        //           it is kept because dropping it would reorder ties upstream does not tie.
+        c = Integer.compare(name().length(), other.name().length());
+        if (c != 0) {
+            return c;
+        }
+        // [PROJ 17] The one hardcoded name preference upstream carries: NTF (Paris) to NTF (1) over
+        //           (2), because the remarks on (2) say OGP prefers the IGN Paris value.
+        c = compareNtfParis(name(), other.name());
+        if (c != 0) {
+            return c;
+        }
+        // [PROJ 18, diverged] The authority reference, then direction. Nothing is left tied, so the
+        //           result cannot depend on the order the database returned rows in. See above for
+        //           why this is not upstream's name comparison.
         c = ref().compareTo(other.ref());
         if (c != 0) {
             return c;
@@ -412,31 +512,184 @@ public final class CrsOperationCandidate implements Comparable<CrsOperationCandi
         return operation.ref();
     }
 
-    private static int compareAccuracy(Accuracy a, Accuracy b) {
+    /**
+     * Whether every grid slot resolves to something the database can account for &mdash; on disk, or
+     * named by a {@code grid_alternatives} row that gives a public URL. PROJ's criterion 6 also
+     * counts membership of a distributable package; the index carries no package column, so that
+     * arm is simply absent rather than guessed at.
+     *
+     * <p><b>A slot an earlier slot already carries is skipped, and leaving it in was a real
+     * mis-ranking.</b> {@code EPSG:1241} declares {@code conus.las} and {@code conus.los}; upstream's
+     * {@code gridsNeeded()} collapses those to one {@code us_noaa_conus.tif} before it computes
+     * {@code gridsKnown_}, so upstream weighs one slot and this library holds two. Only the first has
+     * a {@code grid_alternatives} row &mdash; and 84 of the 85 distinct {@code grid2_name}s in the
+     * index are like that, so this is the normal case, not a data gap &mdash; which made the second
+     * slot look unaccounted for and pushed {@code EPSG:1241} below {@code EPSG:1573} (Quebec,
+     * pseudo-area 4.12, against CONUS-and-EEZ's 22.54) in the real-database ordering. Measured
+     * against {@code projinfo -s EPSG:4267 -t EPSG:4269 --summary --spatial-test intersects} at
+     * 9.8.1, skipping the carried slot is what puts {@code EPSG:1241} back at third where PROJ has it.
+     * See {@link GridInfo#isCarriedByEarlierSlot()}.
+     */
+    private boolean gridsKnown() {
+        for (int i = 0; i < grids.size(); i++) {
+            GridInfo g = grids.get(i);
+            if (g.isCarriedByEarlierSlot()) {
+                continue;
+            }
+            if (!g.isAvailable() && !g.knownUrl().isPresent()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean hasGrids() {
+        return !grids.isEmpty();
+    }
+
+    /**
+     * PROJ's {@code getStepCount}: one, unless this is a concatenated operation, in which case the
+     * number of steps the authority declares.
+     */
+    private int stepCount() {
+        if (operation.kind() == DbObjectType.CONCATENATED_OPERATION) {
+            int steps = operation.steps().size();
+            return steps == 0 ? 1 : steps;
+        }
+        return 1;
+    }
+
+    /** PROJ criterion 7: a published accuracy, whatever it says, beats none. */
+    private static int compareAccuracyKnown(Accuracy a, Accuracy b) {
         if (a == null) {
             return b == null ? 0 : 1;
         }
-        if (b == null) {
-            return -1;
+        return b == null ? -1 : 0;
+    }
+
+    /**
+     * PROJ criterion 10: the smaller figure wins. Only reached once both are known or both unknown,
+     * so an unknown is never compared against a number and never treated as zero.
+     */
+    private static int compareAccuracyMagnitude(Accuracy a, Accuracy b) {
+        if (a == null || b == null) {
+            return 0;
         }
         return Double.compare(a.metres(), b.metres());
     }
 
-    private static int compareArea(AreaOfUse a, AreaOfUse b) {
-        if (a == null) {
-            return b == null ? 0 : 1;
-        }
-        if (b == null) {
-            return -1;
-        }
-        return Double.compare(rankingArea(a), rankingArea(b));
+    /**
+     * The full ordering by accuracy: known before unknown, then ascending. Not a criterion of
+     * {@link #compareTo} &mdash; there the two halves straddle area, which is the whole point of the
+     * port &mdash; but it is what an accuracy-only question means, and
+     * {@link #isBetterAccuracyThan} asks exactly that.
+     */
+    private static int compareAccuracy(Accuracy a, Accuracy b) {
+        int c = compareAccuracyKnown(a, b);
+        return c != 0 ? c : compareAccuracyMagnitude(a, b);
     }
 
-    private static double rankingArea(AreaOfUse a) {
-        double lonSpan = a.crossesAntimeridian()
-                ? 360.0 - (a.westLongitude() - a.eastLongitude())
-                : a.eastLongitude() - a.westLongitude();
-        return lonSpan * (a.northLatitude() - a.southLatitude());
+    /**
+     * PROJ criterion 9, transcribed: <em>"Operations with larger non-zero area of use go before
+     * those with lower one"</em>. Upstream reads
+     *
+     * <pre>
+     * if (areaA &gt; 0) {
+     *     if (areaA &gt; areaB) return true;
+     *     if (areaA &lt; areaB) return false;
+     * } else if (areaB &gt; 0) {
+     *     return false;
+     * }
+     * </pre>
+     *
+     * and the branch shape is kept rather than simplified, because the asymmetry is the interesting
+     * part: a zero area never beats a positive one, but two zero areas are a tie rather than a
+     * verdict, so the criteria below get to decide. An absent bounding box <b>is</b> zero here, not
+     * the whole world &mdash; 18 upstream extents publish none, and treating those as global would
+     * make them win every comparison.
+     *
+     * <p>This is <b>the reverse of what this comparator did before 2.2.0</b>, which preferred the
+     * tighter extent on the theory that a specific operation is a better fit. Measured against
+     * {@code projinfo}, that theory is wrong often enough to matter: for OSGB36 to WGS 84 it put the
+     * ranked list in a different order from PROJ's at six of eight positions.
+     */
+    private static int compareArea(AreaOfUse a, AreaOfUse b) {
+        double areaA = pseudoArea(a);
+        double areaB = pseudoArea(b);
+        if (areaA > 0) {
+            if (areaA > areaB) {
+                return -1;
+            }
+            if (areaA < areaB) {
+                return 1;
+            }
+        } else if (areaB > 0) {
+            return 1;
+        }
+        return 0;
+    }
+
+    /**
+     * PROJ's {@code getPseudoArea}, which now lives in {@link Extents} because operation selection
+     * grew a second caller: the spatial filter measures the two CRS extents with it to decide which
+     * is {@link SourceTargetCRSExtentUse#SMALLEST}, and per-coordinate selection measures operation
+     * extents with it to break an accuracy tie. One transcription of one upstream function, so that
+     * "larger area wins" here and "smaller area wins" there cannot silently come to disagree about
+     * what an area is.
+     *
+     * @param a the area, or null for an operation that declares no usable extent
+     * @return the pseudo-area, or {@code 0.0} when there is no bounding box to measure
+     */
+    private static double pseudoArea(AreaOfUse a) {
+        return Extents.pseudoArea(a);
+    }
+
+    /**
+     * PROJ criterion 17. Two operations connect NTF (Paris) to NTF and upstream hardcodes a
+     * preference between them, because the remarks on {@code EPSG:1764} record that OGP prefers the
+     * IGN Paris value used by {@code EPSG:1763}. Ported explicitly rather than left to the tiebreak:
+     * the reference order happens to give the same answer for the only two rows that exist, but it
+     * would be giving it by accident, and the rule is an authority preference, not a tie.
+     *
+     * <p>Upstream carries a second pair for {@code "NTF (Paris) to RGF93 v1 (1)"} against
+     * {@code "(2)"}. Ported alongside it for fidelity even though the 9.8.1 database contains no
+     * such rows &mdash; the cost is two string comparisons and the alternative is a silent gap.
+     */
+    private static int compareNtfParis(String a, String b) {
+        int c = preferNtf(a, b, "NTF (Paris) to NTF (1)", "NTF (Paris) to NTF (2)");
+        if (c != 0) {
+            return c;
+        }
+        return preferNtf(a, b, "NTF (Paris) to RGF93 v1 (1)", "NTF (Paris) to RGF93 v1 (2)");
+    }
+
+    private static int preferNtf(String a, String b, String preferred, String other) {
+        if (a.contains(preferred) && b.contains(other)) {
+            return -1;
+        }
+        if (a.contains(other) && b.contains(preferred)) {
+            return 1;
+        }
+        return 0;
+    }
+
+    /**
+     * Whether this candidate has a strictly better published accuracy than {@code other}, ties broken
+     * on the authority reference so the comparison is a total order.
+     *
+     * <p>Accuracy <em>only</em>, unlike {@link #compareTo}: area does not enter into it. This answers
+     * "which of these is the more accurate operation", which is a different question from "which
+     * should be offered first".
+     *
+     * @param other the candidate to compare against
+     * @return true iff this one should win an accuracy-only comparison
+     */
+    boolean isBetterAccuracyThan(CrsOperationCandidate other) {
+        int c = compareAccuracy(accuracy, other.accuracy);
+        if (c != 0) {
+            return c < 0;
+        }
+        return ref().compareTo(other.ref()) < 0;
     }
 
     /**
@@ -453,21 +706,6 @@ public final class CrsOperationCandidate implements Comparable<CrsOperationCandi
      * @param other the better-ranked candidate to compare against
      * @return true iff choosing this one over {@code other} loses accuracy
      */
-    /**
-     * Whether this candidate has a strictly better published accuracy than {@code other}, ties broken
-     * on the authority reference so the comparison is a total order.
-     *
-     * @param other the candidate to compare against
-     * @return true iff this one should win an accuracy-only comparison
-     */
-    boolean isBetterAccuracyThan(CrsOperationCandidate other) {
-        int c = compareAccuracy(accuracy, other.accuracy);
-        if (c != 0) {
-            return c < 0;
-        }
-        return ref().compareTo(other.ref()) < 0;
-    }
-
     boolean isDegradedRelativeTo(CrsOperationCandidate other) {
         if (other == null) {
             return false;
@@ -545,6 +783,21 @@ public final class CrsOperationCandidate implements Comparable<CrsOperationCandi
     /**
      * The smallest extent an operation declares, by ranking area, ties broken on the extent code so
      * the choice is deterministic. Package-private: {@link OperationSelector} builds candidates.
+     *
+     * <p>PROJ takes {@code domains[0]} instead &mdash; the first usage row, in whatever order the
+     * database hands them over. This picks the smallest because that is reproducible, and because an
+     * operation that declares several usages is generally best characterised by the tightest one.
+     * Under {@link #compareTo}'s "larger area first" the two choices differ in direction: for a
+     * multi-usage operation this understates the area PROJ would have measured, so such an operation
+     * can rank below where {@code projinfo} puts it. Multi-usage transformations are rare in the
+     * shipped database and none appeared in the pairs measured for 2.2.0, but the divergence is real
+     * and is recorded here rather than discovered later.
+     *
+     * <p>Note also that this measures with {@link DbExtent#rankingArea()}, a flat
+     * {@code lonSpan * latSpan} rectangle, whereas {@link #compareTo} measures with PROJ's
+     * latitude-weighted pseudo-area. That is not an oversight: this one is only choosing
+     * <em>which</em> of an operation's own extents to carry, where a cheap consistent measure is
+     * enough, and changing it would change {@link #areaOfUse()} for callers.
      *
      * @param extents the extents the database returned, in its own order
      * @return the chosen extent, or null if none has a bounding box

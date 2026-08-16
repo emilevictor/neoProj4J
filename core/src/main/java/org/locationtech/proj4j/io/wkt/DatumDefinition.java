@@ -31,6 +31,7 @@ public final class DatumDefinition {
     private Identifier id;
     private String anchor;
     private double frameEpoch = Double.NaN;
+    private boolean esriStyle;
 
     public String getName() {
         return name;
@@ -86,6 +87,35 @@ public final class DatumDefinition {
 
     public boolean isDynamic() {
         return !Double.isNaN(frameEpoch);
+    }
+
+    /**
+     * Whether the document this reference frame came from confirmed itself to be ESRI-flavoured
+     * WKT1, by naming a {@code GEOGCS} {@code GCS_something} or a {@code DATUM}
+     * {@code D_something}.
+     * <p>
+     * The same question, and the same one-field shape, as
+     * {@link ConversionDefinition#isEsriStyle()}
+     * — PROJ's {@code esriStyle_} rather than its {@code maybeEsriStyle_}. 2.1.0 carried the flag
+     * only on the conversion, which meant a bare {@code GEOGCS} computed it and then threw it away
+     * when the parse ended, for exactly the documents where the datum name is the whole content.
+     * <p>
+     * Why a reference frame needs it: an ESRI {@code D_} name is a name in a <em>different
+     * namespace</em>. {@code D_European_1950} is EPSG geodetic datum 6230, and knowing that is the
+     * only way to know that a shift to WGS 84 is owed. A frame whose name proj4j cannot place, in a
+     * document that has confirmed it is speaking ESRI, is therefore not "a frame with an ellipsoid
+     * and no shift" — it is a frame whose shift is unknown. See
+     * {@link EsriDatumPolicy}.
+     * <p>
+     * Package-private, for the same reason the conversion's is: the wider question of
+     * dialect-aware reading is still open and this is not yet a public commitment.
+     */
+    boolean isEsriStyle() {
+        return esriStyle;
+    }
+
+    void setEsriStyle(boolean esriStyle) {
+        this.esriStyle = esriStyle;
     }
 
     public String toString() {

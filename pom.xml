@@ -347,7 +347,7 @@
         <module>grids-us-legacy</module>
         <!-- PROJ 9.8.1's authority database (EPSG v12.029 + ESRI + IGNF + IAU_2015 + NKG), transcoded
              to a deterministic read-only binary index and read by a pure-Java reader. Published;
-             implements org.locationtech.proj4j.spi.ProjDatabase. 6,746,032 B unpacked / 1,775,029 B
+             implements org.locationtech.proj4j.spi.ProjDatabase. 6,746,280 B unpacked / 1,776,742 B
              as a jar - 34% smaller unpacked than the raw proj.db - and its only dependency is proj4j
              itself: no SQLite driver, no native library. See db/README.md. -->
         <module>db</module>

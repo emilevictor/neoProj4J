@@ -99,7 +99,7 @@ import static org.junit.Assert.fail;
  * to avoid throwing. {@link #theGuardsAcceptEveryShapeTheShippedDataActuallyUses} additionally pins the
  * real dimensions of the shipped grids and of {@code proj4j-db.pjdx} against the bounds, because one
  * draft of {@code MAX_EXTENT} would have rejected the project's own database: its string pool holds
- * <strong>97,930</strong> strings against a 100,000 cap that looked generous.
+ * <strong>97,937</strong> strings against a 100,000 cap that looked generous.
  *
  * <h2>"Before the allocation" is measured, not asserted</h2>
  *
@@ -724,7 +724,7 @@ public class GridBinaryReaderSecurityTest {
      *
      * <p>A first draft applied {@link GridExtents#MAX_EXTENT} — 100,000, taken from
      * {@code CTABLEV2}'s own axis check — to every count, including one-dimensional ones. The shipped
-     * {@code proj4j-db.pjdx} string pool holds <strong>97,930</strong> strings. The guard would have
+     * {@code proj4j-db.pjdx} string pool holds <strong>97,937</strong> strings. The guard would have
      * passed today and refused the project's own database after one EPSG release, and every hostile
      * test would still have been green. So the shapes the shipped data actually uses are pinned here,
      * against the bounds, by number.
@@ -741,8 +741,8 @@ public class GridBinaryReaderSecurityTest {
                 4L * 43200L * 21600L, "the decoded-grid budget"));
 
         // One-dimensional counts are NOT grid axes and must not carry the axis bound.
-        assertEquals(97931, GridExtents.checkedCount("proj4j-db.pjdx string pool",
-                97930L + 1, 4L, 8L, 2872150L, "the string-pool section length"));
+        assertEquals(97938, GridExtents.checkedCount("proj4j-db.pjdx string pool",
+                97937L + 1, 4L, 8L, 2872257L, "the string-pool section length"));
         assertEquals(19103 * 5, GridExtents.checkedCount("the widest shipped table",
                 19103L * 5, 4L, 16L, 1L << 20, "the section length"));
 

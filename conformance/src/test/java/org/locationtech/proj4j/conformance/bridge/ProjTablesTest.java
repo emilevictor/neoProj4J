@@ -69,7 +69,7 @@ class ProjTablesTest {
     }
 
     @Test
-    @DisplayName("proj4j resolves 151 of PROJ's 186 operators")
+    @DisplayName("proj4j resolves 161 of PROJ's 186 operators")
     void registryCoverage() {
         Registry registry = new Registry();
         List<String> resolvable = new ArrayList<String>();
@@ -86,10 +86,14 @@ class ProjTablesTest {
         System.out.println("  missing (" + missing.size() + "): " + missing);
         // A FLOOR, NOT AN EXPECTED COUNT, and deliberately a slack one: this test's job is to catch
         // the Registry losing whole families of operators, not to pin a coverage figure that every
-        // porting stream moves. 151 of 186 resolved on 2026-08-14 (the count is printed above, so it
+        // porting stream moves. 161 of 186 resolved on 2026-08-16 (the count is printed above, so it
         // is read rather than trusted). Raise this only when the slack stops being useful.
+        //
+        // Do not read the 25-name shortfall as 25 operators' worth of work: 21 of them are pipeline
+        // steps that PipelineFactory already runs, and of the four left over, horner and sch have no
+        // gie assertions at all. See ProjTables.OPERATORS for the breakdown.
         assertTrue(resolvable.size() >= 80,
-                "only " + resolvable.size() + " operators resolve; 151 resolved on 2026-08-14");
+                "only " + resolvable.size() + " operators resolve; 161 resolved on 2026-08-16");
         // Was: all three of alsk/apian/bacon were registered against the ABSTRACT Projection
         // class, whose project() is the identity - so they returned lon/lat as though it were
         // projected metres. alsk alone was 16 silently-wrong builtins.gie assertions.

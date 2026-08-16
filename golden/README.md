@@ -325,22 +325,25 @@ in `reason`.
 
 ## Seeded rules, and the counts that are honestly unknown
 
-> **SUPERSEDED 2026-08-01: there are no unknown counts left. All 49 rules are `status: active` with
+> **SUPERSEDED 2026-08-01: there are no unknown counts left. All 54 rules are `status: active` with
 > a pinned integer `expected_rows`, and `GoldenRulesTest.noActiveRuleMayLeaveItsExpectedRowsUnpinned`
 > now makes that a build failure rather than a convention.** *(This said 38 until 2026-08-02, 41
 > until 2026-08-03, 42 until 2026-08-11, 44 until 2026-08-14, and 48 until
-> `NUM-SOMERC-FDLIBM-TRANSCENDENTALS` landed later that same day; the file grows and the prose does
+> `NUM-SOMERC-FDLIBM-TRANSCENDENTALS` landed later that same day, 49 until
+> `PROJ-ISEA-NO-INVERSE-OFF-THE-DEFAULT-ORIENTATION` landed with the +proj=isea port, and 51 until
+> 2.2.0's last three rules landed with the cass sign fix, the ESRI omerc variant-A rule and the
+> `+units=` link rule; the file grows and the prose does
 > not, which is why the count is re-derived here rather than copied. Four anchored counts that agree
-> as of 2026-08-14: `grep -cE '^  - id:'` gives **49**, `grep -oE '^  - id: [A-Za-z0-9_-]+' | sort -u
-> | wc -l` gives 49 unique `id`s, `grep -cE '^    status: active'` gives 49, and
-> `grep -cE '^    expected_rows: [0-9]+'` gives 49 — whose values sum to 39,149. Note a bare
+> as of 2026-08-16: `grep -cE '^  - id:'` gives **54**, `grep -oE '^  - id: [A-Za-z0-9_-]+' | sort -u
+> | wc -l` gives 54 unique `id`s, `grep -cE '^    status: active'` gives 54, and
+> `grep -cE '^    expected_rows: [0-9]+'` gives 54 — whose values sum to 39,403. Note a bare
 > `grep -c 'id:'` overcounts —
 > some occurrences are prose inside `reason` blocks and comments — which is exactly the kind of
 > unanchored count that put a wrong number here in the first place. The six remaining `TBD` tokens
 > in the file are all in prose — `reason` text and comments — and none is in an `expected_rows`
 > field.)*
 >
-> *One of the 49, **`NUM-LAEA-HYPOT-TO-NORM2`**, is the argument for pinning in one line, and how it
+> *One of the 54, **`NUM-LAEA-HYPOT-TO-NORM2`**, is the argument for pinning in one line, and how it
 > was discovered shows why: `LambertAzimuthalEqualAreaProjection`'s `Math.hypot` → `MathHelpers.norm2`
 > moved 2 rows into `NUM-KARNEY-LATITUDE-CORE`'s territory, which raised a `COUNT_MISMATCH` at 19,326
 > against its pin of 19,324. **A globbed rule would have absorbed them in silence.** The new rule
@@ -458,11 +461,17 @@ errors are either sub-metre or enormous, with no long tail of subtle drift.
 `mvn -Pgolden -pl golden -am verify` is **expected to fail**. Its current expected report is:
 
 ```
-11,994 UNCHANGED · 41,436 CHANGED · 0 ADDED · 0 REMOVED · 39,149 INTENDED · 2,287 UNEXPLAINED
+11,944 UNCHANGED · 41,486 CHANGED · 0 ADDED · 0 REMOVED · 39,403 INTENDED · 2,083 UNEXPLAINED
 ```
 
 The same line is pinned in `.github/workflows/golden.yaml`. A green golden run would mean the
 expectation had been edited, not that the backlog had gone.
+
+The 2.1.0 release branch read `11,994 · 41,436 · 39,149 · 2,287`. 2.2.0 moved 50 rows from UNCHANGED
+to CHANGED as new projections became reachable, and took 204 rows out of the unexplained backlog, so
+INTENDED rises by 254 while UNEXPLAINED falls by 204. **Both pairs sum to 53,430, and `11994`/`11944`
+and `41436`/`41486` differ by one transposed digit pair each** — a misreading is internally
+consistent and survives a checksum, so quote the pin together with the commit it came from.
 
 **All six figures are now machine-checked.** They are pinned in
 `golden/baseline/1.4.3/golden-expect.txt` — one data line, in `GoldenDiff.Result.summary()`'s own
@@ -490,8 +499,8 @@ What else the job enforces on its own:
   tree, and they are real failures rather than backlog. A `FIGURES_MOVED` is reported *alongside*
   these, never instead of them: the run is already red on the backlog, and a check that
   short-circuited would make re-pinning look like progress.
-- `INTENDED` is additionally pinned a second and tighter way: all 49 rules in `rules.yaml` carry an
-  exact, two-sided `expected_rows`, and those pins sum to exactly 39,149. Count and sum them with
+- `INTENDED` is additionally pinned a second and tighter way: all 54 rules in `rules.yaml` carry an
+  exact, two-sided `expected_rows`, and those pins sum to exactly 39,403. Count and sum them with
   anchored patterns — `grep -cE '^  - id:'` and `grep -oE '^    expected_rows: [0-9]+'` — because an
   unanchored match also picks up occurrences inside comments and double-counts.
 - The workflow's non-vacuity step requires that the test existed, ran exactly once and was not

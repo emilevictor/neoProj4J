@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Locale;
 
 import org.locationtech.proj4j.CoordinateReferenceSystem;
+import org.locationtech.proj4j.spi.ProjDatabase;
 
 /**
  * Reads WKT into a {@link CrsDefinition}, and from there into a
@@ -44,6 +45,7 @@ import org.locationtech.proj4j.CoordinateReferenceSystem;
 public final class WktReader {
 
     private final AxisOrderPolicy axisOrderPolicy;
+    private final ProjDatabase database;
 
     /**
      * A reader with the default {@link AxisOrderPolicy#LEGACY} policy.
@@ -58,14 +60,36 @@ public final class WktReader {
      * @param axisOrderPolicy how declared axis order affects the CRSs this reader builds
      */
     public WktReader(AxisOrderPolicy axisOrderPolicy) {
+        this(axisOrderPolicy, null);
+    }
+
+    /**
+     * A reader that resolves what a document referred to by authority code but did not spell out
+     * against {@code database}.
+     *
+     * @param axisOrderPolicy how declared axis order affects the CRSs this reader builds
+     * @param database        a database, or {@code null} to read documents as self-contained
+     * @since 2.2.0
+     */
+    public WktReader(AxisOrderPolicy axisOrderPolicy, ProjDatabase database) {
         if (axisOrderPolicy == null) {
             throw new IllegalArgumentException("axisOrderPolicy is null");
         }
         this.axisOrderPolicy = axisOrderPolicy;
+        this.database = database;
     }
 
     public AxisOrderPolicy getAxisOrderPolicy() {
         return axisOrderPolicy;
+    }
+
+    /**
+     * The database this reader resolves authority references against, or {@code null}.
+     *
+     * @since 2.2.0
+     */
+    public ProjDatabase getDatabase() {
+        return database;
     }
 
     /**
@@ -91,13 +115,21 @@ public final class WktReader {
     /**
      * Parses {@code wkt} and builds a proj4j CRS from it, applying this reader's
      * {@link AxisOrderPolicy}.
+     * <p>
+     * {@link EsriDatumPolicy} is left at its {@link EsriDatumPolicy#REJECT} default, so an ESRI
+     * {@code D_} reference frame this library cannot place is refused rather than silently reduced
+     * to its ellipsoid. To opt out, call
+     * {@link CrsDefinitions#toCrs(CrsDefinition, AxisOrderPolicy, org.locationtech.proj4j.spi.ProjDatabase, EsriDatumPolicy)}
+     * on the result of {@link #readDefinition}, or set the policy on a
+     * {@link org.locationtech.proj4j.api.ProjContext} and go through
+     * {@link org.locationtech.proj4j.api.Proj}.
      *
      * @throws WktParseException                                  if the text cannot be parsed
      * @throws org.locationtech.proj4j.UnsupportedParameterException if it describes a projection
      *                                                            proj4j does not implement
      */
     public CoordinateReferenceSystem read(String wkt) {
-        return CrsDefinitions.toCrs(readDefinition(wkt), axisOrderPolicy);
+        return CrsDefinitions.toCrs(readDefinition(wkt), axisOrderPolicy, database);
     }
 
     /**
@@ -525,6 +557,7 @@ public final class WktReader {
             DatumDefinition datum = new DatumDefinition();
             datum.setName(name(dn));
             noteEsriDatumName(datum.getName());
+            datum.setEsriStyle(esriStyle);
             datum.setId(id(dn));
             WktNode anchor = dn.find("ANCHOR", "ANCHOREPOCH");
             if (anchor != null && anchor.childCount() > 0) {
@@ -560,6 +593,11 @@ public final class WktReader {
             DatumDefinition datum = new DatumDefinition();
             datum.setName(name(dn));
             noteEsriDatumName(datum.getName());
+            // Stamped here, not at the end of the parse, and after noteEsriDatumName so that this
+            // frame's own D_ name counts. The GCS_ confirmation has already run for every shape
+            // that carries one: geographicWkt1 calls noteEsriGeogcsName before datumWkt1, and a
+            // PROJCS reaches its GEOGCS through that same method.
+            datum.setEsriStyle(esriStyle);
             datum.setId(id(dn));
             WktNode ell = dn.find("SPHEROID", "ELLIPSOID");
             if (ell == null) {

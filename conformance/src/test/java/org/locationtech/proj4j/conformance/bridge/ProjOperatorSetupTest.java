@@ -33,6 +33,16 @@ import org.junit.jupiter.api.Test;
  * column is what it printed. The test asserts that
  * {@link ProjDefinitionValidator#validate} agrees.
  *
+ * <p>What an ACCEPT looks like depends on the operator. For a projection it is a
+ * coordinate. For a transformation — {@code helmert}, {@code molobadekas} — it is
+ * the line <i>"can't initialize operations that take non-angular input coordinates.
+ * Try cct."</i>, because {@code proj} only drives projections. That message means
+ * setup <b>succeeded</b>; the REJECT rows print {@code proj_create: Error ...} with
+ * the reason instead, before the banner. Reproduce those rows with {@code cct}
+ * if you want a number as well as a verdict, and beware that zsh does not split
+ * unquoted parameter expansions, so {@code proj $def} hands the whole definition
+ * over as one argument and answers {@code Unknown projection} to every row alike.
+ *
  * <p><b>The ACCEPT rows are the point.</b> A validator that returned
  * {@code INVALID_DEFINITION} for everything would satisfy every REJECT row and be
  * worthless — worse than worthless, since {@code INVALID_DEFINITION} is the only
@@ -72,11 +82,11 @@ class ProjOperatorSetupTest {
      * Definitions whose verdict this validator is expected to reproduce.
      *
      * <p>Deliberately excluded: definitions PROJ rejects for a reason
-     * {@link ProjOperatorSetup} does not model (the {@code eqdc} eccentricity guard,
-     * which needs {@code pj_mlfn}). Those are listed in {@link #UNMODELLED} instead, so
-     * the gap is on the record rather than silently absent. The {@code lcc} and
-     * {@code omerc} eccentricity guards used to be excluded for the same reason; they
-     * are closed form and are now here, probed in both directions.
+     * {@link ProjOperatorSetup} does not model. Those are listed in {@link #UNMODELLED}
+     * instead, so the gap is on the record rather than silently absent. The {@code lcc},
+     * {@code omerc} and {@code eqdc} eccentricity guards all used to sit there, on the
+     * grounds that they need {@code pj_mlfn}; all three are decidable from closed form
+     * and are now here, probed in both directions.
      */
     private static final Row[] ORACLE = {
             // ---- ell_set.cpp / pj_calc_ellipsoid_params: f must be in [0,1)
@@ -127,6 +137,32 @@ class ProjOperatorSetupTest {
             reject("proj=eqdc R=6400000 lat_2=91", "|lat_2| > 90"),
             reject("proj=eqdc R=1 lat_1=1e-9", "1e-9 degrees is 1.7e-11 rad, under EPS10"),
             accept("proj=eqdc ellps=GRS80 lat_1=0.5 lat_2=2", "ordinary"),
+
+            // ---- eqdc: the secant-cone eccentricity guard, eqdc.cpp:127-132. Decided
+            //      from the numerator alone; see ProjOperatorSetup.eqdc for why the
+            //      pj_mlfn denominator cannot rescue a zero numerator. Note eqdc
+            //      defaults lat_2 to 0 where lcc defaults it to lat_1, so `lat_1=1`
+            //      alone is already a secant cone here.
+            reject("proj=eqdc lat_1=1 ellps=GRS80 b=.1",
+                    "corpus block 84, builtins.gie:1865 - the +b modifier drives es to "
+                            + "1-2.2e-16 and both msfn values come out exactly 1.0"),
+            reject("proj=eqdc lat_1=1 ellps=WGS84 b=.1",
+                    "the other named ellipsoid this class carries a size for"),
+            reject("proj=eqdc a=9999999 b=.9 lat_2=1", "corpus block 79, builtins.gie:1850"),
+            reject("proj=eqdc a=9999999 b=.9 lat_1=1", "lat_2 defaults to 0, so still secant"),
+            reject("proj=eqdc a=9999999 b=.9 lat_1=0.5 lat_2=2", "same guard, non-zero lat_1"),
+            reject("proj=eqdc lat_1=1 ellps=GRS80 rf=1.0000001", "es = 1-1e-14 via +rf"),
+            reject("proj=eqdc lat_1=1 ellps=GRS80 es=0.999999999999999", "es given directly"),
+            accept("proj=eqdc a=9999999 b=.9 lat_1=30 lat_2=45",
+                    "the guard is about the PAIR, not es alone: the same degenerate "
+                            + "ellipsoid still separates these two msfn values by 2.8e-15"),
+            accept("proj=eqdc a=9999999 b=.9 lat_1=1 lat_2=1",
+                    "tangent cone - upstream never enters the branch"),
+            accept("proj=eqdc a=9999999 b=9999 lat_2=1", "near miss: es not close enough to 1"),
+            accept("proj=eqdc lat_1=1 ellps=GRS80 f=0.9", "es = 0.99 is not close enough"),
+            accept("proj=eqdc lat_1=1 ellps=GRS80 b=.1 a=1",
+                    "+a overrides the named size BEFORE +b sets the shape, so es = 0.99"),
+            accept("proj=eqdc lat_1=1 ellps=GRS80", "a bare named ellipsoid is ordinary"),
             accept("proj=leac ellps=GRS80 lat_1=0 lat_2=2", "leac takes phi1 from the pole"),
             accept("proj=leac R=6400000 lat_1=0 lat_2=2", "and ignores lat_2"),
 
@@ -231,6 +267,41 @@ class ProjOperatorSetupTest {
                     + "presence test cannot be a value test"),
             accept("proj=gn_sinu a=6400000 m=1 n=2", "corpus row builtins.gie:2220"),
 
+            // ---- oea: the same two keys as gn_sinu, with NO presence test and a
+            // ---- strict bound on both, so a bare +proj=oea is refused for n
+            reject("proj=oea a=6400000", "+n defaults to 0 and 0 is not > 0"),
+            reject("proj=oea a=6400000 m=2", "n is named first, even though m is given"),
+            reject("proj=oea a=6400000 n=1", "then m"),
+            reject("proj=oea a=6400000 n=-1 m=2", "n must be > 0"),
+            reject("proj=oea a=6400000 n=1 m=0", "m must be > 0 - unlike gn_sinu, "
+                    + "where m=0 is legal"),
+            accept("proj=oea a=6400000 n=1 m=2 theta=3", "corpus row builtins.gie:5192"),
+            accept("proj=oea a=6400000 n=1 m=2", "+theta defaults to 0 and is not bounded"),
+            accept("proj=oea a=6400000 n=1 m=2 theta=-1000", "nor bounded from below"),
+
+            // ---- chamb: the three control points must be pairwise distinct, by
+            // ---- great-circle distance rather than by parameter equality
+            reject("proj=chamb R=6400000", "all six ordinates default to 0"),
+            reject("proj=chamb R=6400000 lat_1=1 lat_2=1", "points 1 and 2 coincide"),
+            reject("proj=chamb R=6400000 lat_1=1 lon_1=0 lat_2=1 lon_2=360",
+                    "distinct parameters, one point: +lon_2 wraps onto +lon_1"),
+            reject("proj=chamb R=6400000 lat_1=1 lat_2=1.00000005",
+                    "8.7e-10 rad apart is under chamb.cpp's 1e-9 TOL"),
+            accept("proj=chamb R=6400000 lat_1=1 lat_2=1.0000001",
+                    "1.7e-9 rad apart is over it - the pair brackets the tolerance and "
+                            + "shows the test is a distance, not an equality"),
+            accept("proj=chamb R=6400000 lat_1=0.5 lat_2=2", "corpus row builtins.gie:1069"),
+            accept("proj=chamb R=6400000 lat_1=10 lat_2=20 lat_3=30",
+                    "collinear is accepted - chamb.cpp:133 says so in as many words"),
+
+            // ---- rouss: PJ_PROJECTION(rouss) has no guard of any kind, so every
+            // ---- definition of it is accepted, including ones that answer nonsense
+            accept("proj=rouss ellps=GRS80", "ordinary"),
+            accept("proj=rouss R=6400000", "a sphere: es=0 collapses the meridian series"),
+            accept("proj=rouss ellps=GRS80 lat_0=90",
+                    "accepted at setup and answers -2.5e+68 at (1,1); refusing here would "
+                            + "diverge from PROJ, so the nonsense is reproduced instead"),
+
             // ---- imw_p: two presence tests the two value tests do not subsume
             reject("proj=imw_p ellps=GRS80", "lat_1 named first"),
             reject("proj=imw_p ellps=GRS80 lat_2=30", "still the missing lat_1"),
@@ -253,12 +324,67 @@ class ProjOperatorSetupTest {
             reject("proj=urm5 a=6400000 n=1 alpha=90", "n*sin(alpha) == 1"),
             accept("proj=urm5 a=6400000 n=0.5", "ordinary"),
             reject("proj=s2 ellps=WGS84 lat_0=0 lon_0=0 UVtoST=invalid", "not in the map"),
+            reject("proj=s2 ellps=WGS84 UVtoST=Linear", "the std::map lookup is case-sensitive"),
+            reject("proj=s2 ellps=WGS84 UVtoST=",
+                    "present with an empty value: pj_param's 's' hands back a pointer to the "
+                            + "NUL, which is not a key of the map either"),
+            reject("proj=s2 ellps=WGS84 UVtoST",
+                    "and the bare form is the same thing - PRESENCE is what makes the lookup "
+                            + "happen, so this is a reject where +north_square is an accept"),
             accept("proj=s2 ellps=WGS84 lat_0=0 lon_0=0 UVtoST=linear", "in the map"),
             accept("proj=s2 ellps=WGS84 lat_0=0 lon_0=0", "defaults to quadratic"),
+            accept("proj=s2 ellps=WGS84 lat_0=90 UVtoST=tangent", "corpus row builtins.gie:6504"),
+            accept("proj=s2 ellps=WGS84 lat_0=0 lon_0=180 UVtoST=none",
+                    "corpus row builtins.gie:6523 - 'none' is a value, not an absence"),
+
+            // ---- rhealpix: the two i-sigil square positions, healpix.cpp:664-683. Two
+            //      refusal mechanisms with one errno, so both directions of both are here.
+            reject("proj=rhealpix ellps=WGS84 north_square=4", "the [0,3] guard, :670-676"),
+            reject("proj=rhealpix ellps=WGS84 south_square=4", "the same guard at :677-683"),
+            reject("proj=rhealpix ellps=WGS84 north_square=-1",
+                    "the OTHER mechanism: pj_param's digit-only grammar (param.cpp:172-180). "
+                            + "proj prints no [0,3] text for this one, because atoi returned 0 "
+                            + "and the range guard was satisfied"),
+            reject("proj=rhealpix ellps=WGS84 north_square=x", "same grammar, no digits at all"),
+            reject("proj=rhealpix ellps=WGS84 north_square=1.5", "a '.' is outside 0-9"),
+            accept("proj=rhealpix ellps=WGS84 south_square=2 north_square=3",
+                    "corpus row builtins.gie:2758"),
+            accept("proj=rhealpix ellps=WGS84 north_square=0",
+                    "0 is in range and is also the default, so this must not be read as absent"),
+            accept("proj=rhealpix ellps=WGS84 north_square=3", "the top of the range"),
+            accept("proj=rhealpix ellps=WGS84", "both default to 0"),
+            accept("proj=healpix ellps=WGS84 rot_xy=42",
+                    "corpus row builtins.gie:2682 - +rot_xy has no guard of any kind"),
+            accept("proj=healpix ellps=WGS84 north_square=9",
+                    "healpix never READS the squares, so a value rhealpix would refuse is inert "
+                            + "here - the near-miss that proves the branch is keyed on +proj="),
             reject("proj=isea mode=nope", "no corpus row reaches this guard"),
             reject("proj=isea orient=nope", "nor this one"),
             accept("proj=isea mode=hex", "corpus row builtins.gie:3152 - legal at setup"),
             accept("proj=isea orient=pole", "legal"),
+
+            // ---- airocean / isea: the two operators share the keyword +orient and share
+            //      none of its values. The crossed rows are what stop a shared allow-list
+            //      from creeping in; each was run through proj 9.8.1 in both directions and
+            //      each crossed value produces error 1027 naming the OTHER operator's pair.
+            reject("proj=airocean orient=nope", "airocean.cpp:829-841"),
+            reject("proj=airocean orient", "bare +orient is the empty string, not a no-op"),
+            reject("proj=airocean orient=isea", "isea's value, refused by airocean"),
+            reject("proj=airocean orient=pole", "likewise"),
+            accept("proj=airocean", "+orient defaults to vertical"),
+            accept("proj=airocean orient=vertical", "corpus block builtins.gie:1195"),
+            accept("proj=airocean orient=horizontal", "corpus block builtins.gie:1297"),
+            reject("proj=isea orient=vertical", "airocean's value, refused by isea"),
+            reject("proj=isea orient=horizontal", "likewise"),
+            reject("proj=isea orient", "bare +orient again"),
+            accept("proj=isea orient=isea", "the default, spelled out"),
+            accept("proj=isea aperture=0", "+aperture has no setup-time range check"),
+            accept("proj=isea resolution=31",
+                    "legal at setup; corpus row builtins.gie:3152 fails at transform time"),
+            accept("proj=isea mode=dd", "legal"),
+            accept("proj=isea mode=di", "legal"),
+            accept("proj=isea azi=10", "+azi moves the orientation, it does not fail setup"),
+            accept("proj=isea lat_0=10", "+lat_0 likewise; it just costs the inverse"),
 
             // ---- ob_tran
             reject("proj=ob_tran R=6400000", "+o_proj missing"),
@@ -291,15 +417,49 @@ class ProjOperatorSetupTest {
             accept("proj=helmert rx=0", "a zero rotation is no rotation"),
             accept("proj=helmert x=1", "translation only"),
             accept("proj=helmert", "the identity is legal"),
+            reject("proj=helmert transpose=F",
+                    "presence, not truth: pj_param reads 'ttranspose', the 't' sigil"),
+            reject("proj=helmert s=-1000000", "s <= -1e6 makes the scale factor zero or negative"),
+            accept("proj=helmert s=-999999", "one part per million short of the refusal"),
+            reject("proj=helmert theta=1 s=0",
+                    "under +theta the scale is a direct multiplier, so zero collapses the plane"),
+            accept("proj=helmert theta=1", "no +s at all defaults the multiplier to 1"),
+            accept("proj=helmert theta=1 s=1", "an explicit multiplier of 1"),
             reject("proj=molobadekas", "convention is unconditionally required here"),
             accept("proj=molobadekas convention=position_vector", "legal"),
+            accept("proj=molobadekas transpose convention=position_vector",
+                    "molobadekas has no transpose check - only helmert does"),
+            accept("proj=molobadekas s=-2000000 convention=position_vector",
+                    "nor does it validate +s, so a negative scale factor is accepted here"),
             reject("proj=molodensky a=6378160 rf=298.25", "dx missing"),
             reject("proj=molodensky a=6378160 rf=298.25 dx=0", "dy missing"),
             accept("proj=molodensky a=6378160 rf=298.25 dx=0 dy=0 dz=0 da=0 df=0", "complete"),
+            accept("proj=molodensky a=6378160 rf=298.25 dx=0 dy=0 dz=0 da=0 df=0 abridged",
+                    "+abridged never affects acceptance; it selects a formula"),
+
+            // ---- vertoffset. It has no branch in ProjOperatorSetup and needs none:
+            // vertoffset.cpp:93-100 reads five optional numbers and computes two radii,
+            // with no guard and no path that returns a destructor. These rows pin that
+            // "no branch" is a measured conclusion rather than an operator nobody got to
+            // - if someone adds a guard, the accepts here have to be revisited to say why.
+            accept("proj=vertoffset ellps=GRS80", "every parameter defaults; this is the identity"),
+            accept("proj=vertoffset ellps=GRS80 lat_0=46.9166666666666666 "
+                    + "lon_0=8.183333333333334 dh=-0.245 slope_lat=-0.210 slope_lon=-0.032",
+                    "the corpus definition, more_builtins.gie:781"),
 
             // ---- defmodel / gridshift
             reject("proj=defmodel", "+model= required"),
             reject("proj=gridshift", "+grids required"),
+
+            // ---- xyzgridshift. +grid_ref is checked BEFORE +grids, so the first row
+            //      below is 1027 and not 1026 -- probed both ways round.
+            reject("proj=xyzgridshift", "+grids required"),
+            reject("proj=xyzgridshift grid_ref=bogus", "grid_ref wins over the missing +grids"),
+            reject("proj=xyzgridshift grids=null grid_ref=bogus", "unknown +grid_ref"),
+            accept("proj=xyzgridshift grids=null", "+grids=null is a real, buildable grid set"),
+            accept("proj=xyzgridshift grids=null grid_ref=input_crs", "the default, named"),
+            accept("proj=xyzgridshift grids=null grid_ref=output_crs", "the iterative branch"),
+            accept("proj=xyzgridshift grids=null multiplier=0", "+multiplier has no guard at all"),
 
             // ---- ups / utm / sterea
             reject("proj=ups a=6400000", "no spherical formulation"),
@@ -310,6 +470,54 @@ class ProjOperatorSetupTest {
             reject("proj=sterea a=9999 b=.9 lat_0=73", "pj_gauss_ini srat underflows"),
             accept("proj=sterea a=9999 b=.9 lat_0=0", "sin(lat_0)=0 makes srat 1"),
             accept("proj=sterea ellps=GRS80 lat_0=52", "ordinary"),
+
+            // ---- noop / geoc / geogoffset (2.2.0). None of the three has a setup
+            //      guard of its own: noop.cpp reads no parameters at all, and
+            //      geogoffset (affine.cpp:228-250) reads +dlon/+dlat/+dh with pj_param
+            //      defaults of 0, so every value is legal and the bare form is the
+            //      identity. These ACCEPT rows record that the absence was checked
+            //      rather than assumed - a guard added upstream would show up here as
+            //      an oracle disagreement rather than as a silent parity gap.
+            accept("proj=noop", "noop.cpp: no parameters, nothing to refuse"),
+            accept("proj=geogoffset", "all three offsets default to 0; the identity"),
+            accept("proj=geogoffset dlon=3600 dlat=-3600 dh=3", "corpus more_builtins.gie:705"),
+            accept("proj=geogoffset dlon=-1e9 dh=-1e9", "no range check on any offset"),
+            accept("proj=geoc ellps=GRS80", "corpus more_builtins.gie:486"),
+            accept("proj=geoc", "append_default_ellipsoid_to_paralist supplies GRS80"),
+            accept("proj=geoc R=6378137", "a sphere is legal; es==0 makes the conversion "
+                    + "the identity at run time, which is not a setup failure"),
+
+            // geoc's ONLY construction requirement is PJ_CONVERSION(geoc, 1)'s
+            // need_ellps, and the only way to reach it is to inhibit the GRS80 default.
+            // Probed: `proj +proj=geoc +no_defs` fails 1026 "Must specify ellipsoid or
+            // sphere" (init.cpp:570-572) while `+proj=noop +no_defs` and
+            // `+proj=geogoffset +dlon=3600 +no_defs` both SUCCEED, because those two are
+            // declared with need_ellps=0. The validator reaches the right verdict here
+            // for a broader reason than PROJ's - see validateEllipsoid - so this row is
+            // pinned on the verdict only; the divergence on the other two is recorded in
+            // NEED_ELLPS_NOT_MODELLED below.
+            reject("proj=geoc no_defs", "need_ellps=1 with the GRS80 default inhibited"),
+    };
+
+    /**
+     * Definitions {@code proj 9.8.1} <em>accepts</em> and this validator rejects.
+     *
+     * <p>{@link ProjDefinitionValidator#validateEllipsoid} refuses any {@code +no_defs}
+     * carrying no ellipsoid size, on the strength of {@code proj +proj=merc +no_defs}
+     * failing. That is right for the ~170 operators declared {@code NEED_ELLPS = 1}, and
+     * wrong for the handful declared {@code 0}: {@code init.cpp:569-580} hands those a
+     * free WGS84 instead of failing. Probed against the installed 9.8.1, both of the
+     * definitions below print a coordinate.
+     *
+     * <p>It is left unfixed deliberately, and the reason is measurable: <b>{@code no_defs}
+     * appears in none of the 42 active corpus files</b>, so the rule has a corpus
+     * population of zero and modelling {@code need_ellps} per operator would be 186 table
+     * rows bought with no assertion. This array is the honest record of the gap, and it
+     * fails the moment the gap closes by accident.
+     */
+    private static final String[] NEED_ELLPS_NOT_MODELLED = {
+            "proj=noop no_defs",
+            "proj=geogoffset dlon=3600 no_defs",
     };
 
     /**
@@ -318,18 +526,15 @@ class ProjOperatorSetupTest {
      * if someone ports those guards, this list must shrink in the same commit, and if
      * the validator starts rejecting them by accident, this catches it.
      *
-     * <p>The {@code lcc} and {@code omerc} entries have left this list — their guards
-     * are closed form ({@code pj_msfn}, {@code pj_tsfn}) and are now ported, and their
-     * probes moved into {@link #ORACLE} in both directions. What remains is
-     * {@code eqdc}, whose guard divides by a difference of {@code pj_mlfn} values;
-     * {@link ProjOperatorSetup#eqdc} states at length why the closed-form part of that
-     * expression is <em>not</em> enough to decide it.
+     * <p>The {@code lcc}, {@code omerc} and {@code eqdc} entries have left this list —
+     * all three guards are decidable from closed form ({@code pj_msfn},
+     * {@code pj_tsfn}), and their probes moved into {@link #ORACLE} in both directions.
+     * {@code eqdc} was the last to go, and it left for a different reason from the other
+     * two: its expression really does divide by a difference of {@code pj_mlfn} values,
+     * but no value that denominator can take turns a zero numerator into an accepted
+     * definition. {@link ProjOperatorSetup#eqdc} enumerates the cases.
      */
     private static final String[] UNMODELLED = {
-            // Need pj_mlfn - the AuxLat 6th-order meridian series, evaluated far outside
-            // its stated |f| <= 1/150 convergence domain - to decide `n == 0`.
-            "proj=eqdc a=9999999 b=.9 lat_2=1",
-            "proj=eqdc lat_1=1 ellps=GRS80 b=.1",
             // A repeated +o_proj: ob_tran_target_params rewrites every occurrence and
             // the resulting failure is not the one the rewrite loop reads as though it
             // should be. proj 9.8.1 rejects this with omerc's lat_1/lat_2 message,
@@ -376,14 +581,26 @@ class ProjOperatorSetupTest {
     }
 
     @Test
-    @DisplayName("guards needing pj_mlfn are honestly reported as not modelled")
+    @DisplayName("the +no_defs rule over-rejects the need_ellps=0 operators, on the record")
+    void needEllpsIsNotModelledPerOperator() {
+        for (String def : NEED_ELLPS_NOT_MODELLED) {
+            GieFailure f = ProjDefinitionValidator.validate(GieProjArgs.parse(def));
+            assertTrue(f != null, def + " is now accepted, which matches proj 9.8.1. If "
+                    + "need_ellps was modelled per operator, delete this entry - the gap "
+                    + "it records has closed. If it was not, something else changed the "
+                    + "+no_defs rule and the ~170 need_ellps=1 operators need re-checking.");
+        }
+    }
+
+    @Test
+    @DisplayName("guards this class declines to model are honestly reported as not modelled")
     void unmodelledGuardsStayValid() {
         for (String def : UNMODELLED) {
             GieFailure f = ProjDefinitionValidator.validate(GieProjArgs.parse(def));
             assertEquals(null, f, def + " is now classified INVALID_DEFINITION. proj 9.8.1 "
-                    + "does reject it, but on an eccentricity guard this class does not "
-                    + "model - so either the guard was ported (update this list) or the "
-                    + "rejection is coming from somewhere it should not.");
+                    + "does reject it, but on a guard this class does not model - so "
+                    + "either the guard was ported (update this list) or the rejection is "
+                    + "coming from somewhere it should not.");
         }
     }
 }

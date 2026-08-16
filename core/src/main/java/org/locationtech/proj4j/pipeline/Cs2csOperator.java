@@ -152,6 +152,11 @@ import org.locationtech.proj4j.vertical.VGridShiftOperator;
  * before anything else touches it. {@code inv_finalize} calls it {@code PJ_FWD}
  * ({@code inv.cpp:140}), last of all.
  *
+ * <p>The arithmetic itself lives in {@link GeocConversion}, shared with the
+ * {@code +proj=geoc} <em>operator</em> ({@link GeocOperator}). The flag and the operator
+ * are the same conversion reached two ways, and upstream likewise has one
+ * {@code pj_geocentric_latitude} with two callers.
+ *
  * <h2>The vertical unit</h2>
  *
  * <p>{@code +vunits}/{@code +vto_meter}/{@code +z_0} are read here rather than in
@@ -246,10 +251,11 @@ final class Cs2csOperator extends OverridableUnitsOperator {
 
     /** {@code P->geoc} ({@code init.cpp:598}): {@code +geoc} <b>and</b> {@code es != 0}. */
     private final boolean geoc;
-    /** {@code P->one_es}, i.e. {@code 1 - es}; only read when {@link #geoc}. */
-    private final double oneEs;
-    /** {@code P->rone_es}, i.e. {@code 1 / (1 - es)}; only read when {@link #geoc}. */
-    private final double rOneEs;
+    /**
+     * {@code pj_geocentric_latitude}, shared with {@code +proj=geoc}
+     * ({@link GeocOperator}); null unless {@link #geoc}.
+     */
+    private final GeocConversion geocConversion;
 
     /**
      * @param registry the projection registry to resolve {@code +proj=} against
@@ -310,8 +316,7 @@ final class Cs2csOperator extends OverridableUnitsOperator {
         // init.cpp:598. The `es != 0` half is not an optimisation: on a sphere the two
         // latitudes are equal, so +geoc is legitimately accepted and ignored there.
         this.geoc = esOrig != 0.0 && params.booleanValue("geoc");
-        this.oneEs = 1.0 - esOrig;
-        this.rOneEs = 1.0 / (1.0 - esOrig);
+        this.geocConversion = geoc ? new GeocConversion(esOrig) : null;
 
         // create.cpp:107-124. The +nadgrids helper, built BEFORE the towgs84 one because
         // its existence is what decides whether the towgs84 one is looked up at all.
@@ -471,6 +476,17 @@ final class Cs2csOperator extends OverridableUnitsOperator {
      * {@code pj_list_linear_units()} and nothing else — so {@code +vunits=deg} is
      * "Invalid value for vunits", not a radian conversion.
      *
+     * <p><b>The column matters.</b> {@code :726} is {@code s = units[i].to_meter}, the
+     * <em>string</em> field, so this reads
+     * {@link PipelineUnits.Resolution#toMeter()} and not {@code factor()}. Measured on
+     * 9.8.1 with {@code +vunits=m} as the accept control and {@code +vunits=rad} as the
+     * reject control: at {@code z = 12345678} m,
+     * {@code +proj=merc +ellps=GRS80 +vunits=us-ft} gives
+     * {@code 40504111.905000023544}, which is {@code +vto_meter=0.304800609601219} exactly
+     * and <em>not</em> {@code +vto_meter=1200/3937}'s {@code 40504111.905000001192}.
+     * Wrapping the step in {@code +proj=pipeline} changes nothing. Reading
+     * {@code factor()} here was a 2.2e-8 m error on that height, reported as success.
+     *
      * @param params            the step's parameters
      * @param horizontalToMeter {@code P->to_meter}, the fallback
      * @return the vertical {@code to_meter}, guaranteed positive and finite
@@ -483,7 +499,9 @@ final class Cs2csOperator extends OverridableUnitsOperator {
                 throw new PipelineDefinitionException(PipelineErrorCode.ILLEGAL_ARG_VALUE,
                         "+vunits=" + vunits + " is not one of PROJ's linear units");
             }
-            return unit.factor();
+            // toMeter(), not factor(): init.cpp:726 reads the string column, exactly as
+            // :689 does for the horizontal +units.
+            return unit.toMeter();
         }
         final String vtoMeter = params.value("vto_meter");
         if (vtoMeter != null) {
@@ -493,8 +511,13 @@ final class Cs2csOperator extends OverridableUnitsOperator {
     }
 
     /**
-     * {@code +vto_meter}'s value syntax: a plain double, or a {@code num/den} ratio, which is
-     * how PROJ's own unit table spells {@code us-ft} ({@code "1200/3937"}).
+     * {@code +vto_meter}'s value syntax: a plain double, or a {@code num/den} ratio. PROJ
+     * accepts both because its own unit table uses both spellings in the string column
+     * {@code +units} reads: {@code dm} is {@code "1/10"} and {@code us-in} is
+     * {@code "1/39.37"}, while {@code us-ft} is the plain decimal
+     * {@code "0.304800609601219"} ({@code 9.8.1:src/units.cpp:14-27}). {@code us-ft} is
+     * <b>not</b> spelled as a ratio there — see {@code Units.US_FEET} for why that
+     * matters and why it must not be "corrected" to {@code 1200/3937}.
      *
      * @param raw the value as written
      * @return the factor, validated positive and finite
@@ -564,8 +587,16 @@ final class Cs2csOperator extends OverridableUnitsOperator {
      * is what makes an all-zero seven-value {@code +towgs84} indistinguishable from
      * a three-value one — and that in turn is what {@code create.cpp}'s all-zero
      * test relies on.
+     *
+     * <p>Package-private rather than private because {@link HelmertOperator} needs the
+     * same seven slots in the same normalised form: upstream's {@code +proj=helmert}
+     * reads {@code P->datum_params}, which is this function's output
+     * ({@code helmert.cpp:583-600}).
+     *
+     * @param value the raw {@code +towgs84} value, comma separated
+     * @return seven slots: metres, then radians and {@code 1 + s/1e6}
      */
-    private static double[] parseTowgs84(final String value) {
+    static double[] parseTowgs84(final String value) {
         final double[] out = new double[7];
         final String[] fields = value.split(",");
         final int n = Math.min(fields.length, 7);
@@ -713,7 +744,7 @@ final class Cs2csOperator extends OverridableUnitsOperator {
         // fwd.cpp:80-81, "If input latitude is geocentrical, convert to geographical".
         // Note PJ_INV, and note that it happens after the clamp and before adjlon.
         if (geoc) {
-            coord[1] = geocentricLatitude(coord[1], false);
+            coord[1] = geocConversion.latitude(coord[1], false);
         }
         if (!over) {
             coord[0] = adjlon(coord[0]);
@@ -851,31 +882,8 @@ final class Cs2csOperator extends OverridableUnitsOperator {
         // inv.cpp:139-140, last of all: "If input latitude was geocentrical, convert
         // back to geocentrical". PJ_FWD this time.
         if (geoc) {
-            coord[1] = geocentricLatitude(coord[1], true);
+            coord[1] = geocConversion.latitude(coord[1], true);
         }
-    }
-
-    /**
-     * {@code pj_geocentric_latitude} ({@code conversions/geoc.cpp:37-64}).
-     *
-     * <p>Two escapes, both upstream's and both load-bearing. Within
-     * {@code M_HALFPI - 1e-9} of a pole the input is returned unchanged, because
-     * {@code tan} diverges there while the geocentric and geographic latitudes converge
-     * — so computing would be both slower and worse. On a sphere ({@code es == 0}) the
-     * two are identical everywhere; that case never reaches here, because
-     * {@link #geoc} folds it in at construction exactly as {@code init.cpp:598} does.
-     *
-     * @param phi     latitude in radians
-     * @param forward {@code PJ_FWD}, i.e. geographic to geocentric; {@code false} for
-     *                {@code PJ_INV}
-     * @return the converted latitude in radians
-     */
-    private double geocentricLatitude(final double phi, final boolean forward) {
-        final double limit = HALF_PI - 1e-9;
-        if (phi > limit || phi < -limit) {
-            return phi;
-        }
-        return Math.atan((forward ? oneEs : rOneEs) * Math.tan(phi));
     }
 
     @Override

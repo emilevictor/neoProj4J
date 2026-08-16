@@ -46,6 +46,13 @@ import org.locationtech.proj4j.util.ProjectionMath;
  * constant itself moves by about one ulp, and with it every {@code lcc} coordinate. That is
  * expected and is the point.
  *
+ * <p><b>Which parallels are in play is decided by PRESENCE, not by value.</b> {@code lcc.cpp:88-95}
+ * asks {@code pj_param(..., "tlat_2").i} and {@code pj_param(..., "tlat_0").i}, so an explicit
+ * {@code +lat_2=0} is a secant cone through the equator and an explicit {@code +lat_0=0} keeps the
+ * latitude of origin there. Both used to be read here as {@code == 0}, which cannot express either.
+ * {@link #initialize()} carries the measured figures and the count of shipped definitions affected,
+ * which is zero.
+ *
  * <p><b>Setup validation.</b> {@code initialize()} now reproduces {@code lcc.cpp:100-110} and
  * {@code :122-138}/{@code :154-161}: a standard parallel at or beyond the pole, and a cone constant
  * that comes out exactly zero, are rejected instead of being carried forward as a division by zero.
@@ -77,16 +84,25 @@ public class LambertConformalConicProjection extends ConicProjection {
 
 	/**
 	* Set up a projection suitable for State Place Coordinates.
+	*
+	* <p>{@code lat_0} and {@code lat_2} go through {@link #setProjectionLatitude(double)} and
+	* {@link #setProjectionLatitude2(double)} rather than being written to the fields directly,
+	* because a caller of this constructor is supplying both parameters explicitly and
+	* {@link #initialize()} now reads whether they were given rather than what they hold. A direct
+	* field write would leave both flags false, and a State Plane zone with {@code lat_2} at the
+	* equator -- or with a {@code lat_0} of 0 -- would come out tangent at {@code lat_1} instead of
+	* secant, which is the very defect this reading was changed to fix. See
+	* {@link Projection#projectionLatitude2Specified}.
 	*/
 	public LambertConformalConicProjection(Ellipsoid ellipsoid, double lon_0, double lat_1, double lat_2, double lat_0, double x_0, double y_0) {
 		setEllipsoid(ellipsoid);
 		projectionLongitude = lon_0;
-		projectionLatitude = lat_0;
+		setProjectionLatitude(lat_0);
 		scaleFactor = 1.0;
 		falseEasting = x_0;
 		falseNorthing = y_0;
 		projectionLatitude1 = lat_1;
-		projectionLatitude2 = lat_2;
+		setProjectionLatitude2(lat_2);
 		initialize();
 	}
 
@@ -154,23 +170,80 @@ public class LambertConformalConicProjection extends ConicProjection {
 		// if ( projectionLatitude1 == 0 )
 			// projectionLatitude1 = projectionLatitude2 = projectionLatitude;
 
-		// https://github.com/OSGeo/PROJ/blob/e3d7e18f988230973ced5163fa2581b6671c8755/src/projections/lcc.cpp#L89-L96
-		// if there is no lat2 set it to lat1
-		if (projectionLatitude2 == 0) {
+		/*
+		 * lcc.cpp:88-95. Both of these are PRESENCE tests upstream, and both used to be value
+		 * tests here:
+		 *
+		 *     if (pj_param(P->ctx, P->params, "tlat_2").i)
+		 *         Q->phi2 = pj_param(P->ctx, P->params, "rlat_2").f;
+		 *     else {
+		 *         Q->phi2 = Q->phi1;
+		 *         if (!pj_param(P->ctx, P->params, "tlat_0").i)
+		 *             P->phi0 = Q->phi1;
+		 *     }
+		 *
+		 * The leading `t` sigil asks whether the key appears in the definition and `.i` is a 0/1
+		 * flag, not the value. Zero is a real standard parallel and a real latitude of origin, so
+		 * `projectionLatitude2 == 0` could not tell an explicit +lat_2=0 from no +lat_2 at all and
+		 * silently made a definition PROJ treats as SECANT come out TANGENT -- with its latitude of
+		 * origin moved to lat_1 as well, because the inner test was wrong the same way. Presence
+		 * arrives on Projection.projectionLatitude2Specified and
+		 * Projection.projectionLatitudeSpecified, which the setters set and which only the parser
+		 * can populate.
+		 *
+		 * Measured against 9.8.1 on GRS80 at 10E 40N, forward:
+		 *
+		 *     +proj=lcc +lat_1=45 +lat_2=0    825297.566331256530   4211552.547939138487
+		 *     +proj=lcc +lat_1=45             854925.007478637854   -503282.608577708714
+		 *
+		 * 29.6 km apart in easting and 4,715 km apart in northing, for two definitions that
+		 * differ by three characters. The second pair shows the inner test in isolation -- both
+		 * omit +lat_2, so both are tangent at 45 degrees, and the only difference is whether
+		 * +lat_0=0 was typed:
+		 *
+		 *     +proj=lcc +lat_1=45 +lat_0=0    854925.007478637854   4982777.080788109452
+		 *     +proj=lcc +lat_1=45             854925.007478637854   -503282.608577708714
+		 *
+		 * Identical eastings, because the cone is the same; 5,486 km apart in northing, because
+		 * rho0 is taken at phi0 and PROJ leaves phi0 at the equator when the key is present.
+		 *
+		 * Still idempotent across repeated initialize() calls: on a second pass the flags are
+		 * unchanged and projectionLatitude2 already holds projectionLatitude1, so both assignments
+		 * are no-ops.
+		 *
+		 * NO SHIPPED DEFINITION MOVES. Of the 1,885 +proj=lcc definitions in the five bundled
+		 * dictionaries (epsg 1,192, esri 521, nad27 75, nad83 68, world 29) not one carries
+		 * +lat_2=0, and the 12 that carry +lat_0=0 all carry a non-zero +lat_2 as well, so the
+		 * whole block is skipped for them under both the old rule and this one. The five presence
+		 * combinations that do occur -- lat_2 present and non-zero (1,547), lat_2 absent with a
+		 * non-zero lat_0 (315), lat_2 absent with no lat_0 (23), and the 6 world/*-alger-family
+		 * grids that have no lat_1 at all and throw on |lat_1 + lat_2| below either way -- resolve
+		 * to the same phi1, phi2, phi0 and secant flag under both rules.
+		 */
+		if (!projectionLatitude2Specified) {
 			projectionLatitude2 = projectionLatitude1;
-			// if there is no lat0, set it to lat1
-			if(projectionLatitude == 0)
+			if (!projectionLatitudeSpecified)
 				projectionLatitude = projectionLatitude1;
 		}
 
 
-		// Left as ProjectionException deliberately. 149 of the 1,885 bundled +proj=lcc definitions
+		// Left as ProjectionException deliberately. 6 of the 1,885 bundled +proj=lcc definitions
 		// omit lat_1 entirely and so already reach this throw; reclassifying it to
 		// InvalidValueException -- which is the taxonomically correct answer, since this is a
 		// setup error carrying PROJ's invalid_op_illegal_arg_value -- would change the exception
 		// type every one of those callers sees, and the two classes are siblings rather than
 		// related by inheritance. That reclassification belongs with the error-taxonomy work, not
 		// here. None of the eight rejection rows at builtins.gie:3862-3908 reaches this line.
+		//
+		// The 6 used to be written here as 149, which is wrong by a factor of 25 and was wrong in
+		// the direction that makes the reclassification look more expensive than it is. Counted two
+		// independent ways over epsg/esri/nad27/nad83/world: joining continuation lines into whole
+		// records and testing for an absent lat_1 key gives 6, and grepping the four single-line
+		// files plus an awk record-joiner over the three multi-line ones gives 6 as well. They are
+		// all in `world` -- n-alger, n-maroc, n-tunis, s-alger, s-maroc and s-tunis, the North
+		// African grids, which carry lat_0 and k_0 but no standard parallel at all. A grep for
+		// `proj=lcc` that does not join continuation lines misses them entirely, because in `world`
+		// the parameters run across three physical lines.
 		if (Math.abs(projectionLatitude1 + projectionLatitude2) < 1e-10)
 			throw new ProjectionException(
 				"Invalid value for lat_1 and lat_2: |lat_1 + lat_2| should be > 0");

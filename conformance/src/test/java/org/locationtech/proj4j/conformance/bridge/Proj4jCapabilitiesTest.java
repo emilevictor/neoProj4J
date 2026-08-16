@@ -128,11 +128,69 @@ class Proj4jCapabilitiesTest {
         assertNull(Proj4jCapabilities.valueGrammarFailure("k_0", "0.9996"));
         assertNull(Proj4jCapabilities.valueGrammarFailure("lat_0", null));
 
-        // Divergence: a num/den ratio, which only +to_meter accepts.
-        assertNotNull(Proj4jCapabilities.valueGrammarFailure("to_meter", "1/0.3048"));
+        // AGREEMENT, not divergence, and this line used to assert the opposite. The old
+        // assertNotNull was pinning the bridge's own stale veto rather than measuring
+        // anything about core: Proj4Parser.parseToMeter implements init.cpp:692-711's
+        // num/den ratio in full, so "1/0.3048" is 3.2808398950131235 on both sides. The
+        // method is kept and amended rather than deleted - it is one of the ci count's
+        // gated methods, and the assertion is what was wrong, not the test.
+        assertNull(Proj4jCapabilities.valueGrammarFailure("to_meter", "1/0.3048"));
 
         // strtod stops at the first invalid character; Double.parseDouble throws.
         assertNotNull(Proj4jCapabilities.valueGrammarFailure("x_0", "500000junk"));
+    }
+
+    @Test
+    @DisplayName("+to_meter's num/den ratio agrees with PROJ, sign rules and all")
+    void toMeterRatioAgreesWithProj() {
+        // The corpus row this exists for: more_builtins.gie:525, whose expect is the same
+        // 69187.5632 609890.7825 as the +to_meter=10 block six lines above it, so the
+        // arithmetic is pinned by a row that already passed.
+        assertEquals(10.0, Proj4jCapabilities.proj4jToMeter("2.0/0.2").doubleValue(), 1e-12);
+        assertNull(Proj4jCapabilities.valueGrammarFailure("to_meter", "2.0/0.2"));
+        assertNull(Proj4jCapabilities.valueGrammarFailure("to_meter", "1/10"));
+        assertNull(Proj4jCapabilities.valueGrammarFailure("to_meter", "1/39.37"));
+        assertNull(Proj4jCapabilities.valueGrammarFailure("to_meter", "0.3048"));
+
+        // TWO NEGATIVES ARE ACCEPTED, and this is the case a from-first-principles reading
+        // gets wrong. init.cpp checks the QUOTIENT against <= 0, not either operand, so
+        // -2/-0.2 is a perfectly good scale of 10. Measured on 9.8.1.
+        assertEquals(10.0, Proj4jCapabilities.proj4jToMeter("-2/-0.2").doubleValue(), 1e-12);
+        assertNull(Proj4jCapabilities.valueGrammarFailure("to_meter", "-2/-0.2"));
+        assertEquals(
+                Proj4jCapabilities.proj4jToMeter("-2/-0.2").doubleValue(),
+                ProjDefinitionValidator.projRatio("-2/-0.2").doubleValue(),
+                0.0);
+
+        // One negative is refused, and by the <= 0 branch rather than the denominator one.
+        assertNull(Proj4jCapabilities.proj4jToMeter("2/-0.2"));
+        assertEquals(-10.0, ProjDefinitionValidator.projRatio("2/-0.2").doubleValue(), 1e-12);
+
+        // A zero denominator is refused by both sides, upstream as error 1027.
+        assertNull(Proj4jCapabilities.proj4jToMeter("1/0"));
+        assertNull(ProjDefinitionValidator.projRatio("1/0"));
+
+        // NEITHER refusal may be reported as NOT_IMPLEMENTED. more_builtins.gie:516 and
+        // :521 are `expect failure` rows that PASS today because the definition is refused
+        // on the UPSTREAM side, by ProjDefinitionValidator, as INVALID_DEFINITION. A
+        // NOT_IMPLEMENTED here would make the operation uncreatable for an unrelated
+        // reason and demote both to VACUOUS_EXPECTED_FAILURE - a pass turned into a
+        // non-measurement, which is worse than a fail.
+        assertNull(Proj4jCapabilities.valueGrammarFailure("to_meter", "1/0"));
+        assertNull(Proj4jCapabilities.valueGrammarFailure("to_meter", "2/-0.2"));
+        assertNull(Proj4jCapabilities.valueGrammarFailure("to_meter", "0"));
+
+        // NON-VACUITY. The arm must still be able to report something, or none of the
+        // assertNulls above discriminates. PROJ's strtod reads "3junk" as 3; ours throws.
+        assertNotNull(Proj4jCapabilities.valueGrammarFailure("to_meter", "3junk"));
+
+        // The latent sibling: +vto_meter takes the same syntax (init.cpp:729-749 is
+        // byte-identical), so "2/2" is the identity and conditionalFailure must wave it
+        // through. Read with projDouble it was 2.0 and was refused.
+        assertNull(Proj4jCapabilities.conditionalFailure("vto_meter", "2/2"));
+        assertNull(Proj4jCapabilities.conditionalFailure("vto_meter", "1"));
+        assertNotNull(Proj4jCapabilities.conditionalFailure("vto_meter", "2"));
+        assertNotNull(Proj4jCapabilities.conditionalFailure("vto_meter", "1/2"));
     }
 
     @Test

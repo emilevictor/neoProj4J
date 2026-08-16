@@ -148,6 +148,64 @@ public final class PjdxDatabase implements ProjDatabase {
         return a;
     }
 
+    /**
+     * PROJ's four-query fallback, in its order: {@code (source, target)}, then
+     * {@code (source, 'any')}, then {@code ('any', target)}, then {@code ('any', 'any')}, and an empty
+     * list when none of the four matches. Ported from
+     * {@code 9.8.1:src/iso19111/factory.cpp} {@code DatabaseContext::getAllowedAuthorities}.
+     * <p>
+     * The order matters and is not obvious: {@code (source, 'any')} is tried before
+     * {@code ('any', target)}, so a rule about where the coordinates come from beats a rule about
+     * where they are going. The shipped table has no {@code (x, 'any')} rows at all, so today only the
+     * first and third queries can match &mdash; but porting three of the four and inferring the rest
+     * would be exactly the kind of guess this index is meant not to contain.
+     * <p>
+     * An index generated before {@link PjdxFormat#S_AUTHORITY_PREFERENCE} existed has no such section.
+     * That is not a corrupt file and must not be read as one: the section is probed for, and its
+     * absence gives the empty list, which callers already treat as "the table says nothing".
+     */
+    @Override
+    public List<String> allowedAuthorities(String srcAuthName, String tgtAuthName) {
+        if (!file.hasSection(PjdxFormat.S_AUTHORITY_PREFERENCE)) {
+            return Collections.emptyList();
+        }
+        String row = preferenceRow(srcAuthName, tgtAuthName);
+        if (row == null) {
+            row = preferenceRow(srcAuthName, ANY_AUTHORITY);
+        }
+        if (row == null) {
+            row = preferenceRow(ANY_AUTHORITY, tgtAuthName);
+        }
+        if (row == null) {
+            row = preferenceRow(ANY_AUTHORITY, ANY_AUTHORITY);
+        }
+        if (row == null) {
+            return Collections.emptyList();
+        }
+        List<String> out = new ArrayList<String>(4);
+        int start = 0;
+        while (start <= row.length()) {
+            int comma = row.indexOf(',', start);
+            int end = comma < 0 ? row.length() : comma;
+            out.add(row.substring(start, end));
+            if (comma < 0) {
+                break;
+            }
+            start = comma + 1;
+        }
+        return Collections.unmodifiableList(out);
+    }
+
+    /** PROJ's wildcard, spelled the same way in both key columns and in the value list. */
+    private static final String ANY_AUTHORITY = "any";
+
+    /** The {@code allowed_authorities} cell for one exact key, or null if the table has no such row. */
+    private String preferenceRow(String srcAuthName, String tgtAuthName) {
+        PjdxFile.RowCursor r =
+                rowByAuthCode(PjdxFormat.S_AUTHORITY_PREFERENCE, srcAuthName, tgtAuthName);
+        return r == null ? null : r.str();
+    }
+
     // ---------------------------------------------------------------- CRSs
 
     @Override

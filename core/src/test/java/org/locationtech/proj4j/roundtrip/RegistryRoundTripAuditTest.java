@@ -57,17 +57,19 @@ import org.locationtech.proj4j.proj.Projection;
  *
  * <h2>What it runs</h2>
  *
- * <p>122 of the 151 instantiable registry names report {@code hasInverse() == true}. Each is built
+ * <p>130 of the 161 instantiable registry names report {@code hasInverse() == true}. Each is built
  * with the corpus tests' idiom — {@code new CRSFactory().createFromParameters(name, def)}, as
  * {@code proj.tierA.TierADomainAndParserGapTest} and {@code proj.tierB.TierBCorpus} do — from
- * {@code +proj=<name> +ellps=GRS80} plus, for the twenty operators that <em>require</em> extra
+ * {@code +proj=<name> +ellps=GRS80} plus, for the twenty-one operators that <em>require</em> extra
  * parameters, the minimum that makes {@code initialize()} succeed (see {@link #REQUIRED}).
  *
  * <p>Each is probed at {@link #POINTS}: an 8&nbsp;&times;&nbsp;7 lon/lat grid plus twelve awkward
  * cases (both signed antimeridians, both poles, both near-poles, small offsets from the origin, the
- * two tropics). <b>68 points &times; 122 projections = 8,296 probes</b>; 304 are refused by the
- * forward and skipped, leaving <b>7,992 round-trip assertions</b>. The whole class runs in well
- * under a second.
+ * two tropics). <b>68 points &times; 130 projections = 8,840 probes</b>; 304 are refused by the
+ * forward and skipped, leaving <b>8,536 round-trip assertions</b>. The whole class runs in well
+ * under a second. None of the eight projections added since 122 adds to the 304: airocean's net and
+ * isea's twenty faces both cover the whole sphere, and oea and rouss answer a finite number
+ * everywhere on the ladder even where that number is absurd, so every probe reaches an inverse.
  *
  * <p>A point the forward <em>refuses</em> — by throwing, or by returning a non-finite ordinate — is
  * skipped, not failed. Refusing an out-of-domain point is the documented {@code DomainErrorPolicy}
@@ -95,7 +97,7 @@ import org.locationtech.proj4j.proj.Projection;
  * 8.5e-7&deg; in the recovered latitude. Measured worst of that class here: 1.5e-6&deg;
  * ({@code putp6p} at the pole). A 1e-6&deg; bar would be measuring {@code double}, not proj4j.
  *
- * <p>The choice is also not delicate, which is the real justification. Sorting all 122 measured
+ * <p>The choice is also not delicate, which is the real justification. Sorting all 130 measured
  * worst-case errors leaves a clear two-and-a-half-decade gap: the largest error among the
  * projections that pass is 6.6e-6&deg; ({@code eqearth}, Newton inverse at the pole) and the
  * smallest among those that fail is 1.7e-3&deg; ({@code putp4p}/{@code weren}, 190 m). <b>Any
@@ -103,7 +105,7 @@ import org.locationtech.proj4j.proj.Projection;
  *
  * <h2>The anti-rot mechanism</h2>
  *
- * <p>29 of the 122 fail. They are pinned in {@link #PINNED} with the error actually measured, and
+ * <p>33 of the 130 fail. They are pinned in {@link #PINNED} with the error actually measured, and
  * the test asserts the failing set <em>equals</em> that table:
  *
  * <ul>
@@ -183,7 +185,7 @@ public class RegistryRoundTripAuditTest {
     // ------------------------------------------------------------------- required parameters
 
     /**
-     * The twenty operators that cannot be built from {@code +proj=<name> +ellps=GRS80} alone,
+     * The twenty-one operators that cannot be built from {@code +proj=<name> +ellps=GRS80} alone,
      * with the minimum that makes {@code initialize()} succeed. Every one of these is asserted to
      * be <em>necessary</em> by {@link #requiredParametersAreStillRequired()}, so this cannot become
      * a place to hide a fix.
@@ -208,6 +210,10 @@ public class RegistryRoundTripAuditTest {
             {"murd2", "+lat_1=30 +lat_2=60"},
             {"murd3", "+lat_1=30 +lat_2=60"},
             {"nsper", "+h=500000"},
+            // oea.cpp:64-72 bounds both +n and +m at > 0, and pj_param's d sigil answers 0 for an
+            // absent key, so "not given" fails the same test "given as 0" does. +theta has no
+            // test and no effect worth pinning here, so it is left at its default.
+            {"oea", "+n=1 +m=2"},
             {"pconic", "+lat_1=30 +lat_2=60"},
             {"tissot", "+lat_1=30 +lat_2=60"},
             {"tpeqd", "+lat_1=30 +lon_1=-10 +lat_2=40 +lon_2=10"},
@@ -236,7 +242,7 @@ public class RegistryRoundTripAuditTest {
     private static final double REFUSED = Double.POSITIVE_INFINITY;
 
     /**
-     * The 29 projections whose inverse does not undo their forward on this ladder, each with the
+     * The 33 projections whose inverse does not undo their forward on this ladder, each with the
      * worst error measured, in degrees. {@link #REFUSED} means the inverse threw or answered
      * {@code NaN} on a point the forward had accepted.
      *
@@ -301,6 +307,31 @@ public class RegistryRoundTripAuditTest {
             new Pin("imw_p", REFUSED,
                     "IMW polyconic (lat_1=30, lat_2=60): 25 probes wrong, 24 refused, inverse "
                             + "latitude NaN"),
+            // isea's forward and inverse were written years apart from different sources and
+            // disagree about the radius on an ellipsoid. isea_s_forward carries a TODO saying it
+            // should convert geodetic latitude to authalic and does not (isea.cpp:979-981), while
+            // pj_isea_data::initialize computes an authalic R for the inverse (isea.cpp:1338-1344),
+            // so on +ellps=GRS80 the two halves are simply not inverses of each other.
+            //
+            // Measured on the installed proj 9.8.1, not inferred: `proj +proj=isea +ellps=GRS80`
+            // at (0,89.9) gives -17279289.821046568 6662722.299779827 and feeding that straight
+            // back with -I prints "*  *"; at (-100,40) the same pair recovers -100.099453632
+            // 40.106020683. Our numbers agree with both to the printed digit.
+            //
+            // That recovered point is 14.5 km from where it started - 11.8 km of it in latitude and
+            // 8.5 km in longitude. Quote the 14.5, not one component: an earlier version of this
+            // comment said "about 12 km", which is the latitude term alone and reads as though it
+            // were the whole error.
+            // The same probes on +R=6371007.18091875 round-trip to 1e-9 deg on both sides, which
+            // is the control: the sphere path is exact, so this is the ellipsoid inconsistency
+            // and not a transcription error.
+            new Pin("isea", REFUSED,
+                    "[upstream] ISEA on an ellipsoid: the forward skips the geodetic-to-authalic "
+                            + "latitude conversion its own TODO asks for while the inverse assumes "
+                            + "an authalic radius, so all 68 probes miss - by ~0.1 deg where the "
+                            + "point stays on the net, and by a refusal where it does not, "
+                            + "including (0,89.9) (isea.cpp:979-981 vs :1338-1344; PROJ 9.8.1 "
+                            + "answers identically, including the refusal)"),
             new Pin("labrd", REFUSED,
                     "Laborde is Madagascar-only (lat_0=-19): 56/68 wrong, recovering latitudes in "
                             + "the tens of thousands of degrees"),
@@ -355,6 +386,13 @@ public class RegistryRoundTripAuditTest {
                             + "an input of 89.8, a silent 22.26 km. NonConvergenceTest names nell_h "
                             + "as one of five kernels where upstream's pole-clamp really is on a "
                             + "failure path, and asserts this throw (nell_h.cpp, nell_h_s_inverse)"),
+            new Pin("oea", REFUSED,
+                    "[upstream] oblated equal area (n=1, m=2) is a novelty projection defined near "
+                            + "its centre: 16 of 68 probes miss, the worst at (-135,-45) where the "
+                            + "forward answers -1.5920900043274394e22 - bit-identical to PROJ - and "
+                            + "the inverse is then handed an asin argument of -2.63e7. PROJ 9.8.1 "
+                            + "prints '*' for the same inverse, so both refuse (oea.cpp, "
+                            + "oea_s_inverse)"),
             new Pin("omerc", 1.2070,
                     "0.1 deg from the antipode of the oblique centre the recovered longitude is "
                             + "1.207 deg out; 11 probes wrong"),
@@ -388,6 +426,33 @@ public class RegistryRoundTripAuditTest {
                             + "because the inverse's unsquashing constant 1.13137085 is 5.2e-10 short "
                             + "of the reciprocal of the forward's 0.883883476 (putp4p.cpp, "
                             + "putp4p_s_inverse; PROJ 9.8.1 answers identically)"),
+            new Pin("rouss", 21610.606,
+                    "[upstream] Roussilhe stereographic is a 33-coefficient series about lat_0, and "
+                            + "63 of 68 global probes are outside any sane use of it: at "
+                            + "(-179.9,-15) the series answers -4.9e7 m and inverts to latitude "
+                            + "-21625.6 deg without refusing. PROJ 9.8.1 prints 21625d36'21.56\"S "
+                            + "for the same round trip, to the digits the intermediate was written "
+                            + "with (rouss.cpp, rouss_e_inverse)"),
+            // s2 draws ONE cube face, and its forward never checks that the point is on that
+            // face. s2_forward calls ValidFaceXYZtoUV (s2.cpp:363), the variant with no guard;
+            // FaceXYZtoUV, the variant that returns false for a point behind the face, is compiled
+            // into the file at :247-275 and never called. So a far-side point divides by a
+            // coordinate of the wrong sign, lands inside the unit square, and is indistinguishable
+            // from a real answer. The inverse then dutifully returns the near-side point that
+            // WOULD have produced it.
+            //
+            // Verified on the 9.8.1 binaries, not inferred: `proj +proj=s2 +ellps=WGS84` on
+            // (-179.9, 0) prints 0.501307289262925 0.500000000000000, which is our forward to
+            // every digit, and `proj -I` on that prints 0.100000000000002 0.000000000000000,
+            // which is our inverse to every digit. Refusing the far side here would be a
+            // divergence from 9.8.1, not a fix, and it would change answers the corpus asserts.
+            new Pin("s2", 180.0,
+                    "[upstream] S2 draws one cube face and the forward does not check the point is "
+                            + "on it: (-179.9,0) projects to (0.50131,0.5) on the FRONT face, which "
+                            + "the inverse reads back as lon 0.1 - 180 deg out, with no refusal. 25 "
+                            + "of 68 probes are on the far side (s2.cpp:363, ValidFaceXYZtoUV "
+                            + "called where FaceXYZtoUV is the guarded variant; PROJ 9.8.1 answers "
+                            + "identically)"),
             new Pin("som", REFUSED,
                     "Space Oblique Mercator refuses both poles on the inverse after accepting them "
                             + "on the forward"),

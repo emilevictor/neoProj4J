@@ -23,6 +23,7 @@ import static org.junit.Assert.fail;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import org.junit.AfterClass;
@@ -46,7 +47,7 @@ import org.locationtech.proj4j.spi.DbObjectType;
 import org.locationtech.proj4j.spi.DbOperation;
 
 /**
- * The facade's operation selection driven by the <strong>real shipped index</strong> — 6,746,032 B of
+ * The facade's operation selection driven by the <strong>real shipped index</strong> — 6,746,280 B of
  * PROJ 9.8.1's authority database, read by the pure-Java {@code .pjdx} reader.
  *
  * <h2>Why this test lives here and not in core</h2>
@@ -98,8 +99,8 @@ public class RealDatabaseSelectionTest {
     // ------------------------------------------------------------------ 1. the headline
 
     /**
-     * <strong>{@code EPSG:4267 → EPSG:4269} sees all nine published transformations, ranks
-     * {@code EPSG:1241} first at 0.15 m, and not one of the nine is ballpark.</strong>
+     * <strong>{@code EPSG:4267 → EPSG:4269} sees all nine published transformations, ranks them in
+     * PROJ 9.8.1's order, and not one of the nine is ballpark.</strong>
      * <p>
      * Ten candidates in total. That is {@code projinfo}'s own count for this pair: the nine grid
      * transformations plus the ballpark offset, which is <em>synthesised</em> — there is not one
@@ -141,11 +142,60 @@ public class RealDatabaseSelectionTest {
         assertTrue(codes.toString(), codes.contains("EPSG:8555"));
         assertTrue(codes.toString(), codes.contains("EPSG:9111"));
 
-        // EPSG:1241 is best: 0.15 m, and the one whose method this library can execute.
-        assertEquals("EPSG:1241", candidates.get(0).authorityCode());
-        assertEquals("NAD27 to NAD83 (1)", candidates.get(0).name());
-        assertEquals(0.15, candidates.get(0).accuracy().get().metres(), 0.0);
+        // The head of the list is EPSG:1313, not the most accurate operation, because PROJ ranks by
+        // area before accuracy magnitude and Canada is larger than CONUS-plus-EEZ. This is
+        // projinfo's own order, verified against PROJ 9.8.1:
+        //
+        //   projinfo -s EPSG:4267 -t EPSG:4269 --summary --spatial-test intersects
+        //     DERIVED_FROM(EPSG):1313, NAD27 to NAD83 (4), 1.5 m, Canada - onshore ...
+        //     DERIVED_FROM(EPSG):1312, NAD27 to NAD83 (3), 2.0 m, Canada - onshore ...
+        //     DERIVED_FROM(EPSG):1241, NAD27 to NAD83 (1), 0.15 m, United States (USA) - CONUS ...
+        //     DERIVED_FROM(EPSG):8555, NAD27 to NAD83 (7), 0.15 m, United States (USA) - CONUS ...
+        //
+        // Until 2.2.0 this asserted EPSG:1241 at rank 0, which was true of the old comparator and
+        // was never true of PROJ. Ranking is a separate question from selection: rank 0 is the head
+        // of the list a caller reads, and BestOperationPolicy.REQUIRE_BEST still selects EPSG:1241
+        // from further down, because the head of the list is a degradation relative to EPSG:8555.
+        // OperationSelectionTest.withADatabaseTheNad27PairSelectsEpsg1241At015m pins that.
+        assertEquals("EPSG:1313", candidates.get(0).authorityCode());
+        assertEquals("NAD27 to NAD83 (4)", candidates.get(0).name());
+        assertEquals(1.5, candidates.get(0).accuracy().get().metres(), 0.0);
         assertEquals(0, candidates.get(0).rank());
+        assertEquals("EPSG:1312", candidates.get(1).authorityCode());
+
+        // ONE DIVERGENCE LEFT BELOW RANK 1, AND IT IS THE DELIBERATE ONE. On this classpath proj4j
+        // now produces
+        //     1313, 1312, 1241, 1243, 1573, 8555, 8549, 1462, 9111, ballpark
+        // where PROJ 9.8.1 with the same grids absent produces
+        //     1313, 1312, 1241, 8555, 1243, 8549, 1573, 1462, 9111, ballpark
+        // (reproduce with: PROJ_DATA=<dir holding only proj.db> PROJ_NETWORK=OFF projinfo
+        //  -s EPSG:4267 -t EPSG:4269 --summary --spatial-test intersects).
+        //
+        // Take 8555 and 8549 out of both lists and what is left is IDENTICAL, in both order and
+        // membership: 1313, 1312, 1241, 1243, 1573, 1462, 9111. Those two sit lower here because
+        // proj4j folds PROJ's separate gridsAvailable_ criterion into its usability tier and
+        // UNSUPPORTED_METHOD outranks nothing -- deliberate, and documented on compareTo.
+        //
+        // Until 2.2.0 there was a second cause, and it was a defect: EPSG:1573 (Quebec, pseudo-area
+        // 4.12) sorted ABOVE EPSG:1241 (CONUS and its EEZ, pseudo-area 22.54) because
+        // CrsOperationCandidate.gridsKnown() returned false for EPSG:1241. That operation has two
+        // grid slots, and the second, conus.los, is carried inside the file the first slot resolved
+        // to, so it has no grid_alternatives row and no knownUrl() of its own -- as 84 of the 85
+        // distinct grid2_names do not. PROJ never sees a second entry at all: gridsNeeded()
+        // collapses the .las/.los pair to one us_noaa_conus.tif before gridsKnown_ is computed.
+        // gridsKnown() now skips a slot an earlier slot carries, which is what moves EPSG:1241 from
+        // fourth to third here. The refusal message still names BOTH files -- see
+        // withNoGridReachableTheFailureNamesBothConusFiles below -- because naming one when the
+        // authority requires two understates what is missing. Counting for the sort and naming for
+        // the caller are different questions and now have different answers.
+        List<String> withoutTheTierDivergence = new ArrayList<String>(codes);
+        withoutTheTierDivergence.remove("EPSG:8555");
+        withoutTheTierDivergence.remove("EPSG:8549");
+        assertEquals("with the two UNSUPPORTED_METHOD operations set aside, the ranking is PROJ's, "
+                        + "in order, not merely as a set",
+                Arrays.asList("EPSG:1313", "EPSG:1312", "EPSG:1241", "EPSG:1243", "EPSG:1573",
+                        "EPSG:1462", "EPSG:9111", "PROJ:BALLPARK_4267_TO_4269"),
+                withoutTheTierDivergence);
     }
 
     /**

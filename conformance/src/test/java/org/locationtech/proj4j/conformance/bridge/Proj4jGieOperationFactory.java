@@ -15,6 +15,7 @@
  */
 package org.locationtech.proj4j.conformance.bridge;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -29,12 +30,17 @@ import org.locationtech.proj4j.Proj4jException;
 import org.locationtech.proj4j.ProjectionException;
 import org.locationtech.proj4j.Registry;
 import org.locationtech.proj4j.UnsupportedParameterException;
+import org.locationtech.proj4j.api.AuthorityUrn;
+import org.locationtech.proj4j.api.Proj;
+import org.locationtech.proj4j.api.ProjContext;
 import org.locationtech.proj4j.gie.GieIoUnits;
 import org.locationtech.proj4j.pipeline.PipelineDefinitionException;
 import org.locationtech.proj4j.pipeline.PipelineErrorCode;
 import org.locationtech.proj4j.pipeline.PipelineFactory;
 import org.locationtech.proj4j.resource.ClasspathResourceResolver;
 import org.locationtech.proj4j.resource.ResourceResolvers;
+import org.locationtech.proj4j.spi.ProjDatabase;
+import org.locationtech.proj4j.spi.ProjDatabaseProvider;
 import org.locationtech.proj4j.proj.Projection;
 
 /**
@@ -126,6 +132,40 @@ public final class Proj4jGieOperationFactory implements GieOperationFactory {
     static {
         ResourceResolvers.addResolver(new ClasspathResourceResolver(
                 Proj4jGieOperationFactory.class.getClassLoader(), "proj-data", null, 10));
+        // The three PROJ-data grids the NKG operations end in, which are not part of the PROJ
+        // source tree and therefore cannot live in proj-data/ - sync-upstream.sh deletes that
+        // directory wholesale, and its manifest header claims PROJ 9.8.1 provenance, which would
+        // be a false statement about a CC-BY-4.0 file from a different repository. See
+        // src/test/resources/NOTICE-gie.md section 4.
+        ResourceResolvers.addResolver(new ClasspathResourceResolver(
+                Proj4jGieOperationFactory.class.getClassLoader(), "proj-data-cdn", null, 11));
+    }
+
+    /**
+     * The authority database, opened once, or {@code null} when no provider is on the classpath.
+     *
+     * <p>Core never scans for a provider implicitly ({@code ProjDatabaseProvider}'s class comment
+     * explains why: an implicit walk makes which database you got a property of the deployment
+     * rather than of the code), so the harness opens it explicitly. {@code neoproj4j-db} is a
+     * test-scope dependency of this module for exactly this reason.
+     *
+     * <p>Null means "no database artifact", which leaves every URN row reported as a database gap
+     * exactly as before. A database that is <em>present and unreadable</em> throws instead, because
+     * that is a broken build and not a capability boundary — reporting it as a gap would hide it in
+     * the manifest.
+     */
+    private static final ProjContext DB_CONTEXT = openDatabase();
+
+    private static ProjContext openDatabase() {
+        try {
+            ProjDatabase db = ProjDatabaseProvider.openFirst(
+                    Proj4jGieOperationFactory.class.getClassLoader());
+            return db == null ? null : ProjContext.builder().database(db).build();
+        } catch (IOException e) {
+            throw new IllegalStateException("an operation database is on the classpath but could "
+                    + "not be opened; the conformance run would silently report every URN row as "
+                    + "a missing database", e);
+        }
     }
 
     public Proj4jGieOperationFactory() {
@@ -156,12 +196,12 @@ public final class Proj4jGieOperationFactory implements GieOperationFactory {
         // 0. Not a proj-string at all. proj_create() also accepts an authority
         //    code, an OGC URN, WKT and PROJJSON, resolving them through proj.db -
         //    nkg.gie's 26 operations are all
-        //    "urn:ogc:def:coordinateOperation:NKG::...". Those are perfectly valid
-        //    upstream, so they are a database gap in proj4j and must not be
-        //    mistaken for a malformed definition.
-        GieFailure identifier = databaseIdentifierFailure(a);
-        if (identifier != null) {
-            return new UnusableOperation(identifier);
+        //    "urn:ogc:def:coordinateOperation:NKG::...". A coordinateOperation URN is
+        //    now resolved through the database and run; the rest are still a database
+        //    gap in proj4j and must not be mistaken for a malformed definition.
+        GieOperation identified = databaseIdentifier(a);
+        if (identified != null) {
+            return identified;
         }
 
         // 1. PROJ's own verdict first, so INVALID_DEFINITION wins over any
@@ -372,10 +412,17 @@ public final class Proj4jGieOperationFactory implements GieOperationFactory {
      * and there the claim "PROJ 9.8.1 would reject this too" is simply false: the corpus
      * follows {@code +proj=hgridshift +grids=tests/test_hgrid.tif}
      * (geotiff_grids.gie:206) with {@code expect 5.875 55.375 0}, and the file is
-     * vendored under {@code src/test/resources/proj-data/tests/}. PROJ reads it; proj4j
-     * has no GeoTIFF reader. Thirteen more {@code .tif} {@code hgridshift} operations,
-     * two {@code .gsb} ones, five {@code tinshift} {@code .json} ones and one
-     * {@code deformation} {@code .ct2} one are the same story.
+     * vendored under {@code src/test/resources/proj-data/tests/}, so a refusal there is a
+     * statement about proj4j and not about the definition.
+     *
+     * <p><b>The reason this paragraph used to give — "PROJ reads it; proj4j has no GeoTIFF
+     * reader" — has been false since 2.1.0, when the reader landed</b>, and the generic
+     * N-sample layer ({@code datum.GenericGrid}, {@code datum.GenericGridSet}) followed in
+     * 2.2.0. {@code tests/test_hgrid.tif} is read today: {@code geotiff_grids.gie} carries
+     * 51 assertions and only two of them are in {@code gie-expected-failures.tsv}. The old
+     * reason is recorded rather than deleted because a stale "we cannot do this" stops the
+     * work instead of costing an experiment. The classification it justified is unchanged
+     * and still correct — see the next paragraph for the reason that does hold.
      *
      * <p>The bridge cannot tell "unreadable here" from "genuinely absent" from inside —
      * but it does not have to, because {@code ExpectedFailureVerdict} already resolves
@@ -410,6 +457,63 @@ public final class Proj4jGieOperationFactory implements GieOperationFactory {
             "BOUNDCRS", "ENGCRS", "PARAMETRICCRS", "TIMECRS", "DERIVEDPROJCRS",
             "COORDINATEOPERATION", "CONCATENATEDOPERATION", "COORDINATEMETADATA"
     };
+
+    /**
+     * Step 0: everything {@code proj_create()} accepts that is not a proj-string.
+     *
+     * <p>A {@code coordinateOperation} URN is resolved through the database and run. That is the
+     * only one of the four non-proj-string shapes that goes anywhere: PROJJSON and WKT still have
+     * no reader here, and a <b>bare {@code AUTHORITY:CODE}</b> is deliberately still refused,
+     * because upstream resolves the two-token form as a <em>CRS</em> ({@code io.cpp:7779}) and
+     * treating it as an operation would make this harness accept a notation PROJ does not. The
+     * whole NKG family spells the URN out in full, so nothing is lost by that.
+     *
+     * <p>An operation the authority publishes but proj4j cannot express arrives here as a
+     * {@code CrsCreationException} and becomes {@link GieFailureKind#NOT_IMPLEMENTED} through
+     * {@link #mapConstructionThrowable}, carrying the reason the factory gave — which is the
+     * honest classification: the definition is valid upstream and the gap is ours.
+     *
+     * @return an operation, or an {@link UnusableOperation} saying why not; {@code null} when the
+     *         definition is a proj-string and the rest of {@link #create} should handle it
+     */
+    private GieOperation databaseIdentifier(GieProjArgs a) {
+        AuthorityUrn urn = operationUrn(a);
+        if (urn != null && DB_CONTEXT != null) {
+            String definition;
+            try {
+                definition = Proj.createOperationDefinition(urn.toString(), DB_CONTEXT);
+            } catch (Throwable e) {
+                GieFailure f = mapConstructionThrowable(e);
+                if (f == null) {
+                    rethrow(e);
+                }
+                return new UnusableOperation(f);
+            }
+            return createFromPipelineEngine(definition);
+        }
+        GieFailure failure = databaseIdentifierFailure(a);
+        return failure == null ? null : new UnusableOperation(failure);
+    }
+
+    /**
+     * The single token, if this definition is one bare token that parses as a coordinate-operation
+     * URN. The token test mirrors {@link #databaseIdentifierFailure}'s: one token, no {@code =},
+     * and a {@code ':'} in it.
+     *
+     * @return the URN, or {@code null} for anything else — including a bare {@code AUTHORITY:CODE},
+     *         which parses as a CRS
+     */
+    private static AuthorityUrn operationUrn(GieProjArgs a) {
+        if (a.size() != 1) {
+            return null;
+        }
+        GieToken t = a.tokens().get(0);
+        if (t.hasValue() || t.key().indexOf(':') < 0) {
+            return null;
+        }
+        AuthorityUrn urn = AuthorityUrn.parse(t.key());
+        return urn != null && urn.isCoordinateOperation() ? urn : null;
+    }
 
     /**
      * @return a {@link GieFailureKind#NOT_IMPLEMENTED} failure when the definition
@@ -708,7 +812,20 @@ public final class Proj4jGieOperationFactory implements GieOperationFactory {
         }
         if (e instanceof Proj4jException) {
             String m = e.getMessage() == null ? "" : e.getMessage();
-            if (m.startsWith("Unknown nadgrid")) {
+            // KEYED ON THE CAUSE, exactly as pipelineKind does, because the message prefix alone
+            // classified only the horizontal path. The vertical path says "Unknown vertical grid",
+            // so +proj=vgridshift +grids=<absent> fell through to NOT_IMPLEMENTED - which
+            // ExpectedFailureVerdict never scores as genuine - even though core had already
+            // declared ErrorCause.MISSING_GRID at VGridShiftOperator:132. Two classifiers keyed on
+            // two different things about the same failure is how that went unnoticed.
+            //
+            // THE STRING TEST IS KEPT AND IS NOT REDUNDANT. Proj4Parser.parseDatum:1348 wraps a failed
+            // +nadgrids= in an InvalidValueException, whose cause() is INVALID_PARAM_VALUE, not
+            // MISSING_GRID; dropping the prefix would silently reclassify every horizontal
+            // missing-grid row. Re-causing that throw is a core change with golden exposure and
+            // belongs in its own commit, not in a harness fix.
+            if (((Proj4jException) e).cause() == ErrorCause.MISSING_GRID
+                    || m.startsWith("Unknown nadgrid")) {
                 return GieFailures.of(GieFailureKind.MISSING_GRID, describe(e), e);
             }
             // Everything else: the validator already established that PROJ

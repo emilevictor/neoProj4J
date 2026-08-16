@@ -178,4 +178,197 @@
 # THE SUM CROSS-CHECK STILL HOLDS, and it is now 49 pins rather than 48: they sum to 39149, which is
 # the INTENDED on the data line below. That is the same mutual-consistency check described above and
 # it is still the weaker claim; the A/B is the measurement.
-golden diff: 11994 UNCHANGED, 41436 CHANGED, 0 ADDED, 0 REMOVED; 39149 INTENDED, 2287 UNEXPLAINED (baseline 53430 rows, current 53430 rows)
+#
+# RE-PINNED 2026-08-14 BY THE TWO ICOSAHEDRAL OPERATORS, +proj=airocean AND +proj=isea. UNCHANGED
+# 11994 -> 11984, CHANGED 41436 -> 41446, INTENDED 39149 -> 39159; ADDED, REMOVED and UNEXPLAINED
+# all hold. Ten rows change sides and every one of them is attributed, so nothing joins the backlog.
+#
+# THE TEN ROWS, read off golden-report.tsv rather than inferred, are `SYN proj/airocean` probes 0-4
+# and `SYN proj/isea` probes 0-4 -- the whole of the two keys, and the only two keys in the whole
+# corpus that mention either name. No shipped CRS definition uses either operator: over the five
+# dictionaries `grep -rEoh '\+?proj=(omerc|isea|airocean)'` returns 46 `+proj=omerc`, 3 bare
+# `proj=omerc` and zero of either icosahedral name, the omerc arm being there so that a zero is
+# evidence about the dictionaries rather than about the pattern. Both keys were UNCHANGED before
+# this change because the baseline and the current tree agreed that the name did not resolve.
+#
+# THEY ARE CLAIMED BY TWO DIFFERENT RULES, AND THAT SPLIT IS THE INTERESTING PART. airocean's five
+# go to PROJ-NEW-PROJECTIONS-REGISTERED, re-pinned 220 -> 225 with `airocean` added to its
+# enumerated key list: InvalidValueException -> OK, forward and inverse both working. isea's five
+# do NOT: its forward works and its inverse refuses, EXC:ProjectionException, so that rule's
+# `status_to: "OK"` declines them and the new PROJ-ISEA-NO-INVERSE-OFF-THE-DEFAULT-ORIENTATION
+# claims them at 5. The refusal is upstream's: 9.8.1's isea.cpp installs an inverse only for the
+# default plane configuration, and the synthetic matrix's canonical `+lat_0=45 +lon_0=10` overrides
+# the orientation, so `proj -I` on that exact string answers `*  *` on every probe. Had the two
+# been lumped together the rule would have DECLINED all ten and read as a DEAD_RULE.
+#
+# +5 and +5 is +10, which is the INTENDED move, and the pins are now 50 summing to exactly 39159.
+# UNEXPLAINED holds at 2287 -- nothing on the triage backlog was resolved and nothing added to it.
+# Measured with `./docker/run.sh ci conformance golden determinism --out /tmp/neoproj4j-out-epolyA
+# --volume neoproj4j-m2-epolyA`.
+
+# RE-PINNED 2026-08-14 BY THE chamb / mod_krovak / oea / rouss PORT, +20. UNCHANGED 11994 -> 11974,
+# CHANGED 41436 -> 41456, INTENDED 39149 -> 39169; ADDED, REMOVED and UNEXPLAINED did not move. All
+# twenty rows are the same twenty on both sides of the ledger: four PROJ 9.8.1 operators the
+# Registry did not resolve now resolve, so `SYN proj/chamb`, `SYN proj/mod_krovak`, `SYN proj/oea`
+# and `SYN proj/rouss`, probes 0..4 each, stop matching a baseline in which 1.4.3 also refused them
+# with `EXC:InvalidValueException`. They leave UNCHANGED, arrive in CHANGED, and are claimed in full
+# by the new rule PROJ-CHAMB-MOD-KROVAK-OEA-ROUSS-REGISTERED, pinned at 20. UNEXPLAINED holds at
+# 2287: nothing joined the backlog and nothing left it.
+#
+# NO EXISTING RULE IS RE-PINNED, which is the check worth stating for this one. The twenty rows were
+# not claimed by anything before -- they were UNCHANGED, and only CHANGED rows are offered to rules
+# -- so the new pin is the whole of the INTENDED move: 39149 + 20 = 39169, and the 50 pins in
+# rules.yaml sum to exactly that.
+#
+# `SYN proj/krovak` IS THE CONTROL AND IT DID NOT MOVE. KrovakProjection is edited by this change:
+# mod_krovak is upstream's own `krovak_setup(P, modified)` with the boolean expressed as an
+# overridable method, so the plain operator now runs one extra `isModified()` test and its two
+# output assignments are named locals. Its five rows are byte-identical to the previous run. Had the
+# refactor cost a bit, this block would be reporting twenty-five.
+#
+# Measured in this worktree with `./docker/run.sh ci conformance golden determinism`, and the twenty
+# rows enumerated from golden-report.tsv before the rule was written.
+#
+# BOTH OF THE TWO BLOCKS ABOVE ARE CORRECT ALONE AND NEITHER IS CORRECT ONCE BOTH ARE IN. They were
+# written in separate worktrees, each measured against plain master, and each re-pinned this one
+# data line from the same starting figures. The line below is the sum, not either of them:
+# INTENDED 39149 + 10 + 20 = 39179, UNCHANGED 11994 - 30 = 11964, CHANGED 41436 + 30 = 41466, and
+# UNEXPLAINED holds at 2287 because neither change touched the triage backlog.
+#
+# THE THIRTY ROWS ARE DISJOINT, WHICH IS WHY THE ARITHMETIC COMPOSES. The icosahedral change claims
+# `SYN proj/airocean` and `SYN proj/isea`; this one claims `SYN proj/chamb`, `SYN proj/mod_krovak`,
+# `SYN proj/oea` and `SYN proj/rouss`. Six keys, five probes each, no key in both sets.
+#
+# THE RULE COUNT IS 51, NOT THE 50 EITHER BLOCK CLAIMS. Each added one rule to master's 49, and only
+# the icosahedral change re-pinned an existing rule (PROJ-NEW-PROJECTIONS-REGISTERED, 220 -> 225).
+# So the pins are 49 + PROJ-ISEA-NO-INVERSE-OFF-THE-DEFAULT-ORIENTATION at 5 +
+# PROJ-CHAMB-MOD-KROVAK-OEA-ROUSS-REGISTERED at 20, summing to exactly 39179.
+#
+# THE ARITHMETIC ABOVE IS A PREDICTION AND THE GATE IS THE MEASUREMENT. A clean three-way merge of
+# two patches proves every hunk is present and proves nothing about whether the two agree; if this
+# sum is wrong, golden reports FIGURES_MOVED or COUNT_MISMATCH rather than passing quietly.
+
+# A THIRD CHANGE HAS NOW RE-PINNED THIS SAME LINE FROM MASTER, AND THE SUM ABSORBS IT THE SAME WAY.
+# The four cube and sphere-partitioning projections -- s2, healpix, rhealpix, qsc -- were measured in
+# their own worktree against plain master and wrote 39169 INTENDED / 11974 UNCHANGED / 41456 CHANGED,
+# which is master + 20. That figure is right alone and wrong here for exactly the reason the two
+# blocks above are: it does not know the other two changes landed. INTENDED 39179 + 20 = 39199,
+# UNCHANGED 11964 - 20 = 11944, CHANGED 41466 + 20 = 41486, UNEXPLAINED still 2287.
+#
+# THE TWENTY NEW ROWS ARE DISJOINT FROM THE OTHER THIRTY, so the arithmetic composes again: SYN
+# proj/s2, SYN proj/healpix, SYN proj/rhealpix and SYN proj/qsc, four keys at five probes each, none
+# of them named by either block above. All twenty carry EXC:InvalidValueException -> OK, so they were
+# absorbed by extending PROJ-NEW-PROJECTIONS-REGISTERED rather than by a new rule, which is why the
+# rule count stays at 51 while the pinned sum moves. The rule holds 49 names and 245 rows.
+#
+# THE ARITHMETIC IS STILL A PREDICTION AND THE GATE IS STILL THE MEASUREMENT.
+#
+# THAT PREDICTION IS NOW MEASURED, 2026-08-16, AND IT WAS RIGHT. Before the re-pin below, the gate
+# printed 11944 / 41486 / 0 / 0 / 39199 / 2287 back byte-identical, with 51/51 rules pinned and no hit
+# for FIGURES_MOVED, COUNT_MISMATCH, DEAD_RULE, EXPIRED_RULE or PENDING_RULE_FIRED. Two independent
+# runs agree: `./docker/run.sh golden --out /tmp/neoproj4j-out-repin --volume neoproj4j-m2-repin` in
+# the pinned container, and `mvn -Pgolden -pl golden -am verify` on the host. So the three-way
+# composition of the icosahedral, chamb/mod_krovak/oea/rouss and cube-and-sphere changes holds.
+#
+# WHERE THE 50 CAME FROM, rule by rule, because the release notes have to say it. Against base
+# 6ae23b7 -- whose own pin is 11994 / 41436 / 0 / 0 / 39149 / 2287 with 49 rules summing to 39149 --
+# INTENDED moved by 50 while only two rules were added, worth 25 between them. The other 25 is one
+# existing rule having its pin raised, and there is exactly one:
+#
+#     PROJ-ISEA-NO-INVERSE-OFF-THE-DEFAULT-ORIENTATION   new,  5   proj/isea
+#     PROJ-CHAMB-MOD-KROVAK-OEA-ROUSS-REGISTERED         new, 20   proj/chamb, proj/mod_krovak,
+#                                                                  proj/oea, proj/rouss
+#     PROJ-NEW-PROJECTIONS-REGISTERED                220 -> 245    proj/airocean, proj/healpix,
+#                                                        (+25)     proj/qsc, proj/rhealpix, proj/s2
+#
+# 5 + 20 + 25 = 50, and no other rule's expected_rows differs between the two commits at all. Read
+# by diffing `git show "6ae23b7:golden/rules.yaml"` against the worktree copy; the per-rule figure is
+# confirmed against the run's own matched counts in golden-report.tsv, where those 49 names claim 245
+# rows at five probes each. The five names added to PROJ-NEW-PROJECTIONS-REGISTERED came in two
+# batches that did not know about each other -- airocean took it 220 -> 225 and the four polyhedral
+# names took it 225 -> 245 -- which is why no single earlier block reports the +25.
+#
+# RE-PINNED 2026-08-16 BY THE ESRI omerc VARIANT-A FIX, AND ONLY TWO OF THE SIX FIGURES MOVE:
+# INTENDED 39199 -> 39242 and UNEXPLAINED 2287 -> 2244. UNCHANGED holds at 11944, CHANGED at 41486,
+# ADDED and REMOVED at 0. No row changes sides. This is the first re-pin of this file that resolves
+# part of the triage backlog instead of adding to it, and the 43 is subtracted from UNEXPLAINED for
+# that reason: all 43 rows were already CHANGED and already UNEXPLAINED, and the new rule
+# DICT-ESRI-OMERC-VARIANT-A-NEEDS-NO-UOFF claims them.
+#
+# THE 43 ROWS ARE MEASURED BY A/B, NOT COMPOSED. Two golden runs over one tree differing in exactly
+# one file -- epsg/src/main/resources/proj4/nad/esri, with and without the eight `+no_uoff` -- and
+# the two golden-report.tsv files diffed line by line. Exactly 43 of the 41,486 CHANGED rows differ
+# between the legs: 38 REG and 5 CSV, enumerated at the rule. Both legs print the same six figures,
+# which is the fact that makes this re-pin small: the dictionary fix changes 43 magnitudes and moves
+# nothing across the UNCHANGED/CHANGED line.
+#
+# THE DEVIATION FROM 1.4.3 GETS BIGGER AND THAT IS THE CORRECT OUTCOME. The five CSV rows go from
+# about 2.0e6 to about 1.6e7, because the baseline is released 1.4.3 and 1.4.3 was wrong about these
+# codes in a third way that is neither variant A nor variant B. The five CSV rows carry committed
+# expected values from the original PROJ4 test83 data, and after the fix all five agree with them --
+# and with `cs2cs` 9.8.1 -- to a few millimetres, inside the 0.1 tolerance the CSV declares. What
+# grew is the distance from 1.4.3, not the error.
+#
+# THE PIN SUM IS NOW 52 RULES SUMMING TO EXACTLY 39242, still the weaker mutual-consistency check
+# and not the measurement. Sum them with the anchored pattern, `grep -Eo '^ +expected_rows: [0-9]+'`:
+# an unanchored match also picks up a commented-out `expected_rows: 944` inside a note in rules.yaml
+# and returns one rule too many.
+#
+# Measured with `./docker/run.sh golden --out /tmp/neoproj4j-out-repin --volume neoproj4j-m2-repin`.
+#
+# RE-PINNED 2026-08-16 BY THE CASSINI ATTRIBUTION, AND AGAIN ONLY TWO FIGURES MOVE: INTENDED
+# 39242 -> 39403 and UNEXPLAINED 2244 -> 2083. UNCHANGED holds at 11944, CHANGED at 41486, ADDED and
+# REMOVED at 0. NO CODE CHANGED -- this re-pin is two new rules in golden/rules.yaml and nothing else,
+# so no row can change sides and only the ledger between INTENDED and UNEXPLAINED moves. The two
+# rules are PROJ-CASS-EASTING-A4-SIGN-CORRECTED at 156 and PARSE-UNITS-LINK-NOW-RECOGNISED at 5.
+#
+# 161 IS DERIVED, NOT TAKEN ON TRUST, and the derivation is worth the four lines because the figure
+# arrived from an earlier attribution pass with no measurement behind it. The 70 cases in
+# golden-index.tsv whose target projection is `cass` -- 40 REG, 29 CSV, 1 SYN -- contribute 220 rows
+# to golden-report.tsv, all 220 of them CHANGED. Their verdicts, read from the report's own verdict
+# column rather than inferred, are:
+#
+#     REG   157 UNEXPLAINED    29 INTENDED (all under NUM-KARNEY-LATITUDE-CORE)
+#     CSV    29 UNEXPLAINED     0 INTENDED
+#     SYN     4 UNEXPLAINED     1 INTENDED (NUM-KARNEY-LATITUDE-CORE)
+#
+# 157 + 4 = 161 outside the reserved `CSV` section, which is the figure, and 156 + 5 = 161 is what the
+# two rules claim. The 29 CSV rows stay UNEXPLAINED on purpose: golden/README.md marks all 1,308 `CSV`
+# rows "reserved; do not rule" pending the proj4-epsg.csv re-pin decision, and 28 of the 29 would
+# otherwise fall to the sign rule. The mechanism explains them just as well, so when that reservation
+# lifts the two `sections:` clauses widen and the pins go 156 -> 184 and 5 -> 6.
+#
+# THE MECHANISM IS CASSINI'S OWN ARITHMETIC AND THAT WAS THE OPEN QUESTION. A rule keyed on
+# `tgt_proj: [cass]` would be claiming the wrong thing if the movement were really a datum-side
+# effect that merely shows up on cass rows, so it was tested rather than assumed: over the 186 cass
+# rows whose easting moves and which are not the `+units=link` key, the northing moves less than a
+# thousandth of what the easting moves on every single row -- median ratio 1.54e-9, worst 2.98e-5 --
+# and a datum or ellipsoid change moves both together. The positive evidence is stronger still: a
+# closed form for the single mis-signed term, evaluated outside this library from each definition's
+# ellipsoid and each probe's datum-shifted position, predicts all 156 easting movements with
+# predicted/measured between 0.998141 and 1.000487, median 1.000000.
+#
+# THE TWO RULES ARE ORDERED LAST IN rules.yaml AND THAT IS LOAD-BEARING. NUM-KARNEY-LATITUDE-CORE
+# already claims 30 of the 220 cass rows, and 28 of those 30 are probe 0 -- where the corrected term
+# carries lam^5 and lam is exactly 0, so they genuinely do not move. Ahead of that rule these two
+# would take some of its 30 and turn its 19309 into a COUNT_MISMATCH; behind it they can only take
+# rows nothing wanted. So NO EXISTING PIN MOVES: the two new pins are the whole of the INTENDED
+# move, 39242 + 156 + 5 = 39403, and the file now holds 54 rules summing to exactly 39403.
+#
+# TWO THINGS FOUND AND NOT FIXED, both written up at PROJ-CASS-EASTING-A4-SIGN-CORRECTED. The one
+# cass row that changes status, `CSV proj4-epsg.csv:01241` probe 0, goes OK -> ProjectionException
+# because GenericInverse2D will not converge 9.7e7 links from the origin -- and PROJ 9.8.1 refuses
+# the same point, answering `*  * inf`, from a forward that agrees with this tree to the last digit.
+# And four `REG epsg:3068` rows sit 49 m to 228 m from `cs2cs` on BOTH legs of the diff, a
+# `+datum=potsdam` disagreement that cancels in the movement and so does not belong to any rule here.
+# Neither is touched: a code change moves rows and needs its own commit and its own measurement.
+#
+# MEASURED, NOT COMPOSED, by two runs that agree. `mvn -B -Dmaven.javadoc.skip=true -Pgolden -pl
+# golden -am verify` on the host and `./docker/run.sh golden --out /tmp/neoproj4j-out-cass --volume
+# neoproj4j-m2-cass` in the pinned container both print the data line below and both list
+# `PROJ-CASS-EASTING-A4-SIGN-CORRECTED: 156` and `PARSE-UNITS-LINK-NOW-RECOGNISED: 5` among their
+# matched counts, with `54/54 rules carry a pinned expected_rows` and no hit for FIGURES_MOVED,
+# COUNT_MISMATCH, DEAD_RULE, EXPIRED_RULE or PENDING_RULE_FIRED. The absence of a COUNT_MISMATCH is
+# what confirms both pins two-sidedly, and it also confirms that NUM-KARNEY-LATITUDE-CORE is still at
+# 19309 -- the ordering held and nothing was stolen from it.
+golden diff: 11944 UNCHANGED, 41486 CHANGED, 0 ADDED, 0 REMOVED; 39403 INTENDED, 2083 UNEXPLAINED (baseline 53430 rows, current 53430 rows)

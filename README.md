@@ -30,8 +30,8 @@ corpora vendored from PROJ 9.8.1 and run on every push:
   variant B (5112), and Transverse Mercator South Oriented (5113). Series 5200 is coordinate
   operations: geographic↔geocentric conversion (5201) and longitude rotation (5208).
 
-Together that is **7,923 assertions, of which 7,902 are non-vacuous and 7,449 pass**. Measured
-2026-08-14 with `./docker/run.sh conformance`, which runs the workflow's exact command. The corpus is
+Together that is **7,923 assertions, of which 7,911 are non-vacuous and 7,819 pass**. Measured
+2026-08-16 with `./docker/run.sh conformance`, which runs the workflow's exact command. The corpus is
 diffed against a checked-in expected-outcome manifest, so any pass→fail regression fails the build.
 
 ## User Guide

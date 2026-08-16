@@ -20,25 +20,29 @@ import java.util.List;
 /**
  * Reads the MetaCRS-format CSV test files that live in {@code core/src/test/resources}.
  *
- * <p>Five files, 4,996 data rows in total as of this commit:
+ * <p>{@link #FILES} names five files. <b>Three of them exist; two do not, and that is not an
+ * error</b> -- {@code readAll} skips a file it cannot find. {@code PROJ4_SPCS_ESRI_nad83.csv} (225
+ * rows, byte-identical to the EPSG file bar retargeting) and {@code TestData.csv} (1 row) were both
+ * deleted in {@code 6d5e9af}, the PROJ 9.8.1 upgrade. The names stay in {@code FILES} so that
+ * restoring either file needs no code change. Three files, <b>4,770</b> data rows as of this commit,
+ * which is exactly the {@code CSV} row count in {@code golden/baseline/1.4.3/golden.tsv}:
  * <table>
  * <tr><td>{@code proj4-epsg.csv}</td><td>4,280</td>
  *     <td>every row probes the single point (1.0, -1.0)</td></tr>
  * <tr><td>{@code PROJ4_SPCS_EPSG_nad83.csv}</td><td>225</td>
- *     <td>220 live plus 5 commented-out {@code ESRI:102631} {@code omerc} rows</td></tr>
+ *     <td>includes the five {@code ESRI:102631} {@code omerc} rows</td></tr>
  * <tr><td>{@code PROJ4_SPCS_nad27.csv}</td><td>265</td>
  *     <td>orphaned; NAD27 SPCS coverage that exists nowhere else</td></tr>
- * <tr><td>{@code PROJ4_SPCS_ESRI_nad83.csv}</td><td>225</td>
- *     <td>orphaned; byte-identical to the EPSG file bar retargeting</td></tr>
- * <tr><td>{@code TestData.csv}</td><td>1</td><td></td></tr>
  * </table>
  *
  * <p><b>Commented rows are included.</b> A leading {@code '#'} is stripped and the row is read
- * normally. Five rows in {@code PROJ4_SPCS_EPSG_nad83.csv} are commented out, four of them tagged
- * <i>"Bug in Proj4J Obl Merc"</i>, and they are among the few in-repo witnesses for the {@code omerc}
- * defect. Hiding a known-bad case behind {@code '#'} is how it stops being tracked; the golden suite
- * takes no view on whether a row is <em>right</em>, only on whether it <em>moved</em>, so a
- * known-broken row is a perfectly good baseline row.
+ * normally. No row in any of the three files is commented out today -- the last five were the
+ * {@code ESRI:102631} rows of {@code PROJ4_SPCS_EPSG_nad83.csv}, four of them tagged <i>"Bug in
+ * Proj4J Obl Merc"</i>, and they went live once the {@code +no_uoff} dictionary fix landed. The
+ * behaviour stays because the reason for it does: hiding a known-bad case behind {@code '#'} is how
+ * it stops being tracked. The golden suite takes no view on whether a row is <em>right</em>, only on
+ * whether it <em>moved</em>, so a known-broken row is a perfectly good baseline row -- and because
+ * those five were read either way, un-commenting them moved no golden row.
  *
  * <p><b>These files are read from the working tree, not from the classpath.</b> They are
  * {@code core}'s test resources and {@code core} publishes no test jar. That means the input set

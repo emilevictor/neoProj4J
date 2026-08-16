@@ -168,6 +168,34 @@ final class FakeProjDatabase implements ProjDatabase {
     }
 
     /**
+     * {@code EPSG:4267} to {@code EPSG:4326}: the one grid transformation EPSG publishes from NAD27
+     * straight to the WGS 84 hub, {@code EPSG:15851} "NAD27 to WGS 84 (79)", NADCON, <b>5.0 m</b>,
+     * {@code conus.las} + {@code conus.los}.
+     *
+     * <p>Verbatim, and re-readable:
+     * <pre>
+     * sqlite3 proj.db "select code,name,method_code,accuracy,grid_name,grid2_name,deprecated
+     *                  from grid_transformation
+     *                  where source_crs_code='4267' and target_crs_code='4326'
+     *                    and grid_name like '%conus%';"
+     * 15851|NAD27 to WGS 84 (79)|9613|5.0|conus.las|conus.los|0
+     * </pre>
+     *
+     * <p>Its orientation is why it exists here rather than {@code EPSG:1241}. A {@code +nadgrids=}
+     * token on a CRS means "this CRS to WGS 84", so only a publication whose <em>target</em> is the
+     * hub can be installed as one. All nine of the NAD27-to-NAD83 rows run between two non-hub
+     * CRSs and are therefore inexpressible that way; this row is the shipped-data case that is not.
+     */
+    static FakeProjDatabase nad27ToWgs84() {
+        FakeProjDatabase db = new FakeProjDatabase("fake:nad27-to-wgs84");
+        db.commonObjects();
+        db.gridOp("15851", "NAD27 to WGS 84 (79)", "9613", "NADCON", 5.0,
+                "conus.las", "conus.los", "4267", "4326", "2374");
+        db.alternative("conus.las", "us_noaa_conus.tif", "conus", "GTiff", "hgridshift");
+        return db;
+    }
+
+    /**
      * The same nine operations, but with <b>no {@code grid_alternatives} rows at all</b> &mdash; the
      * deployment in which the authority's own file names are the only ones there are.
      *
@@ -303,11 +331,17 @@ final class FakeProjDatabase implements ProjDatabase {
                         new org.locationtech.proj4j.spi.DbAxis("Easting", "Y", "east", 2,
                                 unitRef("9001")))));
 
-        crs("4267", "NAD27", "6267");
-        crs("4269", "NAD83", "6269");
-        crs("4277", "OSGB36", "6277");
-        crs("4326", "WGS 84", "6326");
-        crs("9057", "WGS 84 (G1762)", "1156");
+        // Each CRS's real usage row. These matter from 2.2.0 on, because the spatial filter runs by
+        // default and builds its area of interest out of exactly these two extents. Re-readable:
+        //   sqlite3 proj.db "select u.object_code, u.extent_code from usage u
+        //                    where u.object_table_name='geodetic_crs' and u.object_auth_name='EPSG'
+        //                      and u.object_code in ('4267','4269','4277','4326','9057');"
+        //   4267|1349  4269|1350  4277|4390  4326|2830  9057|1262
+        crs("4267", "NAD27", "6267", "1349");
+        crs("4269", "NAD83", "6269", "1350");
+        crs("4277", "OSGB36", "6277", "4390");
+        crs("4326", "WGS 84", "6326", "2830");
+        crs("9057", "WGS 84 (G1762)", "1156", "1262");
 
         datum("6267", "North American Datum 1927", "7008", Double.NaN, null);
         datum("6269", "North American Datum 1983", "7019", Double.NaN, null);
@@ -357,16 +391,32 @@ final class FakeProjDatabase implements ProjDatabase {
                 "United Kingdom (UK) - offshore to boundary of UKCS; onshore Great Britain.",
                 -9.01, 49.75, 2.01, 61.01);
         extent("1262", "World", "World.", -180.0, -90.0, 180.0, 90.0);
+        // EPSG:2830 has the same four bounds as EPSG:1262 and a different name, so the two are NOT
+        // the same extent -- Extent::_isEquivalentTo compares description first
+        // (9.8.1:src/iso19111/metadata.cpp:794-826). That is what sends the EPSG:4326 to EPSG:9057
+        // ballpark to the world extent rather than to the source CRS's.
+        extent("2830", "World (by country)", "World: Afghanistan, Albania, Algeria...",
+                -180.0, -90.0, 180.0, 90.0);
+        // NAD27's and NAD83's own extents. BOTH CROSS THE ANTIMERIDIAN, at west = 167.65, so the
+        // area of interest the filter synthesises for the flagship pair is a wrapping box and the
+        // antimeridian branches of Extents are on the default path, not a corner case.
+        // NAD83's pseudo-area is 112.29 against NAD27's 125.58, so SMALLEST picks EPSG:1350 --
+        // despite EPSG:1350 being the WIDER of the two in longitude (151.62 degrees against
+        // 144.61), which is the solid-angle measure earning its keep.
+        extent("1349", "North America - NAD27", "North and central America: Antigua and Barbuda...",
+                167.65, 7.15, -47.74, 83.17);
+        extent("1350", "North America - NAD83", "North America - onshore and offshore: Canada...",
+                167.65, 14.92, -40.73, 86.45);
     }
 
     // ------------------------------------------------------------------ row builders
 
-    private void crs(String code, String name, String datumCode) {
+    private void crs(String code, String name, String datumCode, String extentCode) {
         crss.put("EPSG:" + code, new DbCrs(DbCrsType.GEOGRAPHIC_2D, "EPSG", code, name, false,
                 new DbObjectRef(DbObjectType.COORDINATE_SYSTEM, "EPSG", "6422"),
                 datumRef(datumCode), null, null, null, null, null));
         usage.put(new DbObjectRef(DbObjectType.GEODETIC_CRS, "EPSG", code),
-                Collections.singletonList(new DbObjectRef(DbObjectType.EXTENT, "EPSG", "1262")));
+                Collections.singletonList(new DbObjectRef(DbObjectType.EXTENT, "EPSG", extentCode)));
     }
 
     private void datum(String code, String name, String ellipsoidCode, double ensembleAccuracy,

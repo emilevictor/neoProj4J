@@ -149,6 +149,13 @@ public final class VerticalGrid implements Serializable, GridCache.Sized {
         if (name == null || name.isEmpty()) {
             throw new IOException("Empty vertical grid name");
         }
+        // VerticalShiftGridSet::open (9.8.1:src/grids.cpp:1614-1623): "null" is a set of one grid
+        // that covers the world and shifts nothing, and it never reaches the file manager. Same
+        // special case, in the same position, as Grid.resolveAndLoad and GenericGridSet.open --
+        // upstream writes it three times too, once per grid hierarchy.
+        if ("null".equals(name)) {
+            return nullGrid();
+        }
         // Same pre-chain refusal, and the same rule, as Grid.resolveAndLoad. See ResourceNames.
         ResourceNames.Rule violation = ResourceNames.violation(name);
         if (violation != null) {
@@ -179,6 +186,43 @@ public final class VerticalGrid implements Serializable, GridCache.Sized {
                 return parse(requested, origin, resolverName, bytes);
             }
         });
+    }
+
+    /**
+     * {@code NullVerticalShiftGrid} ({@code 9.8.1:src/grids.cpp:148-168}): the pseudo-grid named by
+     * {@code +grids=null} / {@code +geoidgrids=null}. A 3&times;3 grid over {@code globalExtent()}
+     * ({@code :131-141}: west {@code -}&pi;, south {@code -}&pi;/2, {@code resX} &pi;,
+     * {@code resY} &pi;/2, so east {@code +}&pi; and north {@code +}&pi;/2) whose {@code valueAt}
+     * writes {@code 0.0f} for every node.
+     *
+     * <p>Held as nine real zeros rather than as an override, so {@link #interpolate} runs unchanged
+     * and returns exactly {@code 0.0} for any point: upstream's own {@code valueAt(int, int, float&)}
+     * is the per-node reader that {@code read_vgrid_value} then interpolates, so nine zeros and an
+     * overridden node reader are the same arithmetic. Upstream also overrides {@code isNodata} to
+     * return {@code false}; that needs no counterpart here because {@code 0.0f} is not nodata under
+     * either of {@link #isNodata}'s two rules.
+     *
+     * <p>Its use is the fall-through tail of a grid list — {@code +grids=<real>,null} means "shift by
+     * the real grid where it reaches, otherwise by nothing", which
+     * {@link org.locationtech.proj4j.vertical.VGridShiftOperator}'s first-covering-grid-wins loop
+     * gets for free once this grid exists and claims global coverage.
+     *
+     * @return the built-in null vertical grid; never {@code null}
+     */
+    static VerticalGrid nullGrid() {
+        return new VerticalGrid("null", "built-in", "built-in", "null", 3, 3,
+                -Math.PI, -Math.PI / 2.0, Math.PI, Math.PI / 2.0, new float[9]);
+    }
+
+    /**
+     * Whether this is PROJ's built-in {@code null} vertical grid — the one that covers the whole
+     * world and shifts nothing. Mirrors {@code Grid.isNullGrid} and {@code GenericGrid.isNullGrid},
+     * and upstream's {@code Grid::isNullGrid}.
+     *
+     * @return true only for the grid produced by {@link #nullGrid}
+     */
+    public boolean isNullGrid() {
+        return "null".equals(format);
     }
 
     /**

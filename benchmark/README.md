@@ -110,9 +110,17 @@ is proposed.
 
 ---
 
-## What each tier gates, and why timing is not a PR gate
+## What each tier gates, and why timing is not gated at all
 
-### Tier 1 — allocation. Blocking on every PR. **This is the primary gate.**
+**Where these tiers run, since 2026-08-14: nowhere automatically.**
+`.github/workflows/bench.yaml` is turned off for the time being — `workflow_dispatch` only, no
+push trigger, no pull-request trigger and no schedule. Neither tier blocks a merge, and neither
+one runs unless somebody asks for it (`gh workflow run bench.yaml`, or the Actions tab). Both
+still fail the run they are in. The remaining cover is a local run —
+`./docker/run.sh bench`, which `HOWTORELEASE.txt`'s release checklist calls for. See
+[CI wiring](#ci-wiring) for the decision and what it costs.
+
+### Tier 1 — allocation. **This is the primary gate.**
 
 `-prof gc`'s `gc.alloc.rate.norm` is **bytes per operation**: bytes allocated divided by operations
 performed. It is a property of the **bytecode**, not of the machine. The same jar reports the same
@@ -265,7 +273,7 @@ all 8 CRS pairs in `op-counts.json.`** It counts call sites reached, as an integ
 transformation can fold it away. If a review proposes relaxing the Tier 1 `pow` arm, the answer is
 that Tier 2 already owns that regression.
 
-### Tier 2 — deterministic operation counts. Blocking on every PR.
+### Tier 2 — deterministic operation counts.
 
 A test-only `CountingMath` / `CountingStrictMath` facade tallies
 `sin cos tan pow exp log atan atan2 sqrt hypot` (plus `asin acos log10 sinh cosh log1p cbrt expm1
@@ -390,7 +398,9 @@ Two secondary points from the same file:
 ```bash
 cd benchmark
 
-# Full run + both blocking tiers. This is what CI does.
+# Both tiers, reduced iterations. This is the exact command bench.yaml runs, and the one
+# ./docker/run.sh bench mirrors. Since bench.yaml is manual-only, this is how the gate is
+# usually run at all.
 ./run-gate.sh --quick --require-baseline
 
 # Reduced-iteration run. Legitimate for Tier 1, NOT for timing.
@@ -721,9 +731,21 @@ this measurement.
 
 ## CI wiring
 
-> **DONE, 2026-08-01. The job exists: `.github/workflows/bench.yaml`.** Until then this module's pom
+> **TURNED OFF, 2026-08-14, and this is temporary.** The job still exists at
+> `.github/workflows/bench.yaml` and still works, but its triggers are now `workflow_dispatch` and
+> nothing else: no push, no pull request, no schedule. **Nothing starts it automatically.** A rise
+> in memory allocated per operation, or a change in how many `sin`/`cos`/`log` calls a transform
+> makes, will not be noticed until somebody runs it — `gh workflow run bench.yaml`, the Actions tab,
+> or `./docker/run.sh bench` locally. That is a real loss of cover and the reason the release
+> checklist in `HOWTORELEASE.txt` runs the gate by hand before a tag. Turn it back on by restoring
+> the triggers; do not soften the job instead.
+>
+> **Previously: DONE, 2026-08-01. The job exists.** Until then this module's pom
 > called Tiers 1 and 2 *"blocking PR gates"* while **no job anywhere invoked `GateChecker`** — the
-> statement was accurate about intent and false about fact.
+> statement was accurate about intent and false about fact. Both halves of that sentence have since
+> been fixed: the job was written, and the pom no longer calls them PR gates.
+>
+> What follows is kept because the reasoning still applies to the job as it runs today.
 >
 > **Three differences from the snippet below, each deliberate:**
 >

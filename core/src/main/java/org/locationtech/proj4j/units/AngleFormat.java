@@ -34,6 +34,19 @@ public class AngleFormat extends NumberFormat {
     public static final String STR_SEC_SYMBOL = "\"";
     public static final char CH_DEG_SYMBOL = '\u00b0';
     public static final char CH_DEG_ABBREV = 'd';
+
+    /**
+     * The uppercase degrees abbreviation, accepted on the <b>reading</b> side only.
+     * <p>
+     * {@code dmstor} takes {@code 'D'} and {@code 'd'} interchangeably
+     * ({@code 9.8.1:src/dmstor.cpp}), so {@code "2D32"} is an angle upstream and now is one
+     * here — see {@link #indexOfDegreeMarker(String)}. This class keeps writing
+     * {@link #CH_DEG_ABBREV}: the {@code DdMmSs} patterns are unchanged, so the round trip
+     * through {@link Angle#parse(String)} still reads back exactly what was written, and
+     * nothing formats an uppercase {@code D}.
+     */
+    public static final char CH_DEG_ABBREV_UPPER = 'D';
+
     public static final char CH_MIN_ABBREV = 'm';
     public static final String STR_SEC_ABBREV = "s";
 
@@ -299,21 +312,63 @@ public class AngleFormat extends NumberFormat {
     }
 
     /**
-     * The index of the degree marker, {@code d} or {@code °}, or {@code -1}.
+     * The index of the <b>earliest</b> degree marker — {@code d}, {@code D} or {@code °} — or
+     * {@code -1}.
      *
-     * <p><b>Lowercase {@code d} only.</b> {@code dmstor} takes either case - its unit table is
-     * {@code "Dd°'\\\"rR"} - so {@code "18D54S"} is an angle upstream and is not one here:
-     * with no marker found the text falls through to {@code Double.parseDouble}, which throws.
-     * That gap predates this branch and is left alone rather than widened into a second parity
-     * argument. It is unreachable from anything shipped - of the 323 distinct DMS values in the
-     * registries, <b>none</b> uses an uppercase {@code D}, and the gie corpus has none either
-     * (counted over text files only; {@code nad/conus} and {@code nad/ntv1_can.dat} are binary
-     * grids and a naive grep over them reports thousands of false hits).
+     * <p><b>Either case, since 2.2.0.</b> {@code dmstor} accepts {@code d}, {@code D}, a bare
+     * {@code \xb0} and the two-byte UTF-8 {@code \xc2\xb0}, all mapping to its {@code n = 0}
+     * degrees slot ({@code 9.8.1:src/dmstor.cpp}). The two byte spellings of the degree sign
+     * are one Java {@code char} here, {@link #CH_DEG_SYMBOL}, because a {@code String} is
+     * already decoded — that half of upstream's table needs no port. What was missing was the
+     * uppercase {@code D}: {@code Angle.parse} got {@code -1}, fell through to
+     * {@code Double.parseDouble}, and threw on a value PROJ reads as an angle.
+     *
+     * <p><b>The earliest marker, not a fallback chain.</b> This used to be
+     * {@code indexOf('d')} then, only if that missed, {@code indexOf('°')}. That shape
+     * mis-orders any string carrying two different markers, because {@code dmstor} scans
+     * strictly left to right and takes whichever marker the digit loop reaches first — so on
+     * {@code "1°2d3"} a chain would report the {@code d} at index 3 while upstream stops at
+     * the {@code °} at index 1. Widening a chain to three markers would have made that
+     * latent bug three times as reachable, so the chain is gone.
+     *
+     * <p><b>Beyond the marker, upstream stays stricter, and these are the cases to keep in
+     * mind when reading {@code Angle.parse} against it.</b> {@code r}/{@code R} means the
+     * value is already radians and is legal only as the <em>first</em> field, so
+     * {@code "2D32R"} is refused upstream. {@code if (n < nl)} requires the markers in
+     * descending order, so {@code "30'2d"} is refused. An unrecognised character ends
+     * {@code dmstor}'s loop and the tail is <em>ignored</em>, which is why {@code m} is not a
+     * minutes marker there and is one here. And a trailing {@code NnEeSsWw}
+     * <em>assigns</em> the sign rather than flipping it, which this class matches.
+     *
+     * <p><b>The claim that used to stand here — that no shipped value uses an uppercase
+     * {@code D} — was true of the registries and FALSE of the corpus.</b> Re-measured:
+     * {@code builtins.gie:3869} carries {@code +lat_1=2D32}, one occurrence, and it is the
+     * only one in all 42 corpus files. The registries really do have none (searched as
+     * {@code =[+-]?[0-9][0-9.]*D} across {@code epsg}, {@code esri}, {@code nad27},
+     * {@code nad83} and {@code world}, with the lowercase-{@code d} form as the positive
+     * control at 337/303/66 hits in the last three), and neither do {@code golden/probes.tsv}
+     * or {@code golden/pairs.tsv} — {@code probes.tsv}'s 75 {@code D} bytes are all in the
+     * key column, ellipsoid and datum names such as {@code NWL9D} and {@code NAD83}, which
+     * never reach {@code Angle.parse}. A "we checked and there are none" note is the most
+     * expensive kind of stale comment, so the split is recorded per file above rather than as
+     * a total.
+     *
+     * <p><b>No regression from the wider marker, verified rather than assumed.</b> The only
+     * strings this newly diverts are ones that previously reached
+     * {@code Double.parseDouble}, and the sole Java numeric form containing a {@code D} is a
+     * <em>trailing</em> {@code double} suffix: {@code "45D"} parses to 45.0, and after this
+     * change routes through {@code dmsToDeg(45, 0, 0)} = 45.0 — the same value. No Java
+     * numeric literal places a {@code D} mid-string, so nothing that used to parse now parses
+     * differently.
      */
     static int indexOfDegreeMarker(String text) {
         int i = text.indexOf(CH_DEG_ABBREV);
-        if (i == -1)
-            i = text.indexOf(CH_DEG_SYMBOL);
+        int upper = text.indexOf(CH_DEG_ABBREV_UPPER);
+        if (i == -1 || (upper != -1 && upper < i))
+            i = upper;
+        int symbol = text.indexOf(CH_DEG_SYMBOL);
+        if (i == -1 || (symbol != -1 && symbol < i))
+            i = symbol;
         return i;
     }
 

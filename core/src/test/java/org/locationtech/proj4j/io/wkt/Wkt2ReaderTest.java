@@ -22,6 +22,11 @@ import static org.junit.Assert.fail;
 
 import org.junit.Test;
 
+import org.locationtech.proj4j.BasicCoordinateTransform;
+import org.locationtech.proj4j.CRSFactory;
+import org.locationtech.proj4j.CoordinateReferenceSystem;
+import org.locationtech.proj4j.ProjCoordinate;
+
 /**
  * The WKT2 reader, over inputs taken from PROJ 9.8.1's {@code test/unit/test_io.cpp}
  * ({@code wkt_parse.wkt2_*}). Corpus case numbers in the comments refer to the extraction of that
@@ -202,7 +207,15 @@ public class Wkt2ReaderTest {
         assertTrue(p, p.contains("+ellps=clrk80ign"));
     }
 
-    /** CASE 152: a COMPOUNDCRS yields its horizontal component. */
+    /**
+     * CASE 152: a COMPOUNDCRS yields its horizontal component and its vertical one.
+     * <p>
+     * Before 2.2.0 this asserted {@code +proj=longlat +datum=WGS84 +no_defs}: the VERTCRS was
+     * parsed, kind-checked on the line above, and then never read again. This VERTCRS carries
+     * no {@code ID[]}, so the unit is the only thing it can contribute — add
+     * {@code ID["EPSG",5773]} and {@code +geoidgrids=us_nga_egm96_15.tif +geoid_crs=WGS84}
+     * appear too, which {@link CompoundCrsFromDocumentTest} pins.
+     */
     @Test
     public void compoundCrs() {
         String wkt = "COMPOUNDCRS[\"WGS 84 + EGM96 height\"," + GEODCRS_4326 + ","
@@ -212,7 +225,8 @@ public class Wkt2ReaderTest {
         assertEquals(CrsDefinition.Kind.COMPOUND, def.getKind());
         assertEquals(2, def.getComponents().size());
         assertEquals(CrsDefinition.Kind.VERTICAL, def.getComponents().get(1).getKind());
-        assertEquals("+proj=longlat +datum=WGS84 +no_defs", proj(wkt));
+        assertEquals(def.getComponents().get(1), def.verticalComponent());
+        assertEquals("+proj=longlat +datum=WGS84 +vunits=m +no_defs", proj(wkt));
     }
 
     /** CASE 159/160: a BOUNDCRS's seven-parameter abridged transformation, by name and by code. */
@@ -342,30 +356,36 @@ public class Wkt2ReaderTest {
     }
 
     /**
-     * An Equidistant Cylindrical with a real standard parallel is refused, not mis-projected.
+     * An Equidistant Cylindrical with a real standard parallel and latitude of natural origin is
+     * accepted, and both parameters are carried through to the projection.
      *
-     * <p><b>The refusal is now over-strict, and this test pins the over-strictness rather than
-     * endorsing it.</b> The reason recorded here was that proj4j's {@code eqc} ignored
-     * {@code +lat_ts}. It does not: {@code PlateCarreeProjection} is a port of 9.8.1's
-     * {@code eqc.cpp} implementing both EPSG:1029 and EPSG:1028, it derives {@code rc} from
-     * {@code cos(lat_ts)} (and {@code nu1 * cos(lat_ts)} on an ellipsoid) at
-     * {@code initialize()} and uses it in {@code project()}, and {@code Proj4Parser} wires
-     * {@code +lat_ts} through {@code setTrueScaleLatitudeDegrees}. So a WKT2 {@code eqc} with a
-     * standard parallel could be built correctly today, and this reader still throws.
+     * <p><b>This test asserted the opposite until task #126.</b> The reader used to throw on a
+     * non-zero {@code lat_ts} or {@code lat_0} for this method — in every dialect, not only
+     * WKT2 — on the stated grounds that proj4j's {@code eqc} ignored them. That reason was
+     * false: {@code PlateCarreeProjection} is a port of 9.8.1's {@code eqc.cpp} implementing
+     * both EPSG:1028 and EPSG:1029, it derives {@code rc} from {@code cos(lat_ts)} (and
+     * {@code nu1 * cos(lat_ts)} on an ellipsoid) and {@code M0} from {@code lat_0} at
+     * {@code initialize()} and uses both in {@code project()}, and {@code Proj4Parser} wires
+     * {@code +lat_ts} through {@code setTrueScaleLatitudeDegrees}. The refusal was invented
+     * locally rather than ported, and removing it restores parity.
      *
-     * <p>What the refusal costs, measured with {@code proj} 9.8.1 at lon 10 / lat 20 /
-     * {@code +ellps=GRS80}: {@code +lat_ts=30} gives an easting of 964862.8025 against
-     * 1113194.9079 bare, so the refused standard parallel is worth 148,332 m; {@code +lat_0=45}
-     * is worth 4,984,944 m of northing. These are not rounding-level parameters.
+     * <p>PROJ 9.8.1 accepts both documents below. {@code projinfo -o PROJ} answers
+     * {@code +proj=eqc +lat_ts=30 +lat_0=0 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m
+     * +no_defs} for the first and the same with {@code +lat_0=45} for the second; it never
+     * refuses. The token order here differs because this package emits a fixed canonical order,
+     * and PROJ writes a defaulted {@code +lat_0=0} that a document without the parameter does
+     * not produce here.
      *
-     * <p>The refusal lives in {@code WktMethods}' {@code FLAG_EQC} branch, which calls
-     * {@code refuseNonZero} on both {@code lat_ts} and {@code lat_0}. Relaxing it is task #126
-     * and is out of scope for 2.1.0 — it is a behaviour change with its own test evidence to
-     * gather — so it is left alone here and written down instead. <b>Do not delete this test to
-     * "fix" the reader — change {@code WktMethods} and change this test in the same commit.</b>
+     * <p>These are not rounding-level parameters, which is why the assertions below check the
+     * emitted values and then a projected coordinate rather than merely that the parse
+     * succeeded. Measured with {@code proj} 9.8.1 at lon 10 / lat 20 / {@code +datum=WGS84}:
+     * {@code +lat_ts=30} gives an easting of 964862.8025 against 1113194.9079 bare, so the
+     * standard parallel is worth 148,332 m, and {@code +lat_0=45} is worth 4,984,944 m of
+     * northing. A reader that parsed the document and then dropped the tokens downstream would
+     * be wrong by those amounts, silently.
      */
     @Test
-    public void equidistantCylindricalWithStandardParallelIsRefused() {
+    public void equidistantCylindricalCarriesStandardParallelAndOrigin() {
         String wkt = "PROJCRS[\"x\",BASEGEOGCRS[\"WGS 84\","
                 + "DATUM[\"World Geodetic System 1984\","
                 + "ELLIPSOID[\"WGS 84\",6378137,298.257223563]],PRIMEM[\"Greenwich\",0]],"
@@ -378,12 +398,43 @@ public class Wkt2ReaderTest {
                 + "PARAMETER[\"False northing\",0,LENGTHUNIT[\"metre\",1]]],"
                 + "CS[Cartesian,2],AXIS[\"(E)\",east],AXIS[\"(N)\",north],"
                 + "LENGTHUNIT[\"metre\",1]]";
-        try {
-            proj(wkt);
-            fail("expected a refusal: WktMethods' FLAG_EQC branch refuses a non-zero lat_ts");
-        } catch (WktParseException expected) {
-            assertTrue(expected.getMessage(), expected.getMessage().contains("ignores"));
-        }
+        String projString = proj(wkt);
+        assertEquals("+proj=eqc +lon_0=0 +lat_ts=30 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs",
+                projString);
+        assertTrue(projString, projString.contains("+lat_ts=30"));
+
+        // EPSG 8801 as well. PROJ's own table carries it for this method as a non-EPSG extension
+        // ("extension of EPSG, but used by GDAL / PROJ", parammappings.cpp paramsEqc).
+        String withOrigin = "PROJCRS[\"x\",BASEGEOGCRS[\"WGS 84\","
+                + "DATUM[\"World Geodetic System 1984\","
+                + "ELLIPSOID[\"WGS 84\",6378137,298.257223563]],PRIMEM[\"Greenwich\",0]],"
+                + "CONVERSION[\"c\",METHOD[\"Equidistant Cylindrical\",ID[\"EPSG\",1028]],"
+                + "PARAMETER[\"Latitude of 1st standard parallel\",30,"
+                + "ANGLEUNIT[\"degree\",0.0174532925199433]],"
+                + "PARAMETER[\"Latitude of natural origin\",45,"
+                + "ANGLEUNIT[\"degree\",0.0174532925199433]],"
+                + "PARAMETER[\"Longitude of natural origin\",0,"
+                + "ANGLEUNIT[\"degree\",0.0174532925199433]],"
+                + "PARAMETER[\"False easting\",0,LENGTHUNIT[\"metre\",1]],"
+                + "PARAMETER[\"False northing\",0,LENGTHUNIT[\"metre\",1]]],"
+                + "CS[Cartesian,2],AXIS[\"(E)\",east],AXIS[\"(N)\",north],"
+                + "LENGTHUNIT[\"metre\",1]]";
+        String withOriginProj = proj(withOrigin);
+        assertEquals("+proj=eqc +lat_0=45 +lon_0=0 +lat_ts=30 +x_0=0 +y_0=0 +datum=WGS84 "
+                + "+units=m +no_defs", withOriginProj);
+        assertTrue(withOriginProj, withOriginProj.contains("+lat_ts=30"));
+        assertTrue(withOriginProj, withOriginProj.contains("+lat_0=45"));
+
+        // And both tokens reach the projection, not merely the string. proj 9.8.1:
+        //   echo "10 20" | proj -d 9 +proj=eqc +datum=WGS84 +lat_ts=30 +lat_0=45
+        //   964862.802508965  -2772578.123806110
+        CoordinateReferenceSystem crs = new WktReader().read(withOrigin);
+        CoordinateReferenceSystem wgs84 =
+                new CRSFactory().createFromParameters("wgs84", "+proj=longlat +datum=WGS84");
+        ProjCoordinate out = new BasicCoordinateTransform(wgs84, crs)
+                .transform(new ProjCoordinate(10, 20), new ProjCoordinate());
+        assertEquals(964862.802508965, out.x, 1e-6);
+        assertEquals(-2772578.123806110, out.y, 1e-6);
     }
 
     /** Both bracket flavours and mixed case keywords are accepted. */

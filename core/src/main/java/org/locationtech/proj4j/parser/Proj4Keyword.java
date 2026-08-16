@@ -115,11 +115,12 @@ public class Proj4Keyword {
      * {@code spilhaus}, {@code tpers} ({@code nsper.cpp:196}), {@code labrd}
      * ({@code labrd.cpp:117}) and {@code isea} ({@code isea.cpp:1024}).
      * <p>
-     * <b>{@code +azi} is now dispatched per class to three of those four</b> -
-     * {@code SpilhausProjection}, {@code TiltedPerspectiveProjection} and
-     * {@code LabordeProjection} - which is exactly the set that is registered in
-     * {@code Registry}. {@code isea} is not ported, so its {@code +proj=} name is
-     * refused before {@code +azi} can matter.
+     * <b>{@code +azi} is now dispatched per class to all four</b> -
+     * {@code SpilhausProjection}, {@code TiltedPerspectiveProjection},
+     * {@code LabordeProjection} and, since {@code isea} was registered,
+     * {@code IcosahedralSnyderEqualAreaProjection} - which is exactly the set that is
+     * registered in {@code Registry}. The fourth was added in the same change as the
+     * {@code isea} registration, for the reason the next paragraph gives.
      * <p>
      * That per-class fan-out is <b>not optional</b>, and it is why {@code tpers} was
      * left unregistered for a stage. {@code Proj4Parser} used to send {@code +azi} to
@@ -152,6 +153,108 @@ public class Proj4Keyword {
     public static final String tilt = "tilt";
 
     /**
+     * {@code +orient} - the icosahedral pair's net orientation. An {@code s} sigil in both
+     * operators, i.e. a bare string compared with {@code strcmp}, so the match is
+     * <b>case-sensitive</b> and an unrecognised value fails setup with
+     * {@code PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE}.
+     * <p>
+     * <b>One keyword, two disjoint value sets</b>, which is why it is dispatched per class
+     * and never through a shared setter:
+     * <table>
+     * <caption>+orient by operator</caption>
+     * <tr><th>operator</th><th>values</th><th>upstream</th></tr>
+     * <tr><td>{@code airocean}</td><td>{@code vertical} (default), {@code horizontal}</td>
+     *     <td>{@code airocean.cpp:829-841}</td></tr>
+     * <tr><td>{@code isea}</td><td>{@code isea} (default), {@code pole}</td>
+     *     <td>{@code isea.cpp:1008-1021}</td></tr>
+     * </table>
+     * <p>
+     * Sending {@code +orient=pole} to {@code airocean} must be refused, not silently
+     * ignored, and vice versa. {@code AirOceanProjection.setOrient} and
+     * {@code IcosahedralSnyderEqualAreaProjection.setOrient} each police their own set.
+     */
+    public static final String orient = "orient";
+
+    /**
+     * {@code +mode} - {@code isea}'s output address form ({@code isea.cpp:1035-1051}), one of
+     * {@code plane} (the default), {@code di}, {@code dd} or {@code hex}. An {@code s} sigil,
+     * so again a case-sensitive {@code strcmp}.
+     * <p>
+     * Only {@code plane} has an inverse: {@code pj_isea_data::initialize}
+     * ({@code isea.cpp:1329-1338}) installs the planar projection object for
+     * {@code ISEA_PLANE} alone, and {@code isea_s_inverse} answers infinity without it.
+     */
+    public static final String mode = "mode";
+
+    /**
+     * {@code +resolution} - {@code isea}'s DGGS grid resolution, an {@code i} sigil
+     * defaulting to <b>4</b> ({@code isea.cpp:1059-1063}). Ignored by {@code +mode=plane},
+     * which is why the corpus can only reach it through
+     * {@code +proj=isea +mode=hex +resolution=31}.
+     */
+    public static final String resolution = "resolution";
+
+    /**
+     * {@code +aperture} - {@code isea}'s DGGS aperture, an {@code i} sigil defaulting to
+     * <b>3</b> ({@code isea.cpp:1065-1069}). Note {@code isea_grid_init} seeds aperture 4 and
+     * resolution 6 and the setup then overwrites both unconditionally, so those seeds are
+     * dead and 3/4 are the real defaults.
+     */
+    public static final String aperture = "aperture";
+
+    /**
+     * {@code +rot_xy} - {@code healpix}'s rotation of the projected plane
+     * ({@code healpix.cpp:615-616}).
+     * <p>
+     * Read with the <b>{@code d}</b> sigil, {@code pj_param(..., "drot_xy").f}, and only
+     * then passed through {@code PJ_TORAD}. That is a plain {@code pj_strtod}, <b>not</b>
+     * the {@code r} sigil's {@code dmstor}, so {@code +rot_xy=45d30'} is not an angle
+     * with minutes - it parses as 45 and the rest is discarded. The value is degrees
+     * either way.
+     * <p>
+     * Read by {@code healpix} alone. {@code rhealpix} shares the file and the opaque
+     * struct but its setup function never writes {@code rot_xy}, so the key is inert
+     * there, and {@code Proj4Parser} dispatches it on {@code HealpixProjection} only -
+     * which is why {@code RHealpixProjection} is a sibling class rather than a subclass.
+     */
+    public static final String rot_xy = "rot_xy";
+
+    /**
+     * {@code +north_square}, {@code +south_square} - which of the four positions
+     * {@code rhealpix} folds each polar square into ({@code healpix.cpp:665-666}).
+     * <p>
+     * Both read with the <b>{@code i}</b> sigil, {@code pj_param(..., "inorth_square").i},
+     * so a strict decimal integer, and both rejected outside {@code [0, 3]} with
+     * {@code PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE} ({@code healpix.cpp:670-683}). That
+     * refusal is mirrored in {@code ProjOperatorSetup} so it happens before any
+     * coordinate is produced rather than after.
+     * <p>
+     * Read by {@code rhealpix} alone; {@code healpix} leaves both at the zero
+     * {@code calloc} gave it and never looks at them.
+     */
+    public static final String north_square = "north_square";
+    public static final String south_square = "south_square";
+
+    /**
+     * {@code +UVtoST} - which cube-face-to-unit-square mapping {@code s2} uses
+     * ({@code s2.cpp:413}).
+     * <p>
+     * Read with the {@code s} sigil, {@code pj_param(ctx, P-&gt;params, "sUVtoST").s}, and
+     * looked up in a {@code std::map} of exactly four names: {@code linear},
+     * {@code quadratic}, {@code tangent}, {@code none} ({@code s2.cpp:77-81}). Absent means
+     * {@code quadratic}; anything not in the map is
+     * {@code PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE} ({@code s2.cpp:417-427}), mirrored in
+     * {@code ProjOperatorSetup} so the definition is refused rather than the coordinate.
+     * <p>
+     * <b>The mixed case is part of the key</b>, not a typo: {@code pj_param} matches the
+     * parameter name literally, so {@code +uvtost=linear} is not this parameter and
+     * {@code +UVtoST=Linear} is not one of its values.
+     * <p>
+     * Read by {@code s2} alone.
+     */
+    public static final String UVtoST = "UVtoST";
+
+    /**
      * {@code +over} - suppress the &plusmn;&pi; reduction of longitude
      * ({@code init.cpp:601}, {@code pj_param(ctx, start, "bover").i}), so it is a
      * {@code b} sigil: a bare {@code +over} is true and {@code +over=f} is
@@ -161,7 +264,7 @@ public class Proj4Keyword {
      * {@code adjlon} calls when it is set ({@code fwd.cpp:82-83}, {@code :110-111})
      * and {@code inv_finalize} skips its one ({@code inv.cpp:115-116}), which is why
      * it is dispatched through {@code Projection.setOver} rather than on a concrete
-     * class. It does <b>not</b> disable {@code +lon_wrap}.
+     * class. It does <b>not</b> disable {@link #lon_wrap}.
      * <p>
      * Upstream also has a context-level {@code forceOver} that ORs in over the
      * parameter ({@code init.cpp:602-603}); it is settable only through
@@ -169,6 +272,39 @@ public class Proj4Keyword {
      * proj-string spelling, so it is deliberately not modelled.
      */
     public static final String over = "over";
+
+    /**
+     * {@code +lon_wrap} - the centre of the output longitude range
+     * ({@code init.cpp:611-623}).
+     * <p>
+     * <b>The value is an angle, and it is read with {@code pj_param}'s {@code r} sigil</b>
+     * ({@code "rlon_wrap"}), so {@code +lon_wrap=180} stores &pi; and DMS forms are legal.
+     * That is the single most misread thing about this parameter, because it changes what
+     * upstream's own guard means: {@code !(fabs(center) &lt; 10 * M_TWOPI)} is a bound of
+     * <b>10 &times; 2&pi; radians &asymp; 3600 degrees</b>, not 62.8 degrees. Measured on
+     * 9.8.1: {@code +lon_wrap=3599} is accepted, {@code 3600} and {@code 3601} are error
+     * 1027 "Invalid value for lon_wrap". The comparison is written inverted rather than as
+     * {@code >=} deliberately - upstream's own comment says so - because that is what makes
+     * a {@code NaN} centre an error instead of silently passing; {@code Proj4Parser}
+     * preserves the inversion for the same reason.
+     * <p>
+     * <b>Global, like {@link #over}, and forward-only.</b> It is applied in exactly one
+     * place upstream, {@code fwd_finalize}'s {@code case PJ_IO_UNITS_RADIANS}
+     * ({@code fwd.cpp:162-167}), as
+     * {@code lam = center + adjlon(lam - center)}. {@code inv_finalize}
+     * ({@code inv.cpp:102-130}) contains no {@code lon_wrap} at all. So it bites the
+     * <em>longlat family, forward direction only</em>: an inverse-longlat and an
+     * inverse-merc leave the longitude unwrapped. That asymmetry is upstream's and is not
+     * a defect to repair here.
+     * <p>
+     * Dispatched through {@code Projection.setLongitudeWrapCenter} rather than on a
+     * concrete class, and registered in {@code supportedParameters()} in the SAME change
+     * as the parser read and the {@code Projection} field. Registering it later would have
+     * been silent: {@code GieProjArgs.toProj4Args()} drops any key outside the allow-list
+     * <em>before</em> {@code setParameters} runs, so a parser read added on its own would
+     * have parsed nothing and produced the unwrapped answer with no diagnostic.
+     */
+    public static final String lon_wrap = "lon_wrap";
 
     /**
      * {@code +W} - read by <b>two</b> operators: {@code lagrng}, where it is the
@@ -278,6 +414,58 @@ public class Proj4Keyword {
      */
     public static final String lon_1 = "lon_1";
     public static final String lon_2 = "lon_2";
+
+    /**
+     * {@code +lat_3}, {@code +lon_3} - the third control point of
+     * {@code chamb}'s trimetric construction ({@code chamb.cpp:112-117}, which builds
+     * the key names with {@code snprintf} and reads all six through {@code pj_param}'s
+     * {@code "r"} sigil).
+     * <p>
+     * {@code +lat_1}/{@code +lat_2} are already dispatched universally and
+     * {@code +lon_1}/{@code +lon_2} arrive on the concrete class, so these two are the
+     * only ones {@code chamb} was missing. Absent, they default to 0, which puts the
+     * third control point on the Gulf of Guinea null island - a perfectly plausible
+     * triangle, so the omission would not have raised anything.
+     */
+    public static final String lat_3 = "lat_3";
+    public static final String lon_3 = "lon_3";
+
+    /**
+     * {@code +theta} - {@code oea}'s rotation of the oval about the projection centre
+     * ({@code oea.cpp:74}, {@code pj_param(..., "rtheta").f}, so every angular syntax
+     * is legal and a bare number is degrees). Unguarded upstream and defaulting to 0.
+     * <p>
+     * Dispatched on {@code OblatedEqualAreaProjection} only. Not to be confused with
+     * {@code +alpha} or {@code +gamma}, which rotate other families and are separate
+     * keys.
+     */
+    public static final String theta = "theta";
+
+    /**
+     * {@code +czech} - {@code krovak}'s and {@code mod_krovak}'s axis convention
+     * switch ({@code krovak.cpp:157}).
+     * <p>
+     * <b>Read with {@code pj_param}'s {@code "t"} sigil - presence, not value.</b>
+     * {@code pj_param(P->ctx, P->params, "tczech").i} is 1 for {@code +czech},
+     * {@code +czech=0} and {@code +czech=false} alike; there is no way to write the
+     * key and get the default. So the parser must test {@code containsKey} and must
+     * <em>not</em> parse the value, exactly as it does for {@code +no_rot} and
+     * {@code +hyperbolic}.
+     * <p>
+     * On: the output stays in Krovak's native southing/westing, both positive over
+     * Czechia. Off: {@code krovak.cpp:192-194} negates both and subtracts twice the
+     * false origin, giving the easting/northing that EPSG:5514 and every GIS expect.
+     * The two differ by the whole sign of the coordinate, so a dropped {@code +czech}
+     * is not a small error.
+     * <p>
+     * {@code KrovakProjection.setCzech} existed from 1.4.3 onward and <b>nothing ever
+     * called it</b>: the key was absent from this allow-list, so
+     * {@code Proj4Keyword.isSupported} dropped it before {@code setParameters} could
+     * see it and {@code +proj=krovak +czech} returned bit-identical output to
+     * {@code +proj=krovak}. That is the exact failure mode this table's closed
+     * allow-list produces, and it is why a key and its dispatch have to land together.
+     */
+    public static final String czech = "czech";
 
     /**
      * {@code +n} - required by {@code urmfps} ({@code urmfps.cpp:56-66}: absent is
@@ -536,8 +724,17 @@ public class Proj4Keyword {
             // instead of an honest NOT_IMPLEMENTED. Add to Proj4jCapabilities.HONOURED in
             // the same change, never separately.
             supportedParams.add(no_rot);      // Just for Oblique Mercator projection
-            supportedParams.add(n);           // urmfps, urm5 and gn_sinu
-            supportedParams.add(m);           // Just for gn_sinu
+            supportedParams.add(lat_3);       // Just for chamb
+            supportedParams.add(lon_3);       // Just for chamb
+            supportedParams.add(n);           // urmfps, urm5, gn_sinu and oea
+            supportedParams.add(m);           // gn_sinu and oea
+            supportedParams.add(theta);       // Just for oea
+            // Presence-only, pj_param's "t" sigil: +czech=0 is still +czech. Registered
+            // only now that Proj4Parser tests containsKey and KrovakProjection.setCzech
+            // is therefore reachable. Before this, the allow-list dropped the key and
+            // builtins.gie #138 got the easting/northing answer where PROJ gives the
+            // southing/westing one - the two differ by the sign of both ordinates.
+            supportedParams.add(czech);       // krovak AND mod_krovak
             supportedParams.add(q);           // Just for urm5
             supportedParams.add(approx);      // Just for tmerc / utm
             supportedParams.add(algo);        // Just for tmerc / utm
@@ -551,9 +748,24 @@ public class Proj4Keyword {
             // Spilhaus is what kept tpers out of Registry: it would have made
             // "+proj=tpers +azi=20" a silently unrotated map. Never widen Registry for an
             // +azi reader without widening the dispatch in the same change.
-            supportedParams.add(azi);         // spilhaus, tpers, labrd (upstream: also isea)
+            supportedParams.add(azi);         // spilhaus, tpers, labrd AND isea
             supportedParams.add(rot);         // Just for Spilhaus
             supportedParams.add(tilt);        // Just for tpers
+            supportedParams.add(rot_xy);      // Just for healpix
+            supportedParams.add(north_square); // Just for rhealpix
+            supportedParams.add(south_square); // Just for rhealpix
+            supportedParams.add(UVtoST);      // Just for s2
+
+            // The icosahedral pair. +orient is read by BOTH airocean and isea, with
+            // DISJOINT value sets, and is dispatched to both classes in the same change
+            // that registers the two +proj= names. +mode, +resolution and +aperture are
+            // isea's alone. Add each to Proj4jCapabilities.HONOURED in the same change,
+            // never separately: a registered key that reaches no setter is a plausible
+            // wrong map, which is strictly worse than an honest NOT_IMPLEMENTED.
+            supportedParams.add(orient);      // airocean AND isea, different values each
+            supportedParams.add(mode);        // Just for isea
+            supportedParams.add(resolution);  // Just for isea
+            supportedParams.add(aperture);    // Just for isea
 
             supportedParams.add(inc_angle);   // Just for som
             supportedParams.add(ps_rev);      // Just for som
@@ -562,6 +774,12 @@ public class Proj4Keyword {
             supportedParams.add(lsat);        // Just for lsat
 
             supportedParams.add(over);        // global: fwd_prepare and inv_finalize
+            // global: fwd_finalize ONLY (fwd.cpp:162-167). Registered here in the same
+            // change as Proj4Parser's read and Projection.setLongitudeWrapCenter, and it
+            // had to be: isSupported() is a closed allow-list and GieProjArgs.toProj4Args()
+            // drops an unregistered key BEFORE setParameters, so a parser read alone would
+            // have read nothing and returned the unwrapped longitude without a diagnostic.
+            supportedParams.add(lon_wrap);
             supportedParams.add(W);           // lagrng AND hammer - both, never one
             supportedParams.add(M);           // Just for hammer
             supportedParams.add(no_cut);      // Just for airy

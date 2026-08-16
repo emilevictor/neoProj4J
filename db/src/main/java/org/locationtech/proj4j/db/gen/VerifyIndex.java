@@ -105,6 +105,7 @@ public final class VerifyIndex {
             verifyAliases(d, db);
             verifySupersessions(d, db);
             verifyDeprecations(d, db);
+            verifyAuthorityPreferences(d, db);
             verifyNameIndex(d, db);
             verifyCrsByDatum(d, db);
             verifyAuthorities(d, db);
@@ -929,6 +930,30 @@ public final class VerifyIndex {
                     t.text(row, "replacement_code"));
             isTrue("replacementsFor(" + object + ") is missing " + expected,
                     db.replacementsFor(object).contains(expected));
+        }
+    }
+
+    /**
+     * Every {@code authority_to_authority_preference} row, read back through the same four-query
+     * cascade PROJ uses. The exact key is queried, so the cascade's first query is the one that must
+     * answer; a row that came back through a later fallback would return a different list and fail
+     * here.
+     * <p>
+     * The comparison is against the comma-split of the source cell, re-split here rather than by
+     * calling the reader's splitter, so a splitter that agreed with itself would still be caught.
+     */
+    private static void verifyAuthorityPreferences(QuoteDump d, PjdxDatabase db) {
+        Table t = d.table("authority_to_authority_preference");
+        for (Object[] row : t.rows) {
+            String src = t.text(row, "source_auth_name");
+            String tgt = t.text(row, "target_auth_name");
+            String allowed = t.text(row, "allowed_authorities");
+            List<String> expected = new java.util.ArrayList<String>();
+            for (String part : allowed.split(",", -1)) {
+                expected.add(part);
+            }
+            eq("allowedAuthorities(" + src + ", " + tgt + ")", expected,
+                    db.allowedAuthorities(src, tgt));
         }
     }
 

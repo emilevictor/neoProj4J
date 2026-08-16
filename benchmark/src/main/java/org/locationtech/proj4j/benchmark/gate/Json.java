@@ -24,7 +24,8 @@ import java.util.Map;
  * A minimal JSON reader and writer, sufficient for JMH's result format and for the checked-in
  * baselines.
  *
- * <p><b>Why hand-rolled rather than Jackson.</b> The gate has to run in CI on every PR, so its own
+ * <p><b>Why hand-rolled rather than Jackson.</b> The gate ships inside a shaded jar that CI and
+ * every developer builds, so its own
  * dependency footprint is a liability: a JSON library here means a download, a shaded copy in
  * {@code benchmarks.jar}, and a CVE feed to watch for a tool that reads two files this repository
  * produces itself. JMH's output uses objects, arrays, strings and numbers and nothing else. The parser

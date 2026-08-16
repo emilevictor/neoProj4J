@@ -64,11 +64,12 @@ import java.util.concurrent.atomic.AtomicLong;
  * <h2>One budget, shared, and it counts failures</h2>
  * <p>Three holes made the stated bound not the real one, and all three are closed here.
  * <ul>
- *   <li><strong>The budget was per-instance and there are two instances.</strong> The horizontal and
- *       vertical caches each took {@code configuredMaxBytes()} in full, so a 64 MiB setting bought a
- *       128 MiB ceiling. They now share one {@link Budget}, so the property means what it says. It
- *       is shared rather than halved because halving would cut a horizontal-only workload's cache in
- *       two to bound a vertical one it never populates.</li>
+ *   <li><strong>The budget was per-instance and there is more than one instance.</strong> The
+ *       horizontal and vertical caches each took {@code configuredMaxBytes()} in full, so a 64 MiB
+ *       setting bought a 128 MiB ceiling. They now share one {@link Budget}, so the property means
+ *       what it says. It is shared rather than divided because dividing would cut a
+ *       horizontal-only workload's cache down to bound the others it never populates — and it is
+ *       what let a third cache ({@link #generic()}) be added without re-opening the arithmetic.</li>
  *   <li><strong>A failed load was retained forever and counted as nothing.</strong> Every exception
  *       path returned without reaching {@code admit}, leaving the {@link FutureTask} in the entry
  *       map with no LRU record — so it could never be evicted and never appeared in
@@ -95,7 +96,10 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class GridCache<T extends GridCache.Sized> {
 
-    /** Anything the cache can account for. Implemented by {@link Grid} and {@link VerticalGrid}. */
+    /**
+     * Anything the cache can account for. Implemented by {@link Grid}, {@link VerticalGrid} and
+     * {@link GenericGridSet}.
+     */
     public interface Sized {
         /** Accounted heap cost of the parsed node data. */
         long sizeBytes();
@@ -121,11 +125,12 @@ public final class GridCache<T extends GridCache.Sized> {
      */
     static final long FAILURE_WEIGHT_BYTES = 1024L;
 
-    /** The one budget both caches draw on. See the class javadoc. */
+    /** The one budget every cache draws on. See the class javadoc. */
     private static final Budget BUDGET = new Budget(configuredMaxBytes());
 
     private static final GridCache<Grid> HORIZONTAL = new GridCache<Grid>(BUDGET);
     private static final GridCache<VerticalGrid> VERTICAL = new GridCache<VerticalGrid>(BUDGET);
+    private static final GridCache<GenericGridSet> GENERIC = new GridCache<GenericGridSet>(BUDGET);
 
     private final Budget budget;
 
@@ -146,7 +151,7 @@ public final class GridCache<T extends GridCache.Sized> {
     }
 
     /**
-     * A cache drawing on an existing budget. Exists so a test can build two caches over one budget
+     * A cache drawing on an existing budget. Exists so a test can build several caches over one budget
      * and observe that they really do share it — the property that makes
      * {@code proj4j.grids.cacheBytes} a bound on the process rather than on an instance.
      */
@@ -162,6 +167,17 @@ public final class GridCache<T extends GridCache.Sized> {
     /** The cache of parsed vertical (geoid / height) grids. */
     public static GridCache<VerticalGrid> vertical() {
         return VERTICAL;
+    }
+
+    /**
+     * The cache of parsed generic (N-sample) grid sets — what {@code +grids=} names.
+     *
+     * <p>Separate from the other two because the value type differs, not because the budget does:
+     * all three draw on the same {@link Budget}, so adding this one lowered no ceiling and raised
+     * none.
+     */
+    public static GridCache<GenericGridSet> generic() {
+        return GENERIC;
     }
 
     private static long configuredMaxBytes() {
@@ -313,8 +329,8 @@ public final class GridCache<T extends GridCache.Sized> {
     }
 
     /**
-     * Bytes currently retained by <strong>this</strong> cache. The budget is shared with the other
-     * one, so this can be below {@link #maxBytes()} while the shared total is at it.
+     * Bytes currently retained by <strong>this</strong> cache. The budget is shared with the
+     * others, so this can be below {@link #maxBytes()} while the shared total is at it.
      */
     public long bytes() {
         return budget.bytesOf(this);
@@ -325,7 +341,10 @@ public final class GridCache<T extends GridCache.Sized> {
         return budget.currentBytes();
     }
 
-    /** The shared ceiling. Both {@link #instance()} and {@link #vertical()} report the same value. */
+    /**
+     * The shared ceiling. {@link #instance()}, {@link #vertical()} and {@link #generic()} all
+     * report the same value.
+     */
     public long maxBytes() {
         return budget.maxBytes();
     }
@@ -361,8 +380,8 @@ public final class GridCache<T extends GridCache.Sized> {
     /**
      * The byte budget, shared by every cache that draws on it.
      *
-     * <p>Extracted from {@code GridCache} for one reason: there are two caches and there was one
-     * documented ceiling, and before this the two each took that ceiling in full. Keeping the
+     * <p>Extracted from {@code GridCache} for one reason: there is more than one cache and there
+     * was one documented ceiling, and before this each took that ceiling in full. Keeping the
      * accounting in an object they share is what makes {@code proj4j.grids.cacheBytes} a bound on
      * the process rather than on an instance.
      *

@@ -642,21 +642,72 @@ public class FlagAndVariantDispatchTest {
     }
 
     /**
-     * {@code +theta} is deliberately NOT registered. It is read by {@code oea} alone
-     * ({@code oea.cpp:74}) and {@code oea} is not ported &mdash; {@code Registry}'s line for it is
-     * still commented out &mdash; so there is nothing to dispatch it to. Registering an operator's
-     * key before the operator exists is the mirror of the {@code tpers} trap and gains nothing:
-     * {@code +proj=oea} is refused on the name.
+     * {@code +theta} is registered now that {@code oea} is ported. This assertion used to run the
+     * other way, with a note saying to invert it in the same change that ports the operator; this
+     * is that change.
      *
-     * <p>{@code +n} and {@code +m}, {@code oea}'s other two, are registered for {@code urmfps},
-     * {@code urm5}, {@code gn_sinu} and {@code fouc_s} and are unaffected.
+     * <p>Registration alone would not be worth a test &mdash; the value of one is that a
+     * registered key with no dispatch behind it is <b>worse</b> than an unregistered one, because
+     * {@code isSupported} silently drops the key and the definition then answers a plausible wrong
+     * number instead of refusing. So the check is that the value reaches the projection: the same
+     * definition with and without {@code +theta} must not give the same coordinate.
+     *
+     * <p>{@code +n} and {@code +m}, {@code oea}'s other two, were already registered for
+     * {@code urmfps}, {@code urm5}, {@code gn_sinu} and {@code fouc_s}.
      */
     @Test
-    public void thetaIsDeliberatelyNotRegisteredBecauseOeaIsNotPorted() {
-        assertFalse("+theta must stay unregistered while +proj=oea is unported. Invert this "
-                        + "assertion in the same change that ports it.",
+    public void thetaIsRegisteredAndReachesOea() {
+        assertTrue("+theta is read by oea (oea.cpp:74) and oea is ported",
                 Proj4Keyword.isSupported("theta"));
-        assertRejects("+proj=oea +a=6400000 +n=1 +m=2 +theta=3", "oea");
+        String withTheta = outcome("+proj=oea +a=6400000 +n=1 +m=2 +theta=3", 2, 1);
+        String without = outcome("+proj=oea +a=6400000 +n=1 +m=2", 2, 1);
+        assertNotEquals("+theta was accepted and then ignored", without, withTheta);
+    }
+
+    /**
+     * The same check for {@code chamb}'s third control point. {@code +lat_3} and {@code +lon_3}
+     * are read by {@code chamb} alone ({@code chamb.cpp:112-119}); the first two ordinates reuse
+     * {@code +lat_1}/{@code +lat_2}/{@code +lon_1}/{@code +lon_2}, which were already registered,
+     * so a forgotten pair here would have built a <i>two</i>-point triangle with the third at the
+     * origin and answered from it.
+     */
+    @Test
+    public void chambsThirdControlPointIsRegisteredAndReaches() {
+        assertTrue("+lat_3", Proj4Keyword.isSupported("lat_3"));
+        assertTrue("+lon_3", Proj4Keyword.isSupported("lon_3"));
+        String base = "+proj=chamb +R=6400000 +lat_1=10 +lon_1=-20 +lat_2=20 +lon_2=0 ";
+        assertNotEquals("+lat_3 was accepted and then ignored",
+                outcome(base + "+lon_3=20", 2, 1),
+                outcome(base + "+lon_3=20 +lat_3=30", 2, 1));
+        assertNotEquals("+lon_3 was accepted and then ignored",
+                outcome(base + "+lat_3=30", 2, 1),
+                outcome(base + "+lat_3=30 +lon_3=20", 2, 1));
+    }
+
+    /**
+     * {@code +czech} is a presence-only flag ({@code krovak.cpp:293}, {@code pj_param}'s {@code t}
+     * sigil) that flips Krovak's two output axes from south/west-negated back to the positive
+     * southing/westing the Czech convention uses. {@code KrovakProjection.setCzech} has existed
+     * since 1.4.3 and <b>nothing ever called it</b>: the key was absent from the allow-list, so
+     * {@code +proj=krovak +czech} and a bare {@code +proj=krovak} returned the identical
+     * coordinate. That is exactly the failure this family of tests exists to catch, so it is
+     * probed here in both directions and on both variants.
+     */
+    @Test
+    public void czechReachesBothKrovakVariants() {
+        assertTrue("+czech", Proj4Keyword.isSupported("czech"));
+        String krovak = "+proj=krovak +ellps=bessel +pm=ferro ";
+        ProjCoordinate plain = forward(krovak, 16.8497719444, 50.2090116667);
+        ProjCoordinate czech = forward(krovak + "+czech", 16.8497719444, 50.2090116667);
+        assertEquals(-plain.x, czech.x, 1e-9);
+        assertEquals(-plain.y, czech.y, 1e-9);
+
+        String mod = "+proj=mod_krovak +ellps=bessel +pm=ferro ";
+        ProjCoordinate modPlain = forward(mod, 16.8497719444, 50.2090116667);
+        ProjCoordinate modCzech = forward(mod + "+czech", 16.8497719444, 50.2090116667);
+        assertEquals(-modPlain.x, modCzech.x, 1e-9);
+        assertEquals(-modPlain.y, modCzech.y, 1e-9);
+        assertNotEquals("mod_krovak must differ from krovak", plain.x, modPlain.x, 1e-6);
     }
 
     // -------------------------------------------------------------------- helpers

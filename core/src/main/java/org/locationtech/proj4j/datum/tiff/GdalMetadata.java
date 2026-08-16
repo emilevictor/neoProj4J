@@ -207,6 +207,19 @@ final class GdalMetadata {
     }
 
     /**
+     * Every parsed item, keyed by {@link #key}. Unmodifiable, and the strings are the only thing it
+     * retains — so a caller can keep this alive after the file bytes have been dropped.
+     *
+     * <p>Exists for the cross-IFD metadata inheritance {@code GTiffGenericGrid::metadataItem}
+     * ({@code 9.8.1:src/grids.cpp:2870-2876}) performs: an IFD with no {@code TYPE} of its own falls
+     * back to IFD 0 for <em>every</em> key, not just {@code TYPE}. Reproducing that needs the whole
+     * map of the first IFD, not the three items one operator happens to read.
+     */
+    Map<String, String> items() {
+        return java.util.Collections.unmodifiableMap(items);
+    }
+
+    /**
      * {@code true} iff a {@code role="scale"} or {@code role="offset"} item was seen. PROJ's
      * {@code readValue} applies scaling only under {@code sample < m_adfScale.size()}, and that vector
      * is empty until one appears — so this flag, not a unit scale, is what decides.
@@ -233,7 +246,11 @@ final class GdalMetadata {
      * in this codebase. The compiled constant is identical — {@code "\0"} is the octal escape for
      * U+0000 — so this is a source-visibility change and nothing else.
      */
-    private static String key(int sample, String name) {
+    // Package-private rather than private so GeoTiffImage.metadataKey can delegate to it: the
+    // encoding is exposed to the datum package by metadataSnapshot(), and two copies of it would
+    // drift apart silently -- a lookup that misses returns the empty string, which is
+    // indistinguishable from an absent item.
+    static String key(int sample, String name) {
         return sample + "\0" + name;
     }
 

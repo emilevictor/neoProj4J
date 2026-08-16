@@ -47,7 +47,7 @@ import org.locationtech.proj4j.db.gen.QuoteDump.Table;
  * the method name resolved from {@code coordinate_operation_method}), {@code grid_transformation},
  * {@code other_transformation}, {@code concatenated_operation}, {@code concatenated_operation_step},
  * {@code usage}, {@code extent}, {@code grid_alternatives}, {@code alias_name},
- * {@code supersession} and {@code deprecation}.
+ * {@code supersession}, {@code deprecation} and {@code authority_to_authority_preference}.
  * <p>
  * Dropped on purpose, each with a reason:
  * <ul>
@@ -56,16 +56,23 @@ import org.locationtech.proj4j.db.gen.QuoteDump.Table;
  *       for a capability that does not exist.</li>
  *   <li>{@code scope} (288 rows) — a usage's scope is descriptive text; PROJ's own operation selection
  *       never reads it. The {@code usage} rows are transcoded as an object-to-extent index, and the
- *       scope reference goes with the rest of the row.</li>
+ *       scope reference goes with the rest of the row.
+ *       <p>Re-checked against 9.8.1 when the authority-preference table below was added, because a
+ *       brief claimed scope was the other half of the OSGB36 over-selection. It is not.
+ *       {@code coordinate_operation_factory.cpp} contains the string {@code scope} zero times, and the
+ *       only place scope changes behaviour is {@code factory.cpp}'s {@code SearchUsages}, which scores
+ *       {@code scope LIKE '%large scale%'} to pick <em>which usage row becomes an object's primary
+ *       domain</em>. Over the whole shipped EPSG v12.029 database that score discriminates on exactly
+ *       ten objects, none of them a coordinate operation, so transcoding scope would remove no
+ *       candidate from any pair.</li>
  *   <li>{@code sqlite_stat1} — query-planner statistics for a query planner we do not have.</li>
  *   <li>{@code grid_packages}, {@code builtin_authorities},
  *       {@code versioned_auth_name_mapping} — {@code grid_packages} is vestigial upstream
  *       ({@code grid_alternatives.package_name} carries a {@code CHECK} that it is always NULL); the
  *       authority list is derived from the data instead of asserted separately, so the two cannot
  *       disagree.</li>
- *   <li>{@code authority_to_authority_preference} (6 rows) and {@code geoid_model} (67 rows) — no
- *       consumer in the SPI yet. Both are cheap to add when there is one; adding them now would be
- *       shipping an accessor nothing calls.</li>
+ *   <li>{@code geoid_model} (67 rows) — no consumer in the SPI yet. Cheap to add when there is one;
+ *       adding it now would be shipping an accessor nothing calls.</li>
  *   <li>{@code description} and {@code anchor} on datums and CRSs — free text, never read by
  *       selection or by the facade's output. {@code extent.description} <em>is</em> kept, because it
  *       is the string a human is shown as the area of use.</li>
@@ -212,6 +219,7 @@ public final class GenerateIndex {
         addAliases(d);
         addSupersessions(d);
         addDeprecations(d);
+        addAuthorityPreferences(d);
 
         writer.collect();
         // Index key strings that appear nowhere else must be collected too: the normalised search names
@@ -893,6 +901,37 @@ public final class GenerateIndex {
                         e.str(t.text(row, "replacement_auth_name"));
                         e.str(t.text(row, "replacement_code"));
                         e.str(t.text(row, "source"));
+                    }
+                });
+    }
+
+    /**
+     * PROJ's {@code authority_to_authority_preference}: six rows in a built 9.8.1 {@code proj.db},
+     * five seeded by {@code data/sql/customizations.sql} and a sixth added by
+     * {@code data/sql/nkg_post_customizations.sql}, which also rewrites the {@code EPSG,EPSG} row's
+     * value to {@code PROJ,EPSG,NKG}. That row is the one that keeps ESRI's transformations out of an
+     * EPSG-to-EPSG search, so the count is worth stating: a dump taken from the {@code .sql} sources
+     * without the NKG post-pass would have five rows and the wrong value in the load-bearing one.
+     * <p>
+     * Stored whole rather than resolved here. The cascade that picks a row is
+     * {@code 9.8.1:src/iso19111/factory.cpp}'s {@code DatabaseContext::getAllowedAuthorities}, and it
+     * has to run at query time because it depends on the pair of authorities being asked about.
+     */
+    private void addAuthorityPreferences(QuoteDump d) {
+        final Table t = d.table("authority_to_authority_preference");
+        writer.addTable(PjdxFormat.S_AUTHORITY_PREFERENCE, "authority_to_authority_preference",
+                t.rows, 2,
+                new PjdxWriter.KeyExtractor() {
+                    @Override
+                    public Object[] key(Object[] row) {
+                        return new Object[]{t.text(row, "source_auth_name"),
+                                t.text(row, "target_auth_name")};
+                    }
+                },
+                new PjdxWriter.RowEmitter() {
+                    @Override
+                    public void emit(PjdxWriter.Enc e, Object[] row) {
+                        e.str(t.text(row, "allowed_authorities"));
                     }
                 });
     }

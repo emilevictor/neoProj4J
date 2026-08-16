@@ -282,6 +282,8 @@ public class AngleFormatParseTest {
                 "123d0m59.5\"",
                 "123d60m", "123d-5m", "123d59.5m", "123d0'60\"", "123d30m-5s", "123d0'-5\"",
                 "", "d30m", "abc", "12dxxm", "123D30M", "12d ",
+                // The uppercase degrees marker, on both sides of the split it now causes.
+                "2D32", "2D", "2D32N", "2D32S", "45D", "2D32R", "2°30D", "1°2D3", "30'2d",
         };
         for (String input : inputs) {
             assertEquals("Angle.parse and AngleFormat.parse must not drift apart on \"" + input
@@ -650,14 +652,157 @@ public class AngleFormatParseTest {
         assertTrue(angleFormatFailureMessage("12dxxm").contains("xx"));
     }
 
+    /**
+     * The degrees marker may be upper case; the minutes and seconds markers may not.
+     *
+     * <p>This method used to be called {@code theMarkersMustBeLowerCase} and asserted that
+     * {@code "123D30M"} was <em>rejected whole</em>, naming the entire string, because no marker
+     * at all was recognised and the value fell through to {@code Double.parseDouble}. Half of
+     * that is no longer true: {@code D} is now a degrees marker, so the string is split at it and
+     * only the {@code "30M"} minutes field is rejected. The assertion is amended rather than
+     * deleted, because "the failure names the smallest field it can" is the property worth
+     * keeping — a caller debugging a CRS definition wants to be pointed at the field.
+     *
+     * <p>{@code M} and {@code S} stay write-only. {@code dmstor} has no minutes letter in either
+     * case — its alphabet is {@code d}, {@code D}, the degree sign, {@code '} and {@code "} — so
+     * a lower-case {@code m} here is already a divergence
+     * ({@link #theThreeShapesWhereThisParserDivergesFromDmstor()}) and widening it to upper case
+     * would deepen that divergence rather than close it, on top of colliding with nothing:
+     * {@code "30M"} occurs in no shipped registry token and in no corpus row.
+     */
     @Test
-    public void theMarkersMustBeLowerCase() {
-        // 'D' and 'M' are the pattern letters for writing, not for reading. An angle written in
-        // upper case falls through to Double.parseDouble and is rejected whole.
-        assertTrue("the whole string is named because no lower-case 'd' was found: "
-                        + angleFailureMessage("123D30M"),
-                angleFailureMessage("123D30M").contains("123D30M"));
-        assertTrue(angleFormatFailureMessage("123D30M").contains("123D30M"));
+    public void onlyTheDegreesMarkerIsCaseInsensitive() {
+        // The minutes field is named, not the whole string: the D split the angle successfully
+        // and the 'M' is what could not be read.
+        assertTrue("the minutes field must be named: " + angleFailureMessage("123D30M"),
+                angleFailureMessage("123D30M").contains("30M"));
+        assertTrue(angleFormatFailureMessage("123D30M").contains("30M"));
+
+        // And it is still a rejection. This is the leg that stops the widened marker from
+        // quietly making 123D30M into an angle by some other route.
+        assertTrue(angleFailureMessage("123D30M").length() > 0);
+        assertEquals("both parsers, same failure", angleOutcome("123D30M"),
+                angleFormatOutcome("123D30M"));
+
+        // The lower-case spelling of the same shape is the control: it parses, so the rejection
+        // above is about the 'M' and nothing else.
+        assertEquals(123.5, Angle.parse("123d30m"), TOLERANCE);
+    }
+
+    /**
+     * {@code "2D32"} is an angle. This is the PROJ 9.8.1 parity gap this change closes.
+     *
+     * <p>{@code dmstor} maps {@code 'D'} and {@code 'd'} to the same degrees slot, so
+     * {@code +lat_1=2D32} is two degrees thirty-two minutes to PROJ. Here
+     * {@code indexOfDegreeMarker} looked for a lower-case {@code d} and the degree sign only,
+     * returned {@code -1}, and the string fell through to {@code Double.parseDouble}, which threw.
+     * So a definition PROJ reads was unreadable — and unreadable is the good half: it threw
+     * rather than silently reading 2.
+     *
+     * <p><b>It is in the corpus, contrary to what {@code indexOfDegreeMarker}'s javadoc used to
+     * claim.</b> {@code gie/builtins.gie:3869} carries {@code +lat_1=2D32}, one occurrence, the
+     * only one across all 42 active corpus files. The registries have none.
+     *
+     * <p>Every value here is measured against an installed 9.8.1 rather than computed from the
+     * formula: {@code proj +proj=eqc +R=1 +lat_0=2D32} answers {@code y = -0.044215007717190},
+     * i.e. {@code 2D32} is {@code 0.0442150077171897} radians and {@code 2.533333333333333}
+     * degrees.
+     */
+    @Test
+    public void anUppercaseDegreesMarkerIsReadExactlyLikeALowercaseOne() throws ParseException {
+        assertEquals("the builtins.gie:3869 value, in degrees",
+                2.533333333333333, Angle.parse("2D32"), 0.0);
+        assertEquals("and the same double as the lower-case spelling, not merely close",
+                Angle.parse("2d32"), Angle.parse("2D32"), 0.0);
+        assertEquals("and the degree-sign spelling agrees too",
+                Angle.parse("2°32"), Angle.parse("2D32"), 0.0);
+
+        // Radians, which is the mode Proj4Parser actually uses, against the measured 9.8.1 value.
+        assertEquals(0.0442150077171897, radianParser().parse("2D32").doubleValue(), 1e-15);
+
+        // Degrees only, and with each hemisphere letter, since the suffix is stripped before the
+        // marker scan is used and an off-by-one there would show up here.
+        assertEquals(2.0, Angle.parse("2D"), 0.0);
+        assertEquals(2.533333333333333, Angle.parse("2D32N"), 0.0);
+        assertEquals(-2.533333333333333, Angle.parse("2D32S"), 0.0);
+        assertEquals(-2.533333333333333, Angle.parse("2D32W"), 0.0);
+
+        // The full sexagesimal form, both minute spellings, upper-case degrees marker.
+        assertEquals(Angle.parse("12d34'57\""), Angle.parse("12D34'57\""), 0.0);
+        assertEquals(Angle.parse("12d34m57s"), Angle.parse("12D34m57s"), 0.0);
+
+        // Both parsers, on all of it.
+        assertEquals(2.533333333333333, parseAsDegrees("2D32"), 0.0);
+        assertEquals(2.0, parseAsDegrees("2D"), 0.0);
+        assertEquals(-2.533333333333333, parseAsDegrees("2D32S"), 0.0);
+
+        // NO REGRESSION on the one Java numeric form that contains a D: a trailing 'D' is the
+        // double suffix, and "45D" used to reach Double.parseDouble and give 45.0. It now goes
+        // through dmsToDeg(45, 0, 0) instead and gives the same 45.0. No Java numeric literal
+        // puts a D anywhere but at the end, so this is the whole of the overlap.
+        assertEquals(45.0, Angle.parse("45D"), 0.0);
+        assertEquals(45.0, parseAsDegrees("45D"), 0.0);
+
+        // Upstream is stricter about 'r', and so are we, by accident rather than by design: 'r'
+        // is legal only as the FIRST field there, so "2D32R" is refused, and here the "32R"
+        // minutes field fails to parse. Agreement, pinned so it is not mistaken for a gap.
+        assertTrue(angleFailureMessage("2D32R").contains("32R"));
+    }
+
+    /**
+     * The marker scan takes the <b>earliest</b> of {@code d}, {@code D} and {@code °}, not the
+     * first one that happens to be present in a fixed order.
+     *
+     * <p>{@code indexOfDegreeMarker} used to be {@code indexOf('d')} and then, only if that
+     * missed, {@code indexOf('°')} — a fallback chain. On a string carrying two different
+     * markers that reports the wrong one, because {@code dmstor} scans strictly left to right
+     * and stops at whichever marker its digit loop reaches first. Adding {@code 'D'} to a chain
+     * would have made a two-marker latent bug into a three-marker one, so the chain was replaced
+     * rather than extended. Asserted on the scan directly, since the difference is an index and
+     * asserting it through a parsed value would only show it where the two readings happen to
+     * differ in outcome.
+     */
+    @Test
+    public void theDegreeMarkerScanTakesTheEarliestSpellingNotAFixedOrder() {
+        // One marker each: the baseline.
+        assertEquals(1, AngleFormat.indexOfDegreeMarker("1d2"));
+        assertEquals(1, AngleFormat.indexOfDegreeMarker("1D2"));
+        assertEquals(1, AngleFormat.indexOfDegreeMarker("1°2"));
+        assertEquals(-1, AngleFormat.indexOfDegreeMarker("123.12"));
+        assertEquals(-1, AngleFormat.indexOfDegreeMarker(""));
+
+        // All six orderings of a pair. Each must answer 1, the earlier position -- a chain in
+        // any fixed order gets three of these wrong.
+        assertEquals("d before D", 1, AngleFormat.indexOfDegreeMarker("1d2D3"));
+        assertEquals("D before d", 1, AngleFormat.indexOfDegreeMarker("1D2d3"));
+        assertEquals("d before the sign", 1, AngleFormat.indexOfDegreeMarker("1d2°3"));
+        assertEquals("the sign before d, which the old chain got wrong",
+                1, AngleFormat.indexOfDegreeMarker("1°2d3"));
+        assertEquals("D before the sign", 1, AngleFormat.indexOfDegreeMarker("1D2°3"));
+        assertEquals("the sign before D", 1, AngleFormat.indexOfDegreeMarker("1°2D3"));
+
+        // All three at once, in each of the three possible leading positions.
+        assertEquals(1, AngleFormat.indexOfDegreeMarker("1d2D3°4"));
+        assertEquals(1, AngleFormat.indexOfDegreeMarker("1D2°3d4"));
+        assertEquals(1, AngleFormat.indexOfDegreeMarker("1°2d3D4"));
+
+        // And the observable consequence, on the one two-marker shape whose two readings differ
+        // in outcome rather than only in message: "2°30D" splits at the sign, leaving "30D",
+        // which Java reads as 30.0 via the double suffix, so the angle is 2.5. A chain that
+        // preferred D would have split at index 4 and thrown on "2°30". Neither reading is
+        // upstream's -- dmstor's descending-order rule refuses the shape outright, since two
+        // degrees markers cannot be in strictly descending order -- and no shipped registry
+        // token or corpus row contains two markers, so nothing measurable turns on it. It is
+        // here as the tell that the rule is positional.
+        assertEquals(2.5, Angle.parse("2°30D"), 0.0);
+
+        // Non-vacuity for the whole family: out-of-order markers still fail. "30'2d" puts the
+        // minutes first, so the degrees field is "30'2" and neither parser can read it -- which
+        // is upstream's answer too, from the same descending-order rule.
+        assertTrue("the degrees field must be named: " + angleFailureMessage("30'2d"),
+                angleFailureMessage("30'2d").contains("30'2"));
+        assertEquals("both parsers agree on that failure",
+                angleOutcome("30'2d"), angleFormatOutcome("30'2d"));
     }
 
     /**

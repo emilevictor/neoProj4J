@@ -47,18 +47,34 @@
  *
  * <h2>What this deliberately is not</h2>
  *
- * <p>Not PROJ's 4D model. There is no {@code PJ_COORD} union, no
- * {@code push}/{@code pop}/{@code set} stack, the time ordinate is carried rather
- * than transformed, and {@code helmert} is not a user-facing operator — it exists
- * only as the hidden helper described above. {@code +geoc}, time-unit conversion,
+ * <p>Not PROJ's 4D model. There is no {@code PJ_COORD} union — a coordinate is a
+ * plain {@code double[4]} — and the time ordinate is carried rather than
+ * transformed. It is <em>read</em>, though: from 2.2.0
+ * {@link org.locationtech.proj4j.pipeline.HelmertOperator} uses it to evaluate a
+ * 14-parameter helmert at the observation epoch.
+ * Time-unit conversion ({@code +t_in}/{@code +t_out}),
  * {@code +proj=gridshift} and {@code +proj=defmodel} are <b>refused rather than
  * ignored</b>: each of them changes the answer, and a pipeline that quietly dropped
  * one would emit a plausible coordinate that is wrong by the size of the omitted
  * step.
  *
+ * <p>Three things this paragraph used to list as absent have since been built, and the
+ * prose had not caught up: a user-facing {@code helmert}
+ * ({@link org.locationtech.proj4j.pipeline.HelmertOperator}, which also brought
+ * {@code molobadekas}), the {@code push}/{@code pop}/{@code set} stack
+ * ({@link org.locationtech.proj4j.pipeline.CoordinateStack},
+ * {@link org.locationtech.proj4j.pipeline.PushPopOperator},
+ * {@link org.locationtech.proj4j.pipeline.SetOperator}), and {@code +geoc}, which is
+ * both a flag on a classic projection and, from 2.2.0, an operator of its own. They
+ * are named here rather than quietly deleted, because "we already decided against
+ * that" is the most expensive kind of stale note: it stops the next person from
+ * trying, instead of costing them one experiment.
+ *
  * <p>The shape has since been grown into, which is the evidence that it was the
- * right shape: {@code cart}, {@code hgridshift}, {@code deformation} and
- * {@code tinshift} were each added as a class implementing
+ * right shape: {@code cart}, {@code hgridshift}, {@code deformation},
+ * {@code tinshift}, and from 2.2.0 {@code vertoffset}, {@code topocentric},
+ * {@code molodensky}, {@code helmert} and {@code molobadekas}, were each added as a
+ * class implementing
  * {@link org.locationtech.proj4j.pipeline.PipelineOperator} over a
  * {@code double[4]}, with no change to that interface, to
  * {@link org.locationtech.proj4j.pipeline.Pipeline} or to

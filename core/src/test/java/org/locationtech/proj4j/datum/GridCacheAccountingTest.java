@@ -45,7 +45,8 @@ import static org.junit.Assert.fail;
  *
  * <p>{@code instance()} and {@code vertical()} were each constructed with
  * {@code configuredMaxBytes()} in full, so {@code -Dproj4j.grids.cacheBytes=64m} bought a 128 MiB
- * ceiling.
+ * ceiling. There is now a third singleton, {@code generic()}, and it shares the same
+ * {@code Budget} object rather than repeating the mistake.
  *
  * <h2>3. An entry larger than the whole budget was admitted and exempted from eviction</h2>
  *
@@ -160,23 +161,31 @@ public class GridCacheAccountingTest {
     // --- 2. one shared budget ------------------------------------------------------------------
 
     /**
-     * The two <em>singletons</em> — not two caches a test built over a budget it chose — must draw
-     * on one budget.
+     * The <em>singletons</em> — not caches a test built over a budget it chose — must draw on one
+     * budget. There are three of them as of 2.2.0: horizontal, vertical and generic.
      *
-     * <p>The obvious assertions here are vacuous and were written that way first: with two separate
+     * <p>The obvious assertions here are vacuous and were written that way first: with separate
      * budgets of equal size, {@code instance().maxBytes() == vertical().maxBytes()} still holds, and
      * so does {@code instance().sharedBytes() == vertical().sharedBytes()} while both are empty. A
      * mutation restoring {@code new GridCache<>(configuredMaxBytes())} on each line passed all of
      * them. What discriminates is loading a grid into <em>one</em> cache and requiring the
-     * <em>other</em> to see it against the shared total.
+     * <em>others</em> to see it against the shared total.
+     *
+     * <p>The three {@code clear()} calls are load-bearing rather than tidiness: this test asserts an
+     * absolute byte count, so anything another test left in <em>any</em> of the caches lands here.
+     * Adding {@code generic()} in 2.2.0 without adding its {@code clear()} failed exactly this
+     * assertion with 1648 bytes of somebody else's grid.
      */
     @Test
-    public void theHorizontalAndVerticalCachesShareOneBudget() throws IOException {
+    public void theHorizontalVerticalAndGenericCachesShareOneBudget() throws IOException {
         GridCache.instance().clear();
         GridCache.vertical().clear();
+        GridCache.generic().clear();
 
         assertEquals("both caches must report the same ceiling",
                 GridCache.instance().maxBytes(), GridCache.vertical().maxBytes());
+        assertEquals("and so must the generic one",
+                GridCache.instance().maxBytes(), GridCache.generic().maxBytes());
         assertEquals("nothing is cached yet", 0L, GridCache.vertical().sharedBytes());
 
         java.util.List<Grid> conus = Grid.fromNadGrids("conus");
@@ -189,14 +198,24 @@ public class GridCacheAccountingTest {
         assertEquals("the vertical cache holds nothing of its own", 0L,
                 GridCache.vertical().bytes());
         assertEquals("but it must see the horizontal grid against the SHARED budget -- this is the"
-                + " assertion that fails when the two caches each take the budget in full", loaded,
+                + " assertion that fails when the caches each take the budget in full", loaded,
                 GridCache.vertical().sharedBytes());
-        assertEquals("and both sides must report the same shared total",
+        assertEquals("and the generic cache must see it too", loaded,
+                GridCache.generic().sharedBytes());
+        assertEquals("and all sides must report the same shared total",
                 GridCache.instance().sharedBytes(), GridCache.vertical().sharedBytes());
         assertTrue(GridCache.instance().sharedBytes() <= GridCache.instance().maxBytes());
 
+        // The other direction: a generic grid must be visible to the horizontal cache.
+        GenericGridSet.open("subset_of_gr3df97a.tif");
+        long withGeneric = GridCache.generic().bytes();
+        assertTrue("the generic set must have a non-zero accounted size", withGeneric > 0);
+        assertEquals("the horizontal cache must see the generic grid too", loaded + withGeneric,
+                GridCache.instance().sharedBytes());
+
         GridCache.instance().clear();
-        assertEquals("clearing one cache must release its share of the shared budget", 0L,
+        GridCache.generic().clear();
+        assertEquals("clearing the caches must release their share of the shared budget", 0L,
                 GridCache.vertical().sharedBytes());
     }
 

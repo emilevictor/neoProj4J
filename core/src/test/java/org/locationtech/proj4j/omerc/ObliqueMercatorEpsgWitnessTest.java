@@ -23,12 +23,27 @@ import org.locationtech.proj4j.CrsTransformException;
 import org.locationtech.proj4j.ErrorCause;
 import org.locationtech.proj4j.ProjCoordinate;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.fail;
 
 /**
  * The nine {@code omerc} rows that {@code proj4-epsg.csv} recorded as {@code "failing"}, and the five
- * commented-out {@code ESRI:102631} rows from {@code PROJ4_SPCS_EPSG_nad83.csv}.
+ * {@code ESRI:102631} rows of {@code PROJ4_SPCS_EPSG_nad83.csv} that used to be commented out.
  *
  * <p>Both sets are held here as live assertions rather than as CSV status flags, because a
  * {@code "failing"} marker in a data file overstates the damage the moment it goes stale and nothing
@@ -50,9 +65,11 @@ import static org.junit.Assert.fail;
  * cleared the last four {@code merc} ones. The committed file now carries no {@code "failing"}
  * row at all &mdash; which is exactly why these nine live here as executed assertions instead.
  *
- * <h2>The five {@code ESRI:102631} rows still do not, and {@code omerc} is no longer why</h2>
+ * <h2>The five {@code ESRI:102631} rows: the dictionary was the defect, and it is fixed</h2>
  *
- * <p>See {@link #esri102631NeedsNoUoffInTheShippedEsriDictionary()}.
+ * <p>See {@link #esri102631MatchesProj981ThroughTheShippedDictionary()} for the fixed definition
+ * measured against PROJ, {@link #esri102631WithoutNoUoffIsWrongByTwiceUZero()} for the mechanism,
+ * and {@link #everyEsriOmercEntryDeclaresTheVariantProjGivesIt()} for the other sixteen.
  */
 public class ObliqueMercatorEpsgWitnessTest {
 
@@ -157,58 +174,222 @@ public class ObliqueMercatorEpsgWitnessTest {
     }
 
     /**
-     * The five commented-out {@code ESRI:102631} rows, four of them tagged
-     * <i>"Bug in Proj4J Obl Merc"</i>. <b>The bug is not in Proj4J's {@code omerc} any more — it is in
-     * the shipped {@code esri} dictionary.</b>
+     * <b>The dictionary-fidelity assertion: {@code ESRI:102631} resolved by name, against PROJ.</b>
      *
-     * <p>{@code epsg/src/main/resources/proj4/nad/esri:5541} defines
-     * {@code <102631>} without {@code +no_uoff}. PROJ 9.8.1's own definition
-     * ({@code projinfo ESRI:102631}) has it:
+     * <p>Everything else in this class builds its target CRS from a hand-written proj-string, which
+     * cannot notice a wrong data file. This one goes through
+     * {@code CRSFactory.createFromName("ESRI:102631")}, so it reads
+     * {@code epsg/src/main/resources/proj4/nad/esri:5541} as shipped and fails if that line changes.
+     *
+     * <p>The expected value is <b>PROJ 9.8.1's</b>, to twelve places:
      *
      * <pre>
-     * +proj=omerc +no_uoff +lat_0=57 +lonc=-133.666666666667 +alpha=-36.8698976458333
-     *   +gamma=-36.8698976458333 +k=0.9999 +x_0=5000000.00000001 +y_0=-5000000.00000001
-     *   +ellps=GRS80 +units=us-ft
+     * printf "55 -134\n" | cs2cs -f "%.9f" EPSG:4269 ESRI:102631
+     *   2616018.151567299	1156379.642216892 0.000000000
      * </pre>
      *
-     * <p>Measured three ways, on the definition <em>as shipped</em>:
-     * <ul>
-     * <li>Proj4J now agrees with {@code cs2cs} 9.8.1 <b>to the printed digit</b> —
-     *     16334242.901471 / -17134586.690995 for the first row — so the projection is right and the
-     *     definition is what disagrees with the CSV.</li>
-     * <li>The residual against the CSV's pinned values is a constant <b>13,718,224.7 ft easting and
-     *     18,290,966.4 ft northing</b> on all five rows, which is exactly {@code 2 * u_0} resolved
-     *     through the rotation — the signature of a missing {@code +no_uoff}.</li>
-     * <li>Adding {@code +no_uoff} to the definition and nothing else reproduces all five CSV rows to
-     *     <b>3 mm</b> against a 0.1 tolerance, which is what this test asserts.</li>
-     * </ul>
+     * <p>Not the CSV's {@code 2616018.154 / 1156379.643}. Those are the same point rounded to three
+     * decimals of a US survey foot -- about 0.8 mm -- and they differ from PROJ's answer by
+     * <b>2.4 mm easting and 0.8 mm northing</b>, against a CSV tolerance of 0.1 ft. Asserting the
+     * CSV's value would cap this test's resolution at that rounding; asserting PROJ's pins it to
+     * 1e-6 ft. Both are checked here so the 2.4 mm is visible and cannot later be mistaken for a
+     * regression.
      *
-     * <p>So the five rows are correct and the fix is one token in a data file. That file is not in
-     * this change's scope, and none of the seventeen {@code omerc} entries in the {@code esri}
-     * dictionary carries {@code +no_uoff} while twenty-two of the twenty-nine in the {@code epsg}
-     * dictionary do — so it wants a verified sweep rather than a single edit, and the CSV rows stay
-     * commented out until that happens. This test pins the diagnosis so the sweep can be checked.
+     * <p>Axis order is <b>not</b> assumed: {@code EPSG:4269} is authority latitude-first, which is
+     * why the {@code cs2cs} input above reads {@code 55 -134}. Feeding it lon-first makes 9.8.1
+     * answer {@code * * inf} with {@code omerc: Invalid latitude}, and {@code OGC:CRS84} fed
+     * lon-first reproduces the latitude-first {@code EPSG:4269} result exactly. proj4j's
+     * {@code ProjCoordinate} is always {@code (x = lon, y = lat)}, hence the argument order here.
      */
     @Test
-    public void esri102631NeedsNoUoffInTheShippedEsriDictionary() {
-        String asShipped = "+proj=omerc +lat_0=57 +lonc=-133.6666666666667 +alpha=-36.86989764583333"
+    public void esri102631MatchesProj981ThroughTheShippedDictionary() {
+        // From the dictionary, by code. The whole point of this test.
+        ProjCoordinate out = fromNad83("ESRI:102631", -134.0, 55.0);
+
+        // cs2cs 9.8.1. 1e-6 ft is 0.3 um; the agreement measured when this was pinned was 1.2e-7 ft.
+        assertEquals("ESRI:102631 easting vs PROJ 9.8.1", 2616018.151567299, out.x, 1.0e-6);
+        assertEquals("ESRI:102631 northing vs PROJ 9.8.1", 1156379.642216892, out.y, 1.0e-6);
+
+        // And the CSV's own rounded pins, at the CSV's own tolerance. Residual is 2.4 mm / 0.8 mm.
+        assertEquals("ESRI:102631 easting vs PROJ4_SPCS_EPSG_nad83.csv:2", 2616018.154, out.x, 0.1);
+        assertEquals("ESRI:102631 northing vs PROJ4_SPCS_EPSG_nad83.csv:2", 1156379.643, out.y, 0.1);
+    }
+
+    /**
+     * The mechanism behind {@link #esri102631MatchesProj981ThroughTheShippedDictionary()}, kept as
+     * an assertion because the size of the error is the evidence that it was {@code u_0} and not
+     * something else.
+     *
+     * <p>The five {@code ESRI:102631} rows of {@code PROJ4_SPCS_EPSG_nad83.csv} were commented out
+     * for years, four of them tagged <i>"Bug in Proj4J Obl Merc"</i>. They are live again as of this
+     * change, and both the comment characters and that tag are gone. <b>The bug was never in Proj4J's
+     * {@code omerc}</b> -- fed the definition as it used to ship, PROJ 9.8.1 returns proj4j's wrong
+     * answer bit for bit, which is what proves the kernel right and the data file wrong. What was
+     * missing was {@code +no_uoff}, so the projection ran EPSG method 9815 (Hotine variant B, with
+     * the {@code u_0} origin shift of {@code omerc.cpp:285-290} and the {@code u -= Q->u_0} of
+     * {@code :77}) where PROJ 9.8.1's own {@code ESRI:102631} declares method 9812, variant A.
+     *
+     * <p>The error is a <b>constant vector</b> on all five rows -- {@code dx = -13,718,224.749904}
+     * and {@code dy = +18,290,966.333212} US survey feet, magnitude <b>22,863,707.916512 ft =
+     * 6,968,872.110697 m</b> -- because a missing {@code u_0} is a translation and nothing else.
+     * That is the signature: a rotation or a scale error would vary from point to point.
+     * ({@code ESRI:24571} is the one entry in the same sweep whose vector is <em>not</em> constant,
+     * because its {@code +gamma} differs from its {@code +alpha}. See the sweep test.)
+     *
+     * <p>One pre-fix value is worth keeping: row 2 of the CSV returned exactly
+     * {@code 16404166.666666680}, which is {@code x_0 / to_meter} -- <b>the false easting itself</b>,
+     * the third of the shapes a failure must never take.
+     */
+    @Test
+    public void esri102631WithoutNoUoffIsWrongByTwiceUZero() {
+        // The 102631 line as it shipped before the fix: no +no_uoff, no +gamma.
+        String withoutNoUoff =
+                "+proj=omerc +lat_0=57 +lonc=-133.6666666666667 +alpha=-36.86989764583333"
                 + " +k=0.9999 +x_0=4999999.999999999 +y_0=-4999999.999999999 +ellps=GRS80"
                 + " +datum=NAD83 +to_meter=0.3048006096012192 +no_defs";
-        String corrected = asShipped + " +no_uoff";
 
-        // As shipped, Proj4J reproduces cs2cs 9.8.1 on the same string: 16334242.901471 -17134586.690995.
-        ProjCoordinate shipped = fromNad83(asShipped, -134.0, 55.0);
-        assertEquals(16334242.901471, shipped.x, 1.0e-5);
-        assertEquals(-17134586.690995, shipped.y, 1.0e-5);
+        // PROJ 9.8.1 given this same string answers 16334242.901471 -17134586.690995, and so do we.
+        ProjCoordinate wrong = fromNad83(withoutNoUoff, -134.0, 55.0);
+        assertEquals(16334242.901471, wrong.x, 1.0e-5);
+        assertEquals(-17134586.690995, wrong.y, 1.0e-5);
 
-        // With +no_uoff, the five CSV rows. Expected values from PROJ4_SPCS_EPSG_nad83.csv:2-6.
+        // The constant translation, measured against the fixed dictionary at the same point.
+        ProjCoordinate right = fromNad83("ESRI:102631", -134.0, 55.0);
+        assertEquals("u_0 easting offset", -13718224.749904, right.x - wrong.x, 1.0e-4);
+        assertEquals("u_0 northing offset", 18290966.333212, right.y - wrong.y, 1.0e-4);
+
+        // All five CSV rows, from the dictionary, at the CSV's own tolerance.
         double tol = 0.1;
-        assertRow(corrected, -134.0, 55.0, 2616018.154, 1156379.643, tol);
-        assertRow(corrected, -133.66666666666666, 57.0, 2685941.919, 1886799.668, tol);
-        assertRow(corrected, -131.59595333333334, 54.65073722222222, 3124531.426, 1035343.511, tol);
-        assertRow(corrected, -129.54166666666666, 54.541666666666664, 3561448.345, 1015025.876, tol);
-        assertRow(corrected, -141.5, 60.5, 1276328.587, 3248159.207, tol);
+        assertRow("ESRI:102631", -134.0, 55.0, 2616018.154, 1156379.643, tol);
+        assertRow("ESRI:102631", -133.66666666666666, 57.0, 2685941.919, 1886799.668, tol);
+        assertRow("ESRI:102631", -131.59595333333334, 54.65073722222222,
+                3124531.426, 1035343.511, tol);
+        assertRow("ESRI:102631", -129.54166666666666, 54.541666666666664,
+                3561448.345, 1015025.876, tol);
+        assertRow("ESRI:102631", -141.5, 60.5, 1276328.587, 3248159.207, tol);
     }
+
+    /**
+     * All seventeen {@code omerc} entries in the shipped {@code esri} dictionary, each one required
+     * to carry {@code +no_uoff} if and only if PROJ 9.8.1 gives that code EPSG method <b>9812</b>,
+     * Hotine variant A.
+     *
+     * <p>This exists because the fix was <em>not</em> one token in one line. Establishing the scope
+     * meant running {@code projinfo -o WKT2:2019} on each of the seventeen and reading the
+     * {@code METHOD} name, and the split is eight to nine:
+     *
+     * <table border="1">
+     * <caption>The seventeen, by EPSG method</caption>
+     * <tr><th>method</th><th>{@code +no_uoff}</th><th>codes</th></tr>
+     * <tr><td>9812, variant A</td><td>required</td>
+     *     <td>24571, 26731, 26931, 102120, 102121, 102122, 102123, 102631</td></tr>
+     * <tr><td>9815, variant B</td><td>forbidden</td>
+     *     <td>2056, 2057, 21780, 21781, 23700, 29700, 29871, 29872, 29873</td></tr>
+     * </table>
+     *
+     * <p><b>A wrong {@code +no_uoff} is as bad as a missing one</b>, in the same direction and the
+     * same order of magnitude, so this test asserts the token's <em>absence</em> on the nine as
+     * firmly as its presence on the eight. A blanket sweep over "every {@code esri} {@code omerc}"
+     * would have broken all nine.
+     *
+     * <p>Corroborated independently: eight of the seventeen codes also exist as {@code omerc} in the
+     * {@code epsg} dictionary -- 2057, 24571, 26731, 26931, 29700, 29871, 29872, 29873 -- and after
+     * the fix the two dictionaries agree on {@code +no_uoff} for all eight. Before it they disagreed
+     * on three (24571, 26731, 26931), which is a second, cheaper way to have found this. That
+     * agreement is asserted here too, so neither file can drift from the other.
+     */
+    @Test
+    public void everyEsriOmercEntryDeclaresTheVariantProjGivesIt() {
+        Set<String> variantA = new TreeSet<String>(Arrays.asList(
+                "24571", "26731", "26931", "102120", "102121", "102122", "102123", "102631"));
+        Set<String> variantB = new TreeSet<String>(Arrays.asList(
+                "2056", "2057", "21780", "21781", "23700", "29700", "29871", "29872", "29873"));
+
+        Map<String, String> esri = omercEntriesOf("esri");
+        Set<String> expected = new TreeSet<String>(variantA);
+        expected.addAll(variantB);
+        assertEquals("the omerc population of proj4/nad/esri", expected,
+                new TreeSet<String>(esri.keySet()));
+
+        for (Map.Entry<String, String> entry : esri.entrySet()) {
+            boolean wanted = variantA.contains(entry.getKey());
+            assertEquals("+no_uoff on esri:" + entry.getKey() + " -- "
+                            + (wanted ? "EPSG method 9812, variant A" : "EPSG method 9815, variant B")
+                            + " -- in: " + entry.getValue(),
+                    wanted, declaresNoUoff(entry.getValue()));
+        }
+
+        // The independent corroboration: the two dictionaries must agree wherever they overlap.
+        Map<String, String> epsg = omercEntriesOf("epsg");
+        int overlap = 0;
+        for (Map.Entry<String, String> entry : esri.entrySet()) {
+            String other = epsg.get(entry.getKey());
+            if (other == null) {
+                continue;
+            }
+            overlap++;
+            assertEquals("+no_uoff disagrees between proj4/nad/esri and proj4/nad/epsg on code "
+                            + entry.getKey(),
+                    declaresNoUoff(other), declaresNoUoff(entry.getValue()));
+        }
+        assertEquals("omerc codes defined in both dictionaries", 8, overlap);
+    }
+
+    /**
+     * Upstream ORs the two spellings ({@code omerc.cpp:139-143}), so a definition that used
+     * {@code +no_off} would be variant A just as much as one that used {@code +no_uoff}, and a test
+     * that looked only for the longer spelling could be defeated by the shorter one. Word-boundary
+     * matched so that {@code +no_uoff} does not also count as {@code +no_off}.
+     */
+    private static boolean declaresNoUoff(String definition) {
+        return NO_UOFF.matcher(definition).find();
+    }
+
+    private static final Pattern NO_UOFF = Pattern.compile("\\+no_(u)?off(?![\\w])");
+
+    /**
+     * The {@code omerc} entries of a shipped dictionary, read as text from the classpath.
+     *
+     * <p>Deliberately raw rather than through {@code CRSFactory}: the question is what the data file
+     * says, and a parsed {@code Projection} has already collapsed {@code +no_uoff} into a boolean
+     * that {@code +gamma} and {@code +alpha} can mask. {@code #} starts a comment for
+     * {@code Proj4FileReader}'s {@code StreamTokenizer} ({@code Proj4FileReader:168}), so comments
+     * are stripped here for the same reason -- a {@code +no_uoff} written inside one would be
+     * invisible to the library and must be invisible here.
+     */
+    private static Map<String, String> omercEntriesOf(String dictionary) {
+        Map<String, String> out = new LinkedHashMap<String, String>();
+        InputStream in = ObliqueMercatorEpsgWitnessTest.class.getClassLoader()
+                .getResourceAsStream("proj4/nad/" + dictionary);
+        assertNotNull("proj4/nad/" + dictionary + " is not on the test classpath", in);
+        try {
+            BufferedReader reader =
+                    new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+            try {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    int hash = line.indexOf('#');
+                    if (hash >= 0) {
+                        line = line.substring(0, hash);
+                    }
+                    Matcher m = ENTRY.matcher(line);
+                    if (m.find() && m.group(2).contains("+proj=omerc")) {
+                        out.put(m.group(1), m.group(2).trim());
+                    }
+                }
+            } finally {
+                reader.close();
+            }
+        } catch (IOException e) {
+            throw new AssertionError("reading proj4/nad/" + dictionary + ": " + e);
+        }
+        assertFalse("no omerc entries found in proj4/nad/" + dictionary
+                + " -- the parse, not the file, is the likely fault", out.isEmpty());
+        return out;
+    }
+
+    /** {@code <code> +proj=... <>}, one entry to a line in all five shipped dictionaries. */
+    private static final Pattern ENTRY = Pattern.compile("<(\\d+)>([^<]*)");
 
     private static void assertRow(String def, double lon, double lat,
                                   double x, double y, double tolerance) {

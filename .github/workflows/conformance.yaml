@@ -11,11 +11,21 @@ name: Conformance
 # outside CI on Temurin 21, against a scratch local Maven repository, with three controls:
 #
 #   1. unmodified              -> exit 0, genuine passes with diff.regressed 0. The current
-#                                 reading is 7,449 / 7,902, measured 2026-08-14 on the 2.1.0
-#                                 release branch with `./docker/run.sh conformance`; master at
-#                                 2fc5989 reads 7,448 / 7,902, and it was 7,441 / 7,900 on
-#                                 2026-08-02 and 7,378 / 7,895 on 2026-08-01, so quote the
-#                                 pair, never one number of it.
+#                                 reading is 7,819 / 7,911, measured 2026-08-16 with
+#                                 `./docker/run.sh conformance` on the whole 2.2.0 tree; the
+#                                 same tree read 7,774 / 7,906 on 2026-08-15 and
+#                                 7,584 / 7,905 partway through it, with only
+#                                 +proj=airocean and +proj=isea registered, and 7,449 / 7,902
+#                                 before those two. master at 2fc5989 reads 7,448 / 7,902, and
+#                                 it was 7,441 / 7,900 on 2026-08-02 and 7,378 / 7,895 on
+#                                 2026-08-01, so quote the pair, never one number of it. The
+#                                 denominator is not a constant: four `expect failure` rows were
+#                                 vacuous only because the operator they name did not exist, and
+#                                 implementing those operators moved all four into it - three
+#                                 for airocean and isea, one for the pipeline operators. Five
+#                                 more have joined it the same way since, which is what took
+#                                 the denominator from 7,906 to 7,911, leaving 12 vacuous rows
+#                                 out of the 7,923 evaluated.
 #   2. one manifest row removed -> exit 1, naming the assertion key as REGRESSED
 #   3. baseline file absent    -> exit 1, naming the ABSENT BASELINE as the cause, not a
 #                                 regression count

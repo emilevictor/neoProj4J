@@ -81,6 +81,52 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
     protected double projectionLatitude = 0.0;
 
     /**
+     * Whether {@code +lat_0} was given, as opposed to holding its default of zero. Zero is a real
+     * latitude of origin, so a test on {@link #projectionLatitude} cannot tell the two apart, and
+     * upstream tests presence: {@code lcc.cpp:92} is
+     * {@code if (!pj_param(P->ctx, P->params, "tlat_0").i) P->phi0 = Q->phi1}, where the leading
+     * {@code t} sigil asks whether the key is in the definition and {@code .i} is a 0/1 flag rather
+     * than the value.
+     *
+     * <p>Only the parser can see this, as {@code params.get("lat_0") == null}, so the flag is set
+     * inside {@link #setProjectionLatitude} and {@link #setProjectionLatitudeDegrees} and cleared by
+     * {@link #clearProjectionLatitude()}. {@link LambertConformalConicProjection#initialize()} is the
+     * only reader.
+     *
+     * <p><b>Sites that write {@link #projectionLatitude} directly and so correctly leave this
+     * false</b>, because each is a projection's own absent-value default rather than a user
+     * parameter: {@code AlaskaModifiedStereographicProjection:63} (64&deg;),
+     * {@code StereographicAzimuthalProjection:96} (&plusmn;90&deg;),
+     * {@code LeeOblatedStereographicProjection:46} (-10&deg;),
+     * {@code TransverseMercatorProjection:151,354}, {@code ObliqueMercatorProjection:136},
+     * {@code SpilhausProjection:123}, {@code ModifiedStereographic48Projection:50} (39&deg;),
+     * {@code KrovakProjection:259}, {@code UniversalPolarStereographicProjection:143} (&plusmn;90&deg;),
+     * {@code EquidistantConicProjection:106}, {@code ModifiedStereographic50Projection:78} (45&deg;),
+     * {@code CassiniProjection:114}, {@code MillerOblatedStereographicProjection:47} (18&deg;),
+     * {@code ExtendedTransverseMercatorProjection:119,378} and
+     * {@code NewZealandMapGridProjection:179} (-41&deg;). Three more carry a caller-supplied
+     * {@code lat_0} from a public constructor -- {@code TransverseMercatorProjection:164},
+     * {@code ObliqueMercatorProjection:157} and
+     * {@code ExtendedTransverseMercatorProjection:129,165} -- and none of those three classes reads
+     * the flag, so nothing they compute changes.
+     *
+     * <p>Defaulting {@link #projectionLatitude} to NaN instead was rejected for the same reason it
+     * was rejected for {@code +lat_ts}: the field is read by value in dozens of projections, several
+     * of which treat 0.0 as a meaningful latitude of origin, and a NaN default would turn each of
+     * those into a NaN coordinate.
+     *
+     * <p>Across versions: {@code serialVersionUID} is unchanged and an absent boolean reads as
+     * false, so an older stream deserializes cleanly, but a stream of {@code +proj=lcc +lat_1=45
+     * +lat_2=0 +lat_0=0} carries the old build's already-mutated {@code projectionLatitude} and
+     * {@code n}/{@code c}/{@code rho0}, which are not transient, so it keeps the old answer. Calling
+     * {@link #initialize()} by hand does not repair it, because the old build had already
+     * overwritten the parallels in place.
+     *
+     * @since 2.1.0
+     */
+    protected boolean projectionLatitudeSpecified = false;
+
+    /**
      * The longitude of the centre of projection, in radians
      */
     protected double projectionLongitude = 0.0;
@@ -94,6 +140,30 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
      * Standard parallel 2 (for projections which use it)
      */
     protected double projectionLatitude2 = 0.0;
+
+    /**
+     * Whether {@code +lat_2} was given, as opposed to holding its default of zero. Zero is a real
+     * standard parallel -- PROJ answers {@code +proj=lcc +lat_1=45 +lat_2=0} with a secant cone
+     * through 45&deg; and the equator -- so a test on {@link #projectionLatitude2} cannot tell it
+     * apart from no {@code +lat_2} at all. Upstream tests presence: {@code lcc.cpp:88} is
+     * {@code if (pj_param(P->ctx, P->params, "tlat_2").i)}.
+     *
+     * <p>Set inside {@link #setProjectionLatitude2} and {@link #setProjectionLatitude2Degrees} and
+     * cleared by {@link #clearProjectionLatitude2()}.
+     * {@link LambertConformalConicProjection#initialize()} is the only reader.
+     *
+     * <p><b>Sites that write {@link #projectionLatitude2} directly and so correctly leave this
+     * false</b>, each a projection's own default: {@code AlbersProjection:57} (29.5&deg;),
+     * {@code EquidistantConicProjection:108} (20&deg;), {@code LambertEqualAreaConicProjection:109}
+     * and {@code LambertConformalConicProjection:74}. Only the last is on a class that reads the
+     * flag, and there it is the no-argument constructor seeding the same 0.0 the field already
+     * holds, which is exactly "not given".
+     * {@code LambertConformalConicProjection}'s seven-argument State Plane constructor does supply
+     * both {@code lat_2} and {@code lat_0}, and it now goes through the setters so the flags say so.
+     *
+     * @since 2.1.0
+     */
+    protected boolean projectionLatitude2Specified = false;
 
     /**
      * The projection alpha value
@@ -232,6 +302,25 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
      * the field existed. See {@link #setOver(boolean)} for what reads it and what does not.
      */
     private boolean over = false;
+
+    /**
+     * PROJ's {@code P->is_long_wrap_set}, the {@code +lon_wrap} presence flag
+     * ({@code init.cpp:612}).
+     * <p>
+     * A separate flag rather than a sentinel in {@link #longitudeWrapCenter}, because
+     * {@code +lon_wrap=0} is a perfectly good request — it re-centres the output range on
+     * Greenwich, {@code (-180, 180]} — and is not the same thing as no {@code +lon_wrap} at
+     * all. Upstream keeps the two apart the same way.
+     */
+    private boolean longWrapSet = false;
+
+    /**
+     * PROJ's {@code P->long_wrap_center}, in <b>radians</b> ({@code init.cpp:613}).
+     * <p>
+     * Radians because upstream reads the parameter with {@code pj_param}'s {@code r} sigil,
+     * so {@code +lon_wrap=180} is &pi; here. See {@link #setLongitudeWrapCenter(double)}.
+     */
+    private double longitudeWrapCenter = 0.0;
 
     /**
      * The name of this projection
@@ -545,6 +634,47 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
                             + "totalScale/false easting to it");
         }
         if (unit != null && unit.equals(Units.DEGREES)) {
+            /*
+             * +lon_wrap, and this is the ONLY place it belongs. Upstream applies it in
+             * fwd_finalize's `case PJ_IO_UNITS_RADIANS` (fwd.cpp:162-167) - i.e. on the
+             * angular-output arm, after project(), still in radians, before anything scales
+             * the result. This arm is that case; the metres arm below is
+             * PJ_IO_UNITS_PROJECTED, which has no lon_wrap line. Putting it after the RTD
+             * multiply would wrap degrees with a radian centre and be wrong by 57x.
+             *
+             *     lam = center + adjlon(lam - center)
+             *
+             * verbatim, including the HUGE_VAL guard, which is `dst.x` being non-finite
+             * here - and cannot fire, because hasValidXandYOrdinates() above already threw.
+             * ProjectionMath.adjlon is the verbatim port of upstream adjlon, 1e-12
+             * overshoot window and NaN transparency included; there is deliberately not a
+             * second copy of that arithmetic.
+             *
+             * NOT guarded on `over`. +over suppresses fwd_prepare's input-side adjlon and
+             * inv_finalize's, and fwd_finalize's wrap is outside both guards, so
+             * `+over +lon_wrap=180` still wraps. Nor is it guarded on isPipelineStep():
+             * upstream reaches this line for any PJ whose forward output units are radians,
+             * and a bare +proj=longlat +lon_wrap=180 is exactly that. Measured on 9.8.1 via
+             * `projinfo -s "+proj=longlat +datum=WGS84 +type=crs" -t "... +lon_wrap=180
+             * +type=crs"`, which emits a three-step pipeline whose middle step carries
+             * +lon_wrap=180 and takes -1 to 359 - so this is a user-facing path and not only
+             * a corpus row.
+             *
+             * ONE DIVERGENCE IN ORDER THAT PROVABLY DOES NOT MATTER, recorded so nobody
+             * re-derives it. PROJ's fwd_prepare adjlons the input whenever !over;
+             * projectRadians above does so only `if (!over && isPipelineStep())`. The wrap
+             * composition is mod 2*pi and adjlon is idempotent, so center + adjlon(x -
+             * center) is the same longitude whether or not x was reduced first.
+             *
+             * Measured, 9.8.1, +proj=longlat +datum=WGS84 +lon_wrap=180, latitude 10:
+             * -1 -> 359, -181 -> 179, 181 -> 181, 0 -> 0, 180 -> 180, -180 -> 180,
+             * 359 -> 359, 361 -> 1. Note -180 and +180 both answer 180, and 181 is left
+             * alone because it is already inside (0, 360].
+             */
+            if (longWrapSet) {
+                dst.x = longitudeWrapCenter
+                        + ProjectionMath.adjlon(dst.x - longitudeWrapCenter);
+            }
             // convert radians to DD
             dst.x *= RTD;
             dst.y *= RTD;
@@ -1202,9 +1332,11 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
 
     /**
      * Set the projection latitude in radians.
+     * Also records that the parameter was given, see {@link #projectionLatitudeSpecified}.
      */
     public void setProjectionLatitude( double projectionLatitude ) {
         this.projectionLatitude = projectionLatitude;
+        this.projectionLatitudeSpecified = true;
     }
 
     public double getProjectionLatitude() {
@@ -1213,13 +1345,30 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
 
     /**
      * Set the projection latitude in degrees.
+     * Also records that the parameter was given, see {@link #projectionLatitudeSpecified}.
      */
     public void setProjectionLatitudeDegrees( double projectionLatitude ) {
         this.projectionLatitude = DTR*projectionLatitude;
+        this.projectionLatitudeSpecified = true;
     }
 
     public double getProjectionLatitudeDegrees() {
         return projectionLatitude*RTD;
+    }
+
+    /**
+     * Puts the latitude of origin back to a state where it counts as never having been given.
+     * This is what a caller wants when it is resetting parameters to their defaults, because
+     * {@link #setProjectionLatitude} cannot express it: passing zero to that setter records
+     * {@code +lat_0=0}, and on a {@code +proj=lcc} that is a latitude of origin at the equator
+     * rather than an instruction to fall back to {@code +lat_1}.
+     *
+     * @see #projectionLatitudeSpecified
+     * @since 2.1.0
+     */
+    public void clearProjectionLatitude() {
+        this.projectionLatitude = 0.0;
+        this.projectionLatitudeSpecified = false;
     }
 
     /**
@@ -1309,9 +1458,11 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
 
     /**
      * Set the projection latitude in radians.
+     * Also records that the parameter was given, see {@link #projectionLatitude2Specified}.
      */
     public void setProjectionLatitude2( double projectionLatitude2 ) {
         this.projectionLatitude2 = projectionLatitude2;
+        this.projectionLatitude2Specified = true;
     }
 
     public double getProjectionLatitude2() {
@@ -1320,13 +1471,30 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
 
     /**
      * Set the projection latitude in degrees.
+     * Also records that the parameter was given, see {@link #projectionLatitude2Specified}.
      */
     public void setProjectionLatitude2Degrees( double projectionLatitude2 ) {
         this.projectionLatitude2 = DTR*projectionLatitude2;
+        this.projectionLatitude2Specified = true;
     }
 
     public double getProjectionLatitude2Degrees() {
         return projectionLatitude2*RTD;
+    }
+
+    /**
+     * Puts the second standard parallel back to a state where it counts as never having been given.
+     * This is what a caller wants when it is resetting parameters to their defaults, because
+     * {@link #setProjectionLatitude2} cannot express it: passing zero to that setter records
+     * {@code +lat_2=0}, which on a {@code +proj=lcc} is a secant cone through the equator rather
+     * than an instruction to fall back to {@code +lat_1}.
+     *
+     * @see #projectionLatitude2Specified
+     * @since 2.1.0
+     */
+    public void clearProjectionLatitude2() {
+        this.projectionLatitude2 = 0.0;
+        this.projectionLatitude2Specified = false;
     }
 
     /**
@@ -1561,6 +1729,58 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
         return over;
     }
 
+    /**
+     * PROJ's {@code +lon_wrap}: re-centre the forward output's longitude range on
+     * {@code center} ({@code init.cpp:611-623}, applied at {@code fwd.cpp:162-167}).
+     * <p>
+     * <b>Radians.</b> The parameter is read upstream with {@code pj_param}'s {@code r}
+     * sigil, so the proj-string {@code +lon_wrap=180} arrives here as &pi;.
+     * {@code Proj4Parser} does that conversion and also enforces upstream's
+     * {@code !(fabs(center) < 10 * M_TWOPI)} guard, which is a bound in <em>radians</em>
+     * (&asymp;3600&deg;) and not in degrees; this setter does not re-check it, so a
+     * programmatic caller may set any finite centre.
+     * <p>
+     * <b>Forward only, and only on the angular-output arm.</b> Upstream applies the wrap
+     * in {@code fwd_finalize}'s {@code case PJ_IO_UNITS_RADIANS} and nowhere else:
+     * {@code inv_finalize} has no {@code lon_wrap}, and a projected forward output is not
+     * a longitude to wrap. So {@link #projectRadians} applies it on the
+     * {@code unit == Units.DEGREES} arm and {@code inverseProjectRadians} does not. An
+     * inverse-longlat and an inverse-merc therefore leave the longitude unwrapped, which
+     * is upstream's asymmetry rather than a gap here.
+     * <p>
+     * <b>Independent of {@link #setOver(boolean)}.</b> {@code +over} suppresses
+     * {@code adjlon} on the <em>input</em> side of {@code fwd_prepare} and in
+     * {@code inv_finalize}; it does not guard {@code fwd_finalize}'s wrap, so
+     * {@code +over +lon_wrap=180} still wraps.
+     *
+     * @param center the centre of the output longitude range, radians
+     */
+    public void setLongitudeWrapCenter(double center) {
+        this.longitudeWrapCenter = center;
+        this.longWrapSet = true;
+    }
+
+    /**
+     * Whether {@code +lon_wrap} was given.
+     *
+     * @return true when {@link #setLongitudeWrapCenter(double)} has been called
+     * @see #setLongitudeWrapCenter(double)
+     */
+    public boolean isLongitudeWrapSet() {
+        return longWrapSet;
+    }
+
+    /**
+     * The {@code +lon_wrap} centre in force.
+     *
+     * @return the centre of the output longitude range in <b>radians</b>, or {@code 0} when
+     *         {@link #isLongitudeWrapSet()} is false
+     * @see #setLongitudeWrapCenter(double)
+     */
+    public double getLongitudeWrapCenter() {
+        return longitudeWrapCenter;
+    }
+
     public void setEllipsoid( Ellipsoid ellipsoid ) {
         this.ellipsoid = ellipsoid;
         a = ellipsoid.equatorRadius;
@@ -1793,9 +2013,20 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
                 // project 10E 20N to 0.15127658789908757, 0.3921633954323098.
                 trueScaleLatitudeSpecified == p.trueScaleLatitudeSpecified &&
                 projectionLatitude == p.projectionLatitude &&
+                // Whether +lat_0 and +lat_2 were given, for the same reason as +lat_ts above:
+                // LambertConformalConicProjection.initialize() reads presence rather than value,
+                // so "+proj=lcc +lat_1=45 +lat_2=0" is a secant cone through 45 degrees and the
+                // equator while "+proj=lcc +lat_1=45" is tangent at 45 with its latitude of origin
+                // moved to 45. Both leave projectionLatitude2 holding 0.0 before initialize()
+                // runs, so without these two lines the two definitions compare EQUAL and one
+                // could be served from the transform cache for the other. Measured on GRS80 at
+                // 10E 40N, PROJ 9.8.1 gives (825297.566331256530, 4211552.547939138487) for the
+                // first and (854925.007478637854, -503282.608577708714) for the second.
+                projectionLatitudeSpecified == p.projectionLatitudeSpecified &&
                 projectionLongitude == p.projectionLongitude &&
                 projectionLatitude1 == p.projectionLatitude1 &&
                 projectionLatitude2 == p.projectionLatitude2 &&
+                projectionLatitude2Specified == p.projectionLatitude2Specified &&
                 // Using Double.compare because alpha and lonc default to NaN and two
                 // projections that both left them unset should still compare equal
                 Double.compare(alpha, p.alpha) == 0 &&
@@ -1838,9 +2069,11 @@ public abstract class Projection implements Cloneable, java.io.Serializable {
         h = 31 * h + hash(trueScaleLatitude);
         h = 31 * h + (trueScaleLatitudeSpecified ? 1231 : 1237);
         h = 31 * h + hash(projectionLatitude);
+        h = 31 * h + (projectionLatitudeSpecified ? 1231 : 1237);
         h = 31 * h + hash(projectionLongitude);
         h = 31 * h + hash(projectionLatitude1);
         h = 31 * h + hash(projectionLatitude2);
+        h = 31 * h + (projectionLatitude2Specified ? 1231 : 1237);
         h = 31 * h + hash(alpha);
         h = 31 * h + hash(lonc);
         h = 31 * h + hash(minLatitude);

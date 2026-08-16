@@ -108,14 +108,29 @@ import org.locationtech.proj4j.util.ProjectionMath;
  * of this class, and it is the pipeline engine's job to retire it by taking over
  * {@code +proj=geocent} — which it already does.
  *
- * <h2>Known divergences from 9.8.1, left in place on purpose</h2>
+ * <h2>How the linear-unit and offset parameters are handled</h2>
  *
  * <ul>
- * <li><b>{@code +to_meter} / {@code +units} are ignored.</b> {@code fwd_finalize}
- *     ({@code fwd.cpp:127-137}) multiplies all three cartesian ordinates by {@code fr_meter} and
- *     {@code inv_prepare} ({@code inv.cpp:64-70}) by {@code to_meter}. Every {@code geocent} def
- *     in the five registry dictionaries is {@code +units=m}, so honouring it would move no
- *     observable row; it is recorded rather than added silently.</li>
+ * <li><b>{@code +to_meter} / {@code +units} are honoured, on all three ordinates.</b>
+ *     {@code fwd_finalize}'s {@code PJ_IO_UNITS_CARTESIAN} branch
+ *     ({@code 9.8.1:src/fwd.cpp:133-136}) multiplies {@code x}, {@code y} <em>and</em> {@code z} by
+ *     {@code P->fr_meter} — Proj4J's {@link #fromMetres} — and {@code inv_prepare}
+ *     ({@code inv.cpp:67-69}) does the mirror with {@code P->to_meter}. Neither is conditional
+ *     upstream, and neither is optional here.
+ *     <p>This used to be recorded as a deliberate divergence, on the argument that all 181
+ *     {@code +proj=geocent} definitions across the five registry dictionaries are {@code +units=m}
+ *     so honouring it "would move no observable row". The premise is true and the conclusion was
+ *     false: {@code 4D-API_cs2cs-style.gie:488} is
+ *     {@code +proj=geocent +a=1000 +b=1000 +to_meter=1000}, whose expected answer for
+ *     {@code (90, 0, 0)} is {@code (0, 1, 0)} and which this class answered {@code (0, 1000, 0)} —
+ *     999 m out, and out by a factor rather than an offset. Worse, the {@code roundtrip 1} on the
+ *     same block <em>passed</em>, because both directions dropped the scale symmetrically and so
+ *     closed on a wrong intermediate. A shipped dictionary being unaffected is an argument about
+ *     the corpus of definitions, never about the corpus of inputs.
+ *     <p>{@code pipeline.CartOperator} and {@code pipeline.Cs2csOperator}'s {@code GEOCENT} kernel
+ *     already did this, which is why the sibling assertion on {@code +proj=cart} at
+ *     {@code 4D-API_cs2cs-style.gie:493} passed throughout: {@code cart} is not in
+ *     {@code Registry}, so it routes to the pipeline engine and never reached this class.</li>
  * <li><b>{@code +x_0} / {@code +y_0} are ignored, and that is correct.</b>
  *     {@code geocent.cpp:53-54} forces {@code P->x0 = P->y0 = 0}, and {@code fwd_finalize}'s
  *     {@code PJ_IO_UNITS_CARTESIAN} branch never adds them.</li>
@@ -234,9 +249,30 @@ public class GeocentProjection extends Projection {
 
         // Read src, write dst -- and write all three before converting, so that the conversion
         // reads the input whether or not the caller aliased the two arguments.
-        dst.x = x;
-        dst.y = y;
-        dst.z = z;
+        //
+        // inv_prepare's PJ_IO_UNITS_CARTESIAN branch (9.8.1:src/inv.cpp:67-69) de-scales all three
+        // ordinates by P->to_meter BEFORE the cartesian inverse runs, and adds no false easting.
+        // Proj4J stores only the reciprocal (fromMetres == P->fr_meter == 1/to_meter, set by
+        // Proj4Parser:344,349), so to_meter is recovered as 1.0/fromMetres. That is a reciprocal of
+        // a reciprocal and so is not guaranteed to reproduce the parsed +to_meter to the last bit;
+        // recording the parsed value instead would mean a new field on Projection, and the
+        // multiply-by-reciprocal is what this class's base already does for totalScaleReciprocal.
+        //
+        // Guarded on != 1.0 so that the 181 shipped +units=m definitions run exactly the
+        // instructions they ran before -- not because 1.0 would change the value (multiplying by
+        // exactly 1.0 is bit-identity, unlike the `x + 0.0` guarded further down, which is not the
+        // identity on -0.0), but because it keeps the division off the common path and because
+        // pipeline.CartOperator and pipeline.Cs2csOperator guard the same way. All three now agree.
+        if (fromMetres != 1.0) {
+            final double toMeter = 1.0 / fromMetres;
+            dst.x = x * toMeter;
+            dst.y = y * toMeter;
+            dst.z = z * toMeter;
+        } else {
+            dst.x = x;
+            dst.y = y;
+            dst.z = z;
+        }
         converter().convertGeocentricToGeodetic(dst);
         checkFinite(dst, "inverse", x, y, z);
 
@@ -281,6 +317,15 @@ public class GeocentProjection extends Projection {
         dst.y = phi;
         dst.z = h;
         converter().convertGeodeticToGeocentric(dst);
+        // fwd_finalize's PJ_IO_UNITS_CARTESIAN branch (9.8.1:src/fwd.cpp:133-136): all three
+        // ordinates, no false easting, no separate vertical unit. See inverseProjectRadians for why
+        // the guard is on != 1.0 and why this is the mirror of that method's 1.0/fromMetres.
+        if (fromMetres != 1.0) {
+            dst.x *= fromMetres;
+            dst.y *= fromMetres;
+            dst.z *= fromMetres;
+        }
+        // After the scale, so the postcondition covers the value actually returned.
         checkFinite(dst, "forward", lam, phi, h);
         return dst;
     }

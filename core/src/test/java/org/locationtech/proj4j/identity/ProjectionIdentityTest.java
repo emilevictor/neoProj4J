@@ -303,6 +303,58 @@ public class ProjectionIdentityTest {
                 proj("+proj=stere +lat_0=90 +lat_ts=70 +lon_0=0 +ellps=WGS84 +units=m +no_defs"));
     }
 
+    /**
+     * The same reasoning as {@link #whetherLatTsWasGivenIsPartOfEquality()}, for {@code +lat_2} and
+     * {@code +lat_0} on {@code lcc}.
+     *
+     * <p>{@code lcc.cpp:88-95} tests whether the tokens were supplied, so
+     * {@code +lat_1=45 +lat_2=0} and {@code +lat_1=45} are different projections: PROJ 9.8.1 at
+     * 10E 40N on GRS80 answers {@code 825297.566331256530 4211552.547939138487} for the first and
+     * {@code 854925.007478637854 -503282.608577708714} for the second. Those two already differ in
+     * every derived field, so they were already unequal; what the flags add is that the difference
+     * is now visible <em>before</em> {@code initialize()} runs, and that it survives the case where
+     * the derived fields agree.
+     *
+     * <p>{@code Projection} is used as part of a transform-cache key, so the flags belong in
+     * {@code equals} and {@code hashCode}: a coarser {@code equals} would hand back a transform
+     * built for the other definition.
+     */
+    @Test
+    public void whetherLatTwoAndLatZeroWereGivenIsPartOfEquality() {
+        Projection latTwoZero = proj("+proj=lcc +lat_1=45 +lat_2=0 +ellps=GRS80 +units=m +no_defs");
+        Projection noLatTwo = proj("+proj=lcc +lat_1=45 +ellps=GRS80 +units=m +no_defs");
+        assertNotEquals(latTwoZero, noLatTwo);
+        assertNotEquals(noLatTwo, latTwoZero);
+
+        // The lat_0 half on its own: these two are the same cone with the same origin, reached one
+        // way by naming lat_2 and the other by naming lat_0=0, and they compare unequal because the
+        // flags differ even though every derived field agrees.
+        Projection latTwoGiven = proj("+proj=lcc +lat_1=45 +lat_2=45 +ellps=GRS80 +units=m +no_defs");
+        Projection latZeroGiven = proj("+proj=lcc +lat_1=45 +lat_0=0 +ellps=GRS80 +units=m +no_defs");
+        assertEquals("fixtures must agree on the latitude of origin",
+                latTwoGiven.getProjectionLatitude(), latZeroGiven.getProjectionLatitude(), 0.0);
+        assertEquals("and on the second parallel",
+                latTwoGiven.getProjectionLatitude2(), latZeroGiven.getProjectionLatitude2(), 0.0);
+        assertNotEquals(latTwoGiven, latZeroGiven);
+        assertNotEquals(latZeroGiven, latTwoGiven);
+
+        // Still reflexive and still stable across two parses of the same string.
+        for (String d : new String[] {
+                "+proj=lcc +lat_1=45 +lat_2=0 +ellps=GRS80 +units=m +no_defs",
+                "+proj=lcc +lat_1=45 +ellps=GRS80 +units=m +no_defs",
+                "+proj=lcc +lat_1=45 +lat_0=0 +ellps=GRS80 +units=m +no_defs"}) {
+            assertEquals(d, proj(d), proj(d));
+            assertEquals(d, proj(d).hashCode(), proj(d).hashCode());
+        }
+
+        // A projection that seeds projectionLatitude itself rather than from a parameter must not be
+        // caught by the flag: tmerc's initialize path writes the field directly.
+        Projection tmerc = proj("+proj=tmerc +lon_0=9 +ellps=GRS80 +units=m +no_defs");
+        assertEquals(tmerc, proj("+proj=tmerc +lon_0=9 +ellps=GRS80 +units=m +no_defs"));
+        assertNotEquals("an explicit +lat_0 is still a different tmerc", tmerc,
+                proj("+proj=tmerc +lat_0=0 +lon_0=9 +ellps=GRS80 +units=m +no_defs"));
+    }
+
     /** Reads the private {@code unit} field, to prove a fixture really leaves it null. */
     private static Object unitField(Projection p) {
         try {

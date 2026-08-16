@@ -52,11 +52,7 @@ import org.locationtech.proj4j.util.ProjectionMath;
  * becomes the equivalent {@code +k_0}, which is what PROJ's own
  * {@code Conversion::convertToOtherMethod} emits, and the value is the one
  * {@code MercatorProjection} would derive from {@code +lat_ts} itself — that projection does read
- * the parameter, so this is a spelling choice rather than a rescue. Equidistant Cylindrical with a
- * non-zero standard parallel or latitude of natural origin is refused as well, and that refusal is
- * not an instance of the rule above either: {@code PlateCarreeProjection} reads both. The refusal
- * itself is left as it stands rather than re-argued here; only its message changed, because it used
- * to tell the caller the projection ignores the parameter.
+ * the parameter, so this is a spelling choice rather than a rescue.
  */
 final class WktMethods {
 
@@ -81,25 +77,6 @@ final class WktMethods {
     private static final int FLAG_LCC_1SP = 8;
     /** Polar Stereographic (variant B): {@code +lat_0} is ±90, from the sign of EPSG 8832. */
     private static final int FLAG_POLAR_STEREO_B = 16;
-    /**
-     * Equidistant Cylindrical: a non-zero {@code lat_ts} or {@code lat_0} is refused.
-     *
-     * <p>STALE REASON, KEPT BEHAVIOUR. This said proj4j ignores both origin parameters. It no
-     * longer does — {@code PlateCarreeProjection} ports 9.8.1's {@code eqc.cpp}, implementing
-     * both EPSG:1029 and EPSG:1028, and applies both parameters — so this refusal is
-     * over-strict and its message ("which proj4j's implementation ignores") is untrue.
-     *
-     * <p>The parameters being refused are not rounding-level. Measured with {@code proj} 9.8.1
-     * at lon 10 / lat 20 / {@code +ellps=GRS80}, {@code +lat_ts=30} is worth 148,332 m of
-     * easting (964862.8025 against 1113194.9079 bare) and {@code +lat_0=45} is worth
-     * 4,984,944 m of northing.
-     *
-     * <p>Left in place because relaxing it is a behaviour change needing its own evidence: that
-     * is task #126, out of scope for 2.1.0.
-     * {@code Wkt2ReaderTest.equidistantCylindricalWithStandardParallelIsRefused} pins it and
-     * carries the same note.
-     */
-    private static final int FLAG_EQC = 32;
     /** Hotine Oblique Mercator: degenerates to {@code +proj=somerc} at azimuth 90. */
     private static final int FLAG_HOTINE = 64;
 
@@ -455,11 +432,10 @@ final class WktMethods {
                 "Cylindrical_Equal_Area", "Behrmann");
         method("cea", "Lambert Cylindrical Equal Area (Spherical)", "9834",
                 "Cylindrical_Equal_Area", new String[0], P_CEA, new String[]{"+R_A"}, PLAIN);
-        method("eqc", "Equidistant Cylindrical", "1028", "Equirectangular", new String[]{
-                "Equidistant_Cylindrical", "Plate_Carree",
-                "Equidistant_Cylindrical_Ellipsoidal"}, P_EQC, null, FLAG_EQC);
-        method("eqc", "Equidistant Cylindrical (Spherical)", "1029", "Equirectangular",
-                new String[]{"Plate_Carree"}, P_EQC, null, FLAG_EQC);
+        method("eqc", "Equidistant Cylindrical", "1028", "Equirectangular", P_EQC,
+                "Equidistant_Cylindrical", "Plate_Carree", "Equidistant_Cylindrical_Ellipsoidal");
+        method("eqc", "Equidistant Cylindrical (Spherical)", "1029", "Equirectangular", P_EQC,
+                "Plate_Carree");
         method("mill", "Miller Cylindrical", null, "Miller_Cylindrical", new String[]{
                 "Miller_Cylindrical"}, P_CENTRE, new String[]{"+R_A"}, PLAIN);
         method("cc", "Central Cylindrical", null, "Central_Cylindrical", P_NATURAL);
@@ -759,10 +735,6 @@ final class WktMethods {
             }
             values.put("lat_0", Double.parseDouble(latTs) >= 0 ? "90" : "-90");
         }
-        if ((method.flags & FLAG_EQC) != 0) {
-            refuseNonZero(values, "lat_ts", conv, "standard parallel");
-            refuseNonZero(values, "lat_0", conv, "latitude of natural origin");
-        }
         if ((method.flags & FLAG_HOTINE) != 0) {
             String alpha = values.get("alpha");
             String gamma = values.get("gamma");
@@ -867,27 +839,6 @@ final class WktMethods {
         String name = conv.getMethodName();
         return !WktNames.equalsRelaxed(name, "Rectified_Skew_Orthomorphic_Natural_Origin")
                 && !WktNames.equalsRelaxed(name, "Rectified_Skew_Orthomorphic_Center");
-    }
-
-    /**
-     * Drops {@code key}, and refuses the document if it held anything but zero.
-     * <p>
-     * The message names THIS METHOD as what ignores the parameter -- it is removed from
-     * {@code values} here and so never reaches the projection -- rather than the projection. Saying
-     * the projection ignores it would be false: the only caller is the {@code FLAG_EQC} branch,
-     * which maps to {@code +proj=eqc} and hence to {@code PlateCarreeProjection}, whose
-     * {@code initialize()} reads both refused parameters -- {@code +lat_ts} through
-     * {@code rc = nu1 * cosPhi1} and {@code +lat_0} through
-     * {@code m0 = meridian.mlfn(projectionLatitude)}.
-     */
-    private static void refuseNonZero(Map<String, String> values, String key,
-                                      ConversionDefinition conv, String what) {
-        String v = values.remove(key);
-        if (v != null && Double.parseDouble(v) != 0.0) {
-            throw new WktParseException("method \"" + conv.getMethodName() + "\" has " + what + " "
-                    + v + ", which this reader ignores rather than carrying onto the projection; "
-                    + "refusing rather than returning coordinates at the wrong scale or offset");
-        }
     }
 
     /**

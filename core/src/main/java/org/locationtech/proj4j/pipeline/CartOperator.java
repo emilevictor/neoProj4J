@@ -58,7 +58,9 @@ import org.locationtech.proj4j.gie.GieIoUnits;
  * scale.
  *
  * <p>Silently dropping the scale would be a factor-of-{@code to_meter} error reported as
- * success, which is why it is here rather than left to a later affine pass.
+ * success, which is why it is here rather than left to a later affine pass. The reading
+ * of the two keys is {@link LinearUnits}, shared with every other {@code CARTESIAN}
+ * operator.
  *
  * <p>Immutable and thread-safe apart from mutating the array passed in.
  *
@@ -78,59 +80,10 @@ final class CartOperator implements PipelineOperator {
     CartOperator(final Registry registry, final ProjParams params) {
         final double[] ellipsoid = StepEllipsoid.resolve(registry, params);
         this.conversion = new CartConversion(ellipsoid[0], ellipsoid[1]);
-        this.toMeter = linearToMeter(params);
+        this.toMeter = LinearUnits.toMeter(params);
         this.frMeter = 1.0 / toMeter;
         this.description = "cart a=" + ellipsoid[0] + " es=" + ellipsoid[1]
                 + (toMeter == 1.0 ? "" : " to_meter=" + toMeter);
-    }
-
-    /**
-     * {@code init.cpp:668-700}: {@code +units} is looked up in the linear table and
-     * <b>wins over {@code +to_meter}</b> when both are given; {@code +to_meter} accepts a
-     * {@code num/den} ratio; either being zero or non-positive is an error.
-     *
-     * @param params the step's parameter list
-     * @return {@code P-&gt;to_meter}
-     */
-    private static double linearToMeter(final ProjParams params) {
-        final String units = params.value("units");
-        if (units != null && !units.isEmpty()) {
-            final PipelineUnits.Resolution u = PipelineUnits.resolve(units);
-            if (!u.isKnown() || u.linear() != 1) {
-                throw new PipelineDefinitionException(PipelineErrorCode.ILLEGAL_ARG_VALUE,
-                        "unknown +units=" + units);
-            }
-            return u.factor();
-        }
-        final String raw = params.value("to_meter");
-        if (raw == null || raw.isEmpty()) {
-            return 1.0;
-        }
-        final double value = ratio(raw);
-        if (!(value > 0) || Double.isInfinite(value)) {
-            throw new PipelineDefinitionException(PipelineErrorCode.ILLEGAL_ARG_VALUE,
-                    "+to_meter=" + raw + " must be a positive finite number");
-        }
-        return value;
-    }
-
-    /** {@code pj_units_ratio}: a plain double, or {@code num/den}. */
-    private static double ratio(final String raw) {
-        final int slash = raw.indexOf('/');
-        try {
-            if (slash < 0) {
-                return Double.parseDouble(raw.trim());
-            }
-            final double den = Double.parseDouble(raw.substring(slash + 1).trim());
-            if (den == 0.0) {
-                throw new PipelineDefinitionException(PipelineErrorCode.ILLEGAL_ARG_VALUE,
-                        "+to_meter=" + raw + " has a zero denominator");
-            }
-            return Double.parseDouble(raw.substring(0, slash).trim()) / den;
-        } catch (final NumberFormatException e) {
-            throw new PipelineDefinitionException(PipelineErrorCode.ILLEGAL_ARG_VALUE,
-                    "+to_meter=" + raw + " is not a number or a num/den ratio", e);
-        }
     }
 
     /** {@code P-&gt;left = PJ_IO_UNITS_RADIANS} ({@code cart.cpp:262}). */

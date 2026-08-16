@@ -156,6 +156,7 @@ public final class GridInfo {
     private final boolean inverseDirection;
     private final String satisfiedBy;
     private final List<String> probedNames;
+    private final boolean carriedByEarlierSlot;
 
     private GridInfo(String name, boolean optional, boolean available, String resolverName,
                      String origin, long sizeBytes, String format, String declaredBy,
@@ -169,6 +170,17 @@ public final class GridInfo {
                      String skipReason, int slot, String modernName, String projGridFormat,
                      String projMethod, boolean inverseDirection, String satisfiedBy,
                      List<String> probedNames) {
+        this(name, optional, available, resolverName, origin, sizeBytes, format, declaredBy,
+                skipReason, slot, modernName, projGridFormat, projMethod, inverseDirection,
+                satisfiedBy, probedNames, false);
+    }
+
+    private GridInfo(String name, boolean optional, boolean available, String resolverName,
+                     String origin, long sizeBytes, String format, String declaredBy,
+                     String skipReason, int slot, String modernName, String projGridFormat,
+                     String projMethod, boolean inverseDirection, String satisfiedBy,
+                     List<String> probedNames, boolean carriedByEarlierSlot) {
+        this.carriedByEarlierSlot = carriedByEarlierSlot;
         this.name = name;
         this.optional = optional;
         this.available = available;
@@ -347,7 +359,27 @@ public final class GridInfo {
                                 + firstSlot.skipReason,
                 slot, alternative == null ? null : alternative.projGridName(),
                 firstSlot.projGridFormat, firstSlot.projMethod, firstSlot.inverseDirection,
-                satisfiedBy, probed);
+                satisfiedBy, probed, true);
+    }
+
+    /**
+     * Whether an earlier slot's file already carries this slot's shift, so this slot is not a
+     * separate thing to go and find.
+     *
+     * <p>Only {@link #sharedWithEarlierSlot} sets it. It exists because ranking has to count grids
+     * the way upstream counts them and reporting has to name them the way the authority names them,
+     * and those two are not the same number. {@code gridsNeeded()}
+     * ({@code 9.8.1:src/iso19111/operation/singleoperation.cpp}) collapses the {@code .las}/{@code
+     * .los} pair to one {@code us_noaa_conus.tif} before anything counts it, so upstream's
+     * {@code gridsKnown_} sees <b>one</b> slot for {@code EPSG:1241}; this library keeps both, because
+     * a refusal that names {@code conus.las} and not {@code conus.los} understates what is missing and
+     * that message is pinned by test. Sorting must therefore skip the carried slot explicitly &mdash;
+     * see {@code CrsOperationCandidate.gridsKnown()}.
+     *
+     * @return true if an earlier slot's file covers this one
+     */
+    boolean isCarriedByEarlierSlot() {
+        return carriedByEarlierSlot;
     }
 
     private static void addIfNew(List<String> into, String candidate) {

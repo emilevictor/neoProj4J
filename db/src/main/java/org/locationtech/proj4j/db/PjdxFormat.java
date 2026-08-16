@@ -184,6 +184,14 @@ public final class PjdxFormat {
     public static final int S_SUPERSESSION = 41;
     public static final int S_DEPRECATION = 42;
 
+    /**
+     * PROJ's {@code authority_to_authority_preference}: which authorities may supply a coordinate
+     * operation between a given pair of authorities, in preference order. Added after
+     * {@link #S_DEPRECATION} and therefore absent from every index generated before it, which is why
+     * {@code PjdxDatabase} probes for the section instead of demanding it.
+     */
+    public static final int S_AUTHORITY_PREFERENCE = 43;
+
     public static final int X_CRS_BY_CODE = 64;
     public static final int X_OP_BY_SOURCE_TARGET = 65;
     public static final int X_OP_BY_TARGET_SOURCE = 66;
