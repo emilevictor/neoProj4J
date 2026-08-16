@@ -33,6 +33,7 @@ import org.locationtech.proj4j.io.wkt.ParameterDefinition;
 import org.locationtech.proj4j.io.wkt.PrimeMeridianDefinition;
 import org.locationtech.proj4j.io.wkt.UnitDefinition;
 import org.locationtech.proj4j.io.wkt.WktParseException;
+import org.locationtech.proj4j.spi.ProjDatabase;
 
 /**
  * Reads PROJJSON into a {@link CrsDefinition}, and from there into a
@@ -49,6 +50,7 @@ import org.locationtech.proj4j.io.wkt.WktParseException;
 public final class ProjJsonReader {
 
     private final AxisOrderPolicy axisOrderPolicy;
+    private final ProjDatabase database;
 
     /**
      * A reader with the default {@link AxisOrderPolicy#LEGACY} policy: longitude-first, exactly as
@@ -59,14 +61,35 @@ public final class ProjJsonReader {
     }
 
     public ProjJsonReader(AxisOrderPolicy axisOrderPolicy) {
+        this(axisOrderPolicy, null);
+    }
+
+    /**
+     * A reader that resolves what a document referred to by authority code but did not spell out
+     * against {@code database}.
+     *
+     * @param database a database, or {@code null} to read documents as self-contained
+     * @since 2.2.0
+     */
+    public ProjJsonReader(AxisOrderPolicy axisOrderPolicy, ProjDatabase database) {
         if (axisOrderPolicy == null) {
             throw new IllegalArgumentException("axisOrderPolicy is null");
         }
         this.axisOrderPolicy = axisOrderPolicy;
+        this.database = database;
     }
 
     public AxisOrderPolicy getAxisOrderPolicy() {
         return axisOrderPolicy;
+    }
+
+    /**
+     * The database this reader resolves authority references against, or {@code null}.
+     *
+     * @since 2.2.0
+     */
+    public ProjDatabase getDatabase() {
+        return database;
     }
 
     /**
@@ -90,7 +113,7 @@ public final class ProjJsonReader {
      * {@link AxisOrderPolicy}.
      */
     public CoordinateReferenceSystem read(String json) {
-        return CrsDefinitions.toCrs(readDefinition(json), axisOrderPolicy);
+        return CrsDefinitions.toCrs(readDefinition(json), axisOrderPolicy, database);
     }
 
     // ------------------------------------------------------------------ elements

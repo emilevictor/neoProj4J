@@ -88,11 +88,17 @@ public final class CrsOperation {
     private final CrsOperationCandidate selected;
     private final List<CrsOperationCandidate> candidates;
 
+    /**
+     * How {@link #selected} was turned into the parameters {@link #transform} runs, or null when it
+     * was not and the legacy datum model is what executes. See {@link #executionNote()}.
+     */
+    private final String executionNote;
+
     private CrsOperation(Crs source, Crs target, ProjContext context,
                          BasicCoordinateTransform transform, boolean ballpark,
                          String ballparkReason, List<String> warnings,
                          List<GridInfo> missingGrids, CrsOperationCandidate selected,
-                         List<CrsOperationCandidate> candidates) {
+                         List<CrsOperationCandidate> candidates, String executionNote) {
         this.source = source;
         this.target = target;
         this.context = context;
@@ -103,6 +109,27 @@ public final class CrsOperation {
         this.missingGrids = Collections.unmodifiableList(missingGrids);
         this.selected = selected;
         this.candidates = Collections.unmodifiableList(candidates);
+        this.executionNote = executionNote;
+    }
+
+    /**
+     * How the operation named by {@link #selectedOperation()} was turned into the parameters this
+     * object actually runs &mdash; for example
+     * {@code "executing EPSG:1314 (OSGB36 to WGS 84 (6)) as +towgs84=446.448,-125.157,542.06,0.15,
+     * 0.247,0.842,-20.489 on the source CRS"}.
+     *
+     * <p><b>Empty means the selected operation is <em>not</em> what executes.</b> The engine's datum
+     * model cannot express every published operation &mdash; see {@link CandidateParameters} for the
+     * list &mdash; and where it cannot, the legacy datum model runs instead and
+     * {@link #warnings()} says so in the same breath. An empty value here alongside a non-empty
+     * {@link #selectedOperation()} is precisely the "reported one thing, ran another" state, made
+     * visible rather than left to be inferred.
+     *
+     * @return the note, or empty when the legacy datum model is what runs
+     * @since 2.2.0
+     */
+    public Optional<String> executionNote() {
+        return Optional.ofNullable(executionNote);
     }
 
     /**
@@ -174,13 +201,20 @@ public final class CrsOperation {
     /**
      * Builds from a database-backed selection, or throws with the cause the selector determined.
      *
-     * <p><b>The consistency gate is the important part of this method.</b> Selection says which
-     * published operation applies; the engine that actually moves coordinates is
-     * {@link BasicCoordinateTransform}, which reaches a grid shift through the datum model's own
-     * {@code +nadgrids=} list. If those two disagree about whether any shift happens at all, this
-     * class would report 0.15&nbsp;m accuracy over a coordinate that had no shift applied &mdash; the
-     * 95.573&nbsp;m defect with a confident number attached to it, which is strictly worse than the
-     * original. So the agreement is checked, and a disagreement refuses or warns.
+     * <p><b>Making the chosen operation the one that runs is the point of this method.</b> Selection
+     * says which published operation applies; the engine that actually moves coordinates is
+     * {@link BasicCoordinateTransform}, which reads its shift from the datum model. Until 2.2.0
+     * nothing carried the one to the other: the candidate was stored, reported by
+     * {@code selectedOperation()}, {@code accuracy()} and {@code describe()}, and never handed to
+     * anything that computed a coordinate. {@link CandidateParameters} closes that by rewriting the
+     * carrying CRS's own parameter list from the candidate and rebuilding it through
+     * {@link org.locationtech.proj4j.CRSFactory}.
+     *
+     * <p>It cannot do so for every candidate, and the remainder is where
+     * {@link #engineDisagreement} still earns its place: for an operation that stays on the legacy
+     * path, the old question &mdash; would the engine apply <em>no</em> shift, or a
+     * <em>different</em> published operation's shift, while this class reported 0.15&nbsp;m
+     * accuracy? &mdash; is exactly as live as it was, and a disagreement still refuses or warns.
      */
     private static CrsOperation fromSelection(Crs source, Crs target, ProjContext context,
                                               OperationSelector.Selection selection,
@@ -194,33 +228,63 @@ public final class CrsOperation {
             BasicCoordinateTransform identityDatum = new BasicCoordinateTransform(source.legacy(),
                     target.legacy(), context.domainErrorPolicy());
             return new CrsOperation(source, target, context, identityDatum, false, null, warnings,
-                    missing, null, selection.candidates());
+                    missing, null, selection.candidates(), null);
         }
         CrsOperationCandidate chosen = selection.selected();
 
         List<GridInfo> allMissing = new ArrayList<GridInfo>(missing);
         allMissing.addAll(chosen.missingGrids());
 
-        String engineMismatch = engineDisagreement(source, target, chosen);
-        if (engineMismatch != null) {
-            if (context.gridPolicy() == GridPolicy.REQUIRE_ALL) {
-                throw new CrsCreationException(ErrorCause.MISSING_GRID, engineMismatch);
+        // Make the chosen operation the one that runs. Until 2.2.0 the candidate was stored and
+        // reported and never handed to anything that computed a coordinate, so the engine ran
+        // whatever +datum= implied instead. See CandidateParameters for the measurements.
+        CandidateParameters.Plan plan = CandidateParameters.plan(source, target, chosen,
+                context.database());
+        String executionNote;
+        if (plan.rewritten()) {
+            executionNote = plan.note();
+        } else {
+            // The inexpressible remainder stays on the legacy path, where the old consistency gate
+            // is still the thing standing between a reported accuracy and an unapplied shift.
+            executionNote = null;
+            String engineMismatch = engineDisagreement(source, target, chosen);
+            if (engineMismatch != null) {
+                if (context.gridPolicy() == GridPolicy.REQUIRE_ALL) {
+                    throw new CrsCreationException(ErrorCause.MISSING_GRID, engineMismatch);
+                }
+                warnings.add(engineMismatch);
             }
-            warnings.add(engineMismatch);
+            warnings.add("the selected operation is not executed directly; the transformation "
+                    + "engine applies the legacy datum model instead. " + plan.refusal());
         }
 
         boolean isBallpark = chosen.isBallpark();
         String reason = isBallpark ? chosen.rejectionReason().orElse(null) : null;
-        BasicCoordinateTransform bct = new BasicCoordinateTransform(source.legacy(),
-                target.legacy(), context.domainErrorPolicy());
+        BasicCoordinateTransform bct = new BasicCoordinateTransform(plan.source(), plan.target(),
+                context.domainErrorPolicy());
         return new CrsOperation(source, target, context, bct, isBallpark, reason, warnings,
-                allMissing, chosen, selection.candidates());
+                allMissing, chosen, selection.candidates(), executionNote);
     }
 
     /**
      * Whether the transformation engine would fail to apply the shift the selected candidate
      * promises, and if so exactly how &mdash; naming both what selection chose and what the engine
      * can reach.
+     *
+     * <p><b>Scope, since 2.2.0:</b> this now guards only the candidates {@link CandidateParameters}
+     * could <em>not</em> express, because for the ones it could, the engine is built from the
+     * candidate's own parameters and there is nothing left to disagree about. It is deliberately
+     * not deleted. The inexpressible set is not small &mdash; every operation published hub-to-CRS,
+     * every CRS-to-CRS operation with no WGS 84 end, Molodensky-Badekas, the time-dependent
+     * methods, and any NADCON pair the legacy grid reader cannot open &mdash; and removing the gate
+     * on the strength of the cases that <em>are</em> fixed would take the guard off the cases that
+     * are not.
+     *
+     * <p>Its known limits, unchanged and stated so they are not mistaken for coverage: it returns
+     * null immediately for a candidate with no grids, so a parameterised Helmert on the legacy path
+     * is ungated here; where it does compare, any one probed name matching any one reachable name
+     * passes; source and target grids are pooled rather than matched per side; and neither the
+     * direction nor the slot pairing is checked.
      *
      * @return the disagreement, or null when selection and execution agree
      */
@@ -308,7 +372,7 @@ public final class CrsOperation {
         BasicCoordinateTransform bct = new BasicCoordinateTransform(source.legacy(),
                 target.legacy(), context.domainErrorPolicy());
         return new CrsOperation(source, target, context, bct, ballpark, ballparkReason, warnings,
-                missing, null, Collections.<CrsOperationCandidate>emptyList());
+                missing, null, Collections.<CrsOperationCandidate>emptyList(), null);
     }
 
     private static void collectMissing(Crs crs, String role, List<GridInfo> missing,
@@ -666,6 +730,12 @@ public final class CrsOperation {
             sb.append("  selected        = <none> -- no authority database is configured, so the "
                     + "legacy datum model's single synthesised operation was used. Set "
                     + "ProjContext.Builder.database(..) for real selection.\n");
+        }
+        if (executionNote != null) {
+            sb.append("  executing       = ").append(executionNote).append('\n');
+        } else if (selected != null) {
+            sb.append("  executing       = the legacy datum model, NOT the selected operation -- "
+                    + "see warnings()\n");
         }
         if (accuracy().isPresent()) {
             sb.append("  accuracy        = ").append(accuracy().get()).append('\n');
