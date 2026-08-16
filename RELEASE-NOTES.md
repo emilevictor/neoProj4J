@@ -1,6 +1,6 @@
 # neoProj4J 2.2.0 release notes
 
-Released <RELEASE DATE> to Maven Central under the same groupId and artifactId as 2.1.0 — see the
+Released 2026-08-16 to Maven Central under the same groupId and artifactId as 2.1.0 — see the
 README for the coordinates. Figures are measured unless labelled otherwise; where a number is still
 pending it says so.
 
