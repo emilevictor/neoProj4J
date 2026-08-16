@@ -47,6 +47,40 @@ import org.locationtech.proj4j.ErrorCause;
  * ballpark offset is the largest degradation there is, so it needs {@link #ALLOW_DEGRADED}
  * <em>and</em> {@link BallparkPolicy#ALLOW}; either alone still refuses.
  *
+ * <h2>Which candidate each policy selects</h2>
+ *
+ * <p>The two policies do not select from the ranked list the same way, and since 2.2.0 they can return
+ * different operations for the same pair:
+ *
+ * <ul>
+ *   <li>{@link #ALLOW_DEGRADED} takes the <b>first usable candidate</b> on the list. The caller has
+ *       said rank is enough, so rank is what it gets, and that is {@code projinfo}'s first executable
+ *       line.</li>
+ *   <li>{@link #REQUIRE_BEST} takes the <b>first usable candidate that is not a degradation</b>, and
+ *       refuses only when there is no such candidate. It has to: it promises not to return a degraded
+ *       operation, and refusing while holding a perfectly good one would not be that promise, it
+ *       would be a different and worse one.</li>
+ * </ul>
+ *
+ * <p>So the stricter policy can return the <em>more</em> accurate operation of the two, which reads
+ * backwards until you notice that "strict" here constrains the answer's quality and not the search.
+ * {@code EPSG:4267} to {@code EPSG:4269} is the case, in any deployment where both the Canadian NTv1
+ * grid and the CONUS NADCON grid are reachable: PROJ ranks by area before accuracy magnitude, so
+ * {@code EPSG:1312} (NTv1, 2.0&nbsp;m, all of Canada) heads the list and {@code EPSG:1241} (NADCON,
+ * 0.15&nbsp;m, CONUS) is one row further down. {@link #ALLOW_DEGRADED} returns the 2.0&nbsp;m one;
+ * {@link #REQUIRE_BEST} returns {@code EPSG:1241}, because 2.0&nbsp;m is a degradation relative to the
+ * 0.15&nbsp;m {@code EPSG:8555} that this library cannot execute. Neither policy reorders anything, and
+ * {@link CrsOperation#candidates()} shows both the same list in the same order.
+ *
+ * <p>Reachability is the part to keep hold of. Where <em>no</em> grid is reachable &mdash; the
+ * {@code proj4j-db}-only deployment, for one &mdash; there is no usable candidate for either policy to
+ * pick and {@link #REQUIRE_BEST} refuses, which is the behaviour this enum was added for and is
+ * unchanged.
+ *
+ * <p>Whenever {@link #REQUIRE_BEST} passes over the head of the list, it says so in
+ * {@link CrsOperation#warnings()}, naming both operations and the rejected one that set the bar. A
+ * caller never has to infer the substitution from the answer.
+ *
  * <h2>Without a database there is nothing to rank</h2>
  *
  * <p>With no {@link ProjContext#database()} there is exactly one candidate operation per CRS pair
@@ -59,15 +93,16 @@ import org.locationtech.proj4j.ErrorCause;
 public enum BestOperationPolicy {
 
     /**
-     * <b>The default.</b> If a more accurate candidate cannot be executed here, fail with
-     * {@link ErrorCause#BEST_OPERATION_UNAVAILABLE} rather than quietly selecting a worse one. The
-     * message names both operations, quantifies the accuracy gap in metres, and names the grid files
-     * that would unlock the better one.
+     * <b>The default.</b> Select the highest-ranked usable candidate that is not less accurate than
+     * the best candidate that cannot be executed here. If <em>every</em> usable candidate is less
+     * accurate than that one, fail with {@link ErrorCause#BEST_OPERATION_UNAVAILABLE} rather than
+     * quietly selecting a worse one. The message names both operations, quantifies the accuracy gap in
+     * metres, and names the grid files that would unlock the better one.
      */
     REQUIRE_BEST,
 
     /**
-     * Select the best candidate that <em>can</em> be executed, recording in
+     * Select the first candidate on the ranked list that <em>can</em> be executed, recording in
      * {@link CrsOperation#warnings()} which one was skipped, why, and what accuracy was given up.
      */
     ALLOW_DEGRADED
