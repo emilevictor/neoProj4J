@@ -36,7 +36,7 @@ import org.openjdk.jmh.annotations.Warmup;
  * CRS creation cost, <b>parameterised by position in the init file</b>.
  *
  * <p>This is not an arbitrary parameterisation. {@code Proj4FileReader} used to open the classpath
- * resource and linearly tokenise the <b>888 KB</b> {@code proj4/nad/epsg} file with a
+ * resource and linearly tokenise the <b>887 KB</b> {@code proj4/nad/epsg} file with a
  * {@code StreamTokenizer} <b>on every single call</b>, allocating per entry scanned, so the cost of
  * creating a CRS was a function of how far down the file its code happened to sit. A benchmark that
  * only measured {@code EPSG:4326} - which sits in the first 4% of the file - would have reported a
@@ -44,11 +44,11 @@ import org.openjdk.jmh.annotations.Warmup;
  * exists, and it is why the parameter has to stay now that the cost is flat.
  *
  * <p>The three parameter values are the file's actual first, middle and last entries, measured on
- * the checked-in {@code epsg} file (5,755 entries, 11,731 lines):
+ * the checked-in {@code epsg} file (5,758 entries, 11,738 lines):
  * <ul>
  *   <li>{@code EARLY} - {@code EPSG:3819}, line 2, the very first entry.</li>
- *   <li>{@code MIDDLE} - {@code EPSG:5937}, line 5,855, entry 2,878 of 5,755.</li>
- *   <li>{@code LATE} - {@code EPSG:9054}, line 11,732, the very last entry.</li>
+ *   <li>{@code MIDDLE} - {@code EPSG:5937}, line 5,861, entry 2,881 of 5,758.</li>
+ *   <li>{@code LATE} - {@code EPSG:9054}, line 11,738, the very last entry.</li>
  * </ul>
  * The expected shape was a near-linear ramp from EARLY to LATE. <b>The ramp is gone: the fix
  * landed.</b> {@code io/InitFileCache} parses each init file once into a map, and
@@ -59,6 +59,14 @@ import org.openjdk.jmh.annotations.Warmup;
  * <p>If the {@code epsg} file is regenerated the line numbers above move. The codes are still valid
  * subjects, but re-derive the positions before quoting them, and update this comment - a stale
  * position claim here is worse than none.
+ *
+ * <p><b>Re-derived 2026-08-17, doing exactly that.</b> 2.3.0 inserted {@code EPSG:4979},
+ * {@code EPSG:7843} and {@code EPSG:7912} into the {@code epsg} file at lines 878, 1004 and 1012, all
+ * three ahead of {@code MIDDLE}, so its position moved by 6 lines and 3 entries and the file grew by
+ * the same. <b>No benchmark figure moves and none was touched.</b> The three codes are still the
+ * file's first, middle and last entries, which is the only property this parameter needs, and the
+ * cost is flat across all three anyway - so a shift of six lines cannot change a timing even in
+ * principle.
  */
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
@@ -68,13 +76,13 @@ import org.openjdk.jmh.annotations.Warmup;
 @Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 public class CrsParseBenchmark {
 
-    /** Where in the 888 KB init file the code sits. */
+    /** Where in the 887 KB init file the code sits. */
     public enum FilePosition {
         /** First entry, line 2. */
         EARLY("EPSG:3819"),
-        /** Entry 2,878 of 5,755, line 5,855. */
+        /** Entry 2,881 of 5,758, line 5,861. */
         MIDDLE("EPSG:5937"),
-        /** Last entry, line 11,732. */
+        /** Last entry, line 11,738. */
         LATE("EPSG:9054");
 
         private final String code;

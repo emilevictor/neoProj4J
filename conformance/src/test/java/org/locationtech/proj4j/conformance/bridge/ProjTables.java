@@ -57,28 +57,28 @@ public final class ProjTables {
      * the last of them; re-read the test's output, not this sentence.
      *
      * <p>The 25-name shortfall is much smaller than it looks, and it is worth
-     * knowing why before anyone plans work against it. Twenty-one of the 25 are
+     * knowing why before anyone plans work against it. Twenty-two of the 25 are
      * not projections at all — they are pipeline steps, and
-     * {@code PipelineFactory} runs every one of them: the twenty in its
+     * {@code PipelineFactory} runs every one of them: the twenty-one in its
      * {@code PIPELINE_ONLY_OPERATORS} list ({@code affine}, {@code axisswap},
      * {@code cart}, {@code deformation}, {@code geoc}, {@code geogoffset},
-     * {@code helmert}, {@code hgridshift}, {@code molobadekas},
-     * {@code molodensky}, {@code noop}, {@code pop}, {@code push},
-     * {@code set}, {@code tinshift}, {@code topocentric},
+     * {@code gridshift}, {@code helmert}, {@code hgridshift},
+     * {@code molobadekas}, {@code molodensky}, {@code noop}, {@code pop},
+     * {@code push}, {@code set}, {@code tinshift}, {@code topocentric},
      * {@code unitconvert}, {@code vertoffset}, {@code vgridshift},
      * {@code xyzgridshift}) plus {@code pipeline} itself, which
      * {@code PipelineFactory.isPipeline} handles. Asking the {@code Registry}
      * for those is the wrong question; they resolve, just not here.
      *
-     * <p>That leaves four names absent from both the {@code Registry} and the
-     * pipeline factory: {@code defmodel}, {@code gridshift}, {@code horner}
-     * and {@code sch}. Two of those four, {@code horner} and {@code sch}, carry
-     * no assertions anywhere in the gie corpus — not one mention in any active
-     * file, and no upstream test file names them at 9.8.1 either, so this is not
-     * coverage we declined to ship. Implementing them would move no row.
-     * {@code defmodel} and {@code gridshift} have 16 operation blocks each. The
-     * real gap this table describes is therefore two operators, not
-     * twenty-five.
+     * <p>That leaves three names absent from both the {@code Registry} and the
+     * pipeline factory: {@code defmodel}, {@code horner} and {@code sch}. Two of
+     * those three, {@code horner} and {@code sch}, carry no assertions anywhere
+     * in the gie corpus — not one mention in any active file, and no upstream
+     * test file names them at 9.8.1 either, so this is not coverage we declined
+     * to ship. Implementing them would move no row. {@code defmodel} has 16
+     * operation blocks. The real gap this table describes is therefore one
+     * operator, not twenty-five. {@code gridshift}, which had 17 blocks and was
+     * the other half of that gap, is implemented as of 2.3.0.
      */
     public static final Set<String> OPERATORS = set(
             "adams_hemi", "adams_ws1", "adams_ws2", "aea", "aeqd", "affine", "airocean", "airy",

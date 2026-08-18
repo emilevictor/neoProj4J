@@ -38,7 +38,7 @@
  *
  * <h2>The data gap, stated plainly</h2>
  *
- * <p>{@code proj4j-epsg}'s {@code proj4/nad/epsg} holds 5,755 entries and <b>not one vertical
+ * <p>{@code proj4j-epsg}'s {@code proj4/nad/epsg} holds 5,758 entries and <b>not one vertical
  * CRS</b>. {@code EPSG:5773}, {@code 3855}, {@code 5798}, {@code 5714}, {@code 5715},
  * {@code 5703} and {@code 4937} are all absent, and so is {@code EPSG:4979} — WGS 84
  * geographic 3D. That is not an oversight in the file: it is a PROJ.4-era {@code +init=}

@@ -194,7 +194,8 @@ jobs:
       # go unrecorded. This is deliberately the same shape as docker/run.sh's check_determinism,
       # which asserts DET_FLOOR_TESTS and separately reports the drift; keep the two in step.
       #
-      # RAISE THE FLOOR when tests are added on purpose. It is a ratchet, not a ceiling.
+      # RAISE THE FLOOR when tests are added on purpose. It only ever goes up, and it is a floor
+      # rather than a ceiling: it exists to catch tests going missing, so never lower it to match.
       - name: Assert the determinism tests actually ran
         run: |
           set -euo pipefail

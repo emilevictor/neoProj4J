@@ -33,6 +33,20 @@ import java.util.ServiceLoader;
  * exists to remove. {@link #discover(ClassLoader)} runs only when an application calls it, or when it hands the
  * result to {@code ProjContext.Builder}.
  *
+ * <p><strong>So putting {@code neoproj4j-db} on the classpath does nothing by itself, and that is
+ * deliberate rather than an oversight.</strong> This has been read as one: the module ships a
+ * {@code META-INF/services} file, nothing in any {@code src/main} calls {@link #discover(ClassLoader)}
+ * or {@link #openFirst(ClassLoader)}, and it looks like a wire that was never connected. It is not a
+ * wire; it is the contract {@code openFirst} reads when an application does call it. The one-liner an
+ * application wants is {@code Proj4jDb.open()}, handed to
+ * {@code ProjContext.Builder.database(..)} &mdash; see {@code db/README.md}. Self-activation is
+ * refused because attaching a database changes which operation is selected between two CRSs, so
+ * classpath presence alone would move answers. Contrast
+ * {@code org.locationtech.proj4j.resource.ResourceResolvers}, which <em>does</em> auto-discover:
+ * there the default {@code GridPolicy} is {@code REQUIRE_ALL}, so adding a grid pack turns a refusal
+ * into an answer and can never move an answer already being returned. Same mechanism, opposite
+ * safety profile.
+ *
  * <h2>Duplicates are rejected, not ordered by luck</h2>
  * {@link #discover(ClassLoader)} sorts by {@code (priority(), name())} and <strong>throws</strong> if two providers
  * share both. {@code ServiceLoader} iteration order follows classpath order, which varies between a

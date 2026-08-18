@@ -51,8 +51,9 @@ public class PipelineOperatorDispatchTest {
     @Test
     public void everyNonProjectionOperatorIsClaimed() {
         String[] claimed = {
-            "affine", "axisswap", "cart", "deformation", "geoc", "geogoffset", "helmert",
-            "hgridshift", "molobadekas", "molodensky", "noop", "pop", "push", "set",
+            "affine", "axisswap", "cart", "defmodel", "deformation", "geoc", "geogoffset",
+            "gridshift", "helmert", "hgridshift", "molobadekas", "molodensky", "noop", "pop",
+            "push", "set",
             "tinshift", "topocentric", "unitconvert", "vertoffset", "vgridshift",
             "xyzgridshift",
         };
@@ -72,7 +73,7 @@ public class PipelineOperatorDispatchTest {
     public void noProjectionOrRegistryNameIsClaimed() {
         String[] notClaimed = {
             "longlat", "latlong", "lonlat", "latlon", "geocent", "merc", "utm", "tmerc",
-            "lcc", "stere", "pipeline", "gridshift", "defmodel", "horner", "",
+            "lcc", "stere", "pipeline", "horner", "",
         };
         for (int i = 0; i < notClaimed.length; i++) {
             assertFalse("'" + notClaimed[i] + "' must not route to the pipeline engine",
@@ -199,11 +200,17 @@ public class PipelineOperatorDispatchTest {
                 PipelineErrorCode.FILE_NOT_FOUND_OR_INVALID, "could not find required grid(s)");
     }
 
-    /** {@code defmodel} and {@code gridshift} are not claimed, so they are not silently run. */
+    /**
+     * An operator this factory does not implement is not claimed, so it is not silently run.
+     *
+     * <p>This assertion used to name {@code gridshift} and {@code defmodel}. Both landed in
+     * 2.3.0 and moved to {@link #everyNonProjectionOperatorIsClaimed}, which is why they are
+     * not here any more. {@code horner} is the one {@code PJ_TRANSFORMATION} left that this
+     * factory has no body for, so it is what the assertion is about now.
+     */
     @Test
     public void unimplementedOperatorsAreNotClaimed() {
-        assertFalse(PipelineFactory.handlesOperator("defmodel"));
-        assertFalse(PipelineFactory.handlesOperator("gridshift"));
+        assertFalse(PipelineFactory.handlesOperator("horner"));
     }
 
     private void assertRejected(String definition, PipelineErrorCode expected,

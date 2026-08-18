@@ -58,13 +58,13 @@ import org.locationtech.proj4j.datum.tiff.GeoTiffImage;
  * <li><b>A windowed read reports nodata as an outcome distinct from a value.</b> See
  *     {@link #valuesAt}.</li>
  * <li><b>Windowed output is sample-innermost.</b> See {@link #valuesAt}.</li>
- * <li><b>Biquadratic (NADCON5) interpolation is NOT implemented.</b> Only
- *     {@link #interpolateThreeSamples} is, which is bilinear and is all
- *     {@code xyzgridshift} and {@code deformation} use. {@code +proj=gridshift
- *     +interpolation=biquadratic} — {@code gridshift.cpp:474-560} — has no port here, and
- *     {@code gridshift} is refused outright, so the gap is not reachable. Whoever implements
- *     {@code gridshift} has to write it; {@link #valuesAt} with a 3&times;3 window is the input it
- *     needs.</li>
+ * <li><b>Biquadratic (NADCON5) interpolation is not here either, and deliberately so.</b> The only
+ *     interpolation this class offers is {@link #interpolateThreeSamples}, which is bilinear and is
+ *     all {@code xyzgridshift} and {@code deformation} use. Biquadratic
+ *     ({@code gridshift.cpp:474-560}) lives with the operator that needs it, in
+ *     {@code pipeline.GenericShiftKernel}, and reads through {@link #valuesAt} with a 3&times;3
+ *     window. This entry used to say the method was unimplemented and unreachable because
+ *     {@code +proj=gridshift} was refused; the operator landed in 2.3.0.</li>
  * </ol>
  *
  * <h2>Immutability</h2>
@@ -326,9 +326,9 @@ public final class GenericGrid {
      * {@code [ (y0,x0,s0) (y0,x0,s1) (y0,x0,s2) (y0,x1,s0) ... ]}. Upstream's fast path in
      * {@code GTiffGrid::valuesAt} is a {@code memcpy} that only fires when the requested sample
      * indices are <em>consecutive</em>, precisely because that is the order it has to produce;
-     * {@code gridshift.cpp} permutes its channel indices to hit it. Producing any other order here
-     * would leave a future {@code gridshift} port reading the wrong channel out of the right
-     * numbers, which is silent.
+     * {@code gridshift.cpp} permutes its channel indices to hit it, and
+     * {@code pipeline.GenericShiftKernel} reproduces that permutation. Producing any other order
+     * here would leave it reading the wrong channel out of the right numbers, which is silent.
      *
      * <p><b>Nodata is a separate outcome, not a value.</b> Upstream reports it through a
      * {@code bool&amp;} out-parameter and every caller tests it <em>in addition to</em> the return

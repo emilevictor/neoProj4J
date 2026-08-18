@@ -606,13 +606,22 @@ public class RealDatabaseSelectionTest {
         // A projected CRS is deliberately NOT built from the database: turning 4,312 conversion rows
         // into Projections is where a mis-slotted parameter becomes a plausible coordinate in the wrong
         // place, and the legacy dictionary already carries those.
+        //
+        // The cause changed in 2.3.0, from DATABASE_UNAVAILABLE to CRS_TYPE_NOT_SUPPORTED. The old
+        // one was a false statement in this very test: the database is present, is being read two
+        // assertions above, and knows EPSG:27700 perfectly well. What is unsupported is building a
+        // projected CRS out of it. A consumer sent looking for a missing jar by that cause spent
+        // real time on it, which is why the wording is now pinned as well.
         try {
             Proj.createCrs("EPSG:27700", ctx);
             fail("a projected CRS must not be built from the database in this release");
         } catch (CrsCreationException expected) {
-            assertEquals(ErrorCause.DATABASE_UNAVAILABLE, expected.cause());
+            assertEquals(ErrorCause.CRS_TYPE_NOT_SUPPORTED, expected.cause());
             assertTrue(expected.getMessage(),
-                    expected.getMessage().contains("only the legacy dictionary can build"));
+                    expected.getMessage().contains("the code IS known to the configured authority "
+                            + "database"));
+            assertTrue(expected.getMessage(),
+                    expected.getMessage().contains("only geodetic types are"));
         }
     }
 

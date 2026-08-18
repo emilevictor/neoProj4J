@@ -247,24 +247,56 @@ ProjDatabase db = ProjDatabaseProvider.openFirst(myClassLoader);
 `Proj4jDb.open(ResourceResolver)` takes any resolver, so an unpacked data directory works via
 `DirectoryResourceResolver`.
 
-## Not in the reactor
+### If it starts refusing things it used to answer
 
-This module is **deliberately not in the root `<modules>`**. Add it with:
+Attaching a database is an **opt-in behaviour change, not a purely additive one.** The dictionary
+still owns the parameters of every code it knows, so those do not move — but the database also
+decides *which operation runs between two CRSs*, and that path does not care where either CRS came
+from. Measured by a consumer against the published 2.2.0 artifacts, over the 5,162 codes the
+dictionary can produce: 529 answers move and 1,072 are withdrawn.
 
-```xml
-<!-- PROJ 9.8.1's authority database (EPSG v12.029 + ESRI + IGNF + IAU_2015 + NKG), transcoded to a
-     deterministic read-only binary index and read by a pure-Java reader. Published; implements
-     org.locationtech.proj4j.spi.ProjDatabase. 6,746,280 B unpacked / ~1.78 MB as a jar, and its only
-     dependency is proj4j itself -- no SQLite driver, no native library. See db/README.md. -->
-<module>db</module>
+The withdrawals are the strict defaults doing their job — `BallparkPolicy.REJECT`,
+`GridPolicy.REQUIRE_ALL` and `BestOperationPolicy.REQUIRE_BEST`, all three of which only have
+something to refuse once there is an authority to refuse it against. Turning all three off is one
+call as of 2.3.0:
+
+```java
+ProjContext ctx = ProjContext.permissive().database(Proj4jDb.open()).build();
 ```
+
+It is called `permissive()` and not `projCompatible()` on purpose: what it has been shown to do is
+*not refuse*, which is a different claim from *return PROJ 9.8.1's answer*. Ask
+`isBallparkTransformation()`, `accuracy()` and `missingGrids()` on the operation to find out which
+kind of answer you got.
+
+## In the reactor, and published
+
+This module is in the root `<modules>` at `pom.xml:353`, and it is published. An earlier version of
+this section said it was "deliberately not in the root `<modules>`" and gave the XML to add. That was
+wrong, and it is the sort of wrong that costs an afternoon: it reads as "this is not built here", so
+the next person goes looking for a separate build. The genuinely profile-gated modules are `golden`,
+`benchmark` and `benchmark-ab` (`pom.xml:307-333`).
+
+What **is** opt-in is the runtime, not the build. Being on the classpath does nothing on its own; an
+application has to call `Proj4jDb.open()` and hand the result to `ProjContext.Builder.database(..)`.
+See "Using it" above, and the note on `ProjDatabaseProvider` for why core will not scan for you.
 
 ## Licensing
 
 `proj.db` is **not** covered by `LICENSE.EPSG` alone. It also contains ESRI (ArcGIS Pro 3.6), IGNF
-3.1.0, IAU_2015, NKG 1.0.w and NRCAN data — 2,991 ESRI, 2,201 IAU_2015 and 864 IGNF CRSs. Those have
-distinct terms, which is why this is a separate artifact with its own aggregated `NOTICE` rather than
-something folded into `proj4j-epsg` and misrepresenting that one.
+3.1.0, IAU_2015, NKG 1.0.w and NRCAN data — 2,991 ESRI, 2,201 IAU_2015 and 864 IGNF CRSs, 2 NKG CRSs,
+and **no NRCAN CRSs at all**. Those have distinct terms, which is why this is a separate artifact with
+its own aggregated `NOTICE` rather than something folded into `proj4j-epsg` and misrepresenting that
+one.
+
+NRCAN is in that list for two rows, and it is worth saying which two rather than letting the name
+imply a body of Canadian CRSs that is not there. Measured against both `proj.db` and the shipped
+index, NRCAN owns **zero CRSs and exactly two `grid_transformation` rows**:
+`NRCAN:HT2_1997_NAD83CSRSV7` and `NRCAN:HT2_2002_NAD83CSRSV7`, both `NAD83(CSRS)v7 → CGVD28 height`
+(EPSG:8254 → EPSG:5713) at 0.05 m by EPSG method 1060, over the geoid grids `HT2_1997.byn` and
+`HT2_2002v70.byn`. They are the 1997 and 2002 epochs of a model EPSG itself publishes only at 2010
+(`EPSG:9987`, `HT2_2010v70.byn`), so `operationsBetween` returns all three as alternatives for that
+pair. Small, but not redundant — which is why the authority stays.
 
 It is also why existing `proj4j-epsg` consumers can upgrade the code without taking on a 6.4 MB
 dependency they did not ask for, and vice versa.

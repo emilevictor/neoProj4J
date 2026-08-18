@@ -462,7 +462,7 @@ public final class Proj {
         if (!ctx.hasDatabase()) {
             throw new CrsCreationException(ErrorCause.DATABASE_UNAVAILABLE, "cannot resolve \""
                     + identifier + "\": no authority database is configured"
-                    + " (ProjContext.Builder.database(..)). Add the proj4j-db artifact.");
+                    + " (ProjContext.Builder.database(..)). Add the neoproj4j-db artifact.");
         }
         somethingBuilt.set(true);
         String definition = DatabaseOperationFactory.projDefinition(ctx.database(), urn);
@@ -603,7 +603,12 @@ public final class Proj {
      * is no manifest and this reports {@code "unknown"}, which is the true answer.
      *
      * <p>The trailing note states whether the default context has an authority database, because that
-     * is the single fact that most changes what this library will and will not answer.
+     * is the single fact that most changes what this library will and will not answer. It
+     * <b>names the default context</b> rather than saying "no authority database configured" flatly,
+     * because a caller who attached a database to an explicit {@link ProjContext} would otherwise
+     * read a true statement about a deployment they are not using as a false one about the one they
+     * are. Same defect as the one fixed in {@code fromName}'s failure message; the cure is the same,
+     * to say whose context is being described.
      *
      * @return for example
      *         {@code "proj4j 2.0.0 (PROJ 9.8.1 algorithms, EPSG v12.029)"}; never null
@@ -613,7 +618,7 @@ public final class Proj {
         Optional<String> db = databaseVersion();
         return "proj4j " + (v == null ? "unknown (no jar manifest on this classpath)" : v)
                 + " (PROJ " + PROJ_SEMANTICS_VERSION + " algorithms, "
-                + (db.isPresent() ? db.get() : "no authority database configured") + ")";
+                + (db.isPresent() ? db.get() : "no authority database on the default context") + ")";
     }
 
     /**
@@ -677,7 +682,10 @@ public final class Proj {
      * {@code "PROJ 9.8.1, EPSG v12.029"}. A fact about the shipped bytes, not a constant that could
      * drift from them.
      *
-     * <p><b>Empty when no database is configured</b>, and that refusal is deliberate. What stands in
+     * <p><b>Empty when the default context has no database</b> &mdash; this method reads
+     * {@link #defaultContext()} and nothing else, so it says nothing about a database attached to
+     * some other {@link ProjContext}. Use {@link #databaseInfo(ProjContext)} for that. The refusal
+     * to name a version is deliberate. What stands in
      * for one, in the separate {@code proj4j-epsg} artifact, is a PROJ.4 {@code +init=} dictionary
      * generated from <b>EPSG v9.2-era</b> data, while PROJ 9.8.1 ships <b>EPSG v12.029</b>. The
      * dictionary files carry no version stamp anywhere, so:
@@ -958,25 +966,37 @@ public final class Proj {
      * Resolves an {@code authority:code} name.
      *
      * <p>The legacy PROJ.4 dictionary is tried first and stays authoritative, so a code it knows
-     * resolves to byte-identical parameters whether or not a database is configured &mdash; adding
-     * {@code proj4j-db} must not move a coordinate that already worked. The database is consulted only
-     * for a code the dictionary cannot produce, which is the useful half of the vintage gap: the
-     * dictionary is EPSG v9.2-era and the shipped database is v12.029.
+     * resolves to byte-identical parameters whether or not a database is configured. The database is
+     * consulted only for a code the dictionary cannot produce, which is the useful half of the
+     * vintage gap: the dictionary is EPSG v9.2-era and the shipped database is v12.029.
+     *
+     * <p><strong>That is a claim about CRSs and not about answers, and the difference matters.</strong>
+     * Attaching {@code neoproj4j-db} <em>can</em> move a coordinate that already worked, because the
+     * database also decides which operation runs between two CRSs &mdash; a path that does not care
+     * where either CRS came from, so both can have come from the dictionary and the answer still
+     * moves. Measured by a consumer against the published 2.2.0 artifacts, over the 5,162 codes the
+     * dictionary can produce: 529 answers move and 1,072 are withdrawn (refused rather than
+     * approximated, under the strict default policies). Adding the database is an opt-in behaviour
+     * change, not a purely additive one.
      */
     private static Crs fromName(String definition, String text, ProjContext ctx) {
         try {
             CoordinateReferenceSystem crs = new CRSFactory().createFromName(text);
-            return applyAxisPolicy(definition, Crs.Source.AUTHORITY_CODE, ctx, crs, null, false);
+            return applyAxisPolicy(definition, Crs.Source.AUTHORITY_CODE, ctx, crs, null, false,
+                    text);
         } catch (IllegalStateException noDictionary) {
             Crs fromDb = DatabaseCrsFactory.create(definition, text, ctx);
             if (fromDb != null) {
                 return fromDb;
             }
+            CrsCreationException wrongType = typeRefusal(text, ctx, noDictionary);
+            if (wrongType != null) {
+                throw wrongType;
+            }
             throw new CrsCreationException(ErrorCause.DATABASE_UNAVAILABLE,
-                    "cannot resolve \"" + text + "\": the legacy PROJ.4 dictionary is not on the "
-                            + "classpath" + databaseNote(ctx) + ". Add the proj4j-epsg artifact, or "
-                            + "supply the CRS as a PROJ.4 parameter string, WKT or PROJJSON. "
-                            + databaseInfo().vintageNote(), noDictionary);
+                    "cannot resolve \"" + text + "\": " + dictionaryReason(text, ctx)
+                            + databaseNote(ctx) + ". Supply the CRS as a PROJ.4 parameter string, "
+                            + "WKT or PROJJSON. " + databaseInfo(ctx).vintageNote(), noDictionary);
         } catch (UnknownAuthorityCodeException notInDictionary) {
             // Deliberately only this exception. An UnsupportedParameterException means the code WAS
             // found and names a projection Proj4J has not implemented, which is a different fact and
@@ -986,8 +1006,62 @@ public final class Proj {
             if (fromDb != null) {
                 return fromDb;
             }
+            CrsCreationException wrongType = typeRefusal(text, ctx, notInDictionary);
+            if (wrongType != null) {
+                throw wrongType;
+            }
             throw notInDictionary;
         }
+    }
+
+    /**
+     * The honest refusal for a code the configured database <em>has</em> and this library declines to
+     * build, or null when that is not what happened.
+     *
+     * <p>Both dictionary failure paths end here, because the distinction they were drawing was the
+     * wrong one. {@code ESRI:102100} threw {@code UnknownAuthorityCodeException} and
+     * {@code IGNF:LAMB93} threw {@code DATABASE_UNAVAILABLE}, purely because the first authority has
+     * a dictionary file and the second does not &mdash; but the actual cause is the same for both, and
+     * it is neither "unknown code" nor "no database". The database knows both codes and
+     * {@link DatabaseCrsFactory} refuses their CRS type. Saying so is
+     * {@link ErrorCause#CRS_TYPE_NOT_SUPPORTED}, used here exactly as it already is for compound CRSs.
+     *
+     * <p>This makes the failure honest without making it resolve. Building projected CRSs from the
+     * database is a real piece of work &mdash; 45 distinct conversion methods over 5,048 codes &mdash;
+     * and it is not in this release.
+     */
+    private static CrsCreationException typeRefusal(String text, ProjContext ctx, Exception cause) {
+        String type = DatabaseCrsFactory.unbuildableTypeOf(text, ctx);
+        if (type == null) {
+            return null;
+        }
+        return new CrsCreationException(ErrorCause.CRS_TYPE_NOT_SUPPORTED,
+                "cannot resolve \"" + text + "\": the code IS known to the configured authority "
+                        + "database (" + ctx.database().name() + "), as a " + type + " CRS, and the "
+                        + "legacy PROJ.4 dictionary does not have it. Building a " + type + " CRS "
+                        + "from the database is not implemented -- only geodetic types are. Supply "
+                        + "the CRS as a PROJ.4 parameter string, WKT or PROJJSON.", cause);
+    }
+
+    /**
+     * Why the legacy dictionary threw, told apart rather than assumed.
+     *
+     * <p>{@code CRSFactory.createFromName} raises {@code IllegalStateException} for <em>two</em>
+     * different situations: the dictionary artifact is genuinely absent, and the artifact is present
+     * but carries no file for that authority. {@code IGNF}, {@code IAU_2015} and {@code NKG} are all
+     * the second case. Until 2.3.0 this message stated the first as a fact without checking, so it
+     * was wrong for every authority the dictionary does not cover, and it sent readers looking for a
+     * missing jar that was on the classpath all along.
+     */
+    private static String dictionaryReason(String text, ProjContext ctx) {
+        if (!databaseInfo(ctx).dictionaryPresent()) {
+            return "the legacy PROJ.4 dictionary is not on the classpath (add the neoproj4j-epsg "
+                    + "artifact)";
+        }
+        int colon = text.indexOf(':');
+        String authority = colon > 0 ? text.substring(0, colon) : text;
+        return "the legacy PROJ.4 dictionary is on the classpath but has no \"" + authority
+                + "\" authority in it";
     }
 
     private static String databaseNote(ProjContext ctx) {
@@ -1022,7 +1096,7 @@ public final class Proj {
             throw new CrsCreationException(ErrorCause.INVALID_CRS_SYNTAX,
                     "cannot parse as a PROJ.4 parameter string: " + text);
         }
-        return applyAxisPolicy(definition, Crs.Source.PROJ_STRING, ctx, crs, null, false);
+        return applyAxisPolicy(definition, Crs.Source.PROJ_STRING, ctx, crs, null, false, null);
     }
 
     private static Crs fromWkt(String definition, String text, ProjContext ctx) {
@@ -1062,15 +1136,40 @@ public final class Proj {
     /**
      * Applies {@link AxisOrderPolicy} to a CRS built from a name or a PROJ string, where there are
      * no declared axes to honour and therefore a judgement to be made and disclosed.
+     *
+     * @param authCode the {@code authority:code} this CRS was named by, or null when it was not
+     *                 named by one. Only a code can be looked up in the database, and only under
+     *                 {@link AxisOrderPolicy#AUTHORITY} is there any reason to.
      */
     private static Crs applyAxisPolicy(String definition, Crs.Source source, ProjContext ctx,
                                        CoordinateReferenceSystem crs, CrsDefinition def,
-                                       boolean declared) {
+                                       boolean declared, String authCode) {
         String[] params = crs.getParameters();
         boolean explicitAxis = params != null && Crs.hasParam(params, "axis");
         AxisOrderPolicy policy = ctx.axisOrderPolicy();
         boolean geographic = crs.getProjection() != null
                 && Boolean.TRUE.equals(crs.getProjection().isGeographic());
+
+        if (policy == AxisOrderPolicy.AUTHORITY && !explicitAxis && params != null) {
+            // Ask the authority before applying the rule. This reaches the codes the legacy
+            // dictionary resolved -- which is to say nearly all of them, and every projected one,
+            // since DatabaseCrsFactory.create refuses to build those. Without it a projected
+            // north-east CRS such as EPSG:2393 came out east-north-up under a policy whose whole
+            // point is not to guess.
+            String authorityAxis = DatabaseCrsFactory.axisOrderFor(authCode, ctx);
+            if (authorityAxis != null) {
+                if ("enu".equals(authorityAxis)) {
+                    // Read, and it agrees with the default. Nothing to append, but the answer is
+                    // still an authority's rather than an assumption's, so say so.
+                    return new Crs(definition, source, ctx, crs, def, true,
+                            authorityAxisNote(authorityAxis));
+                }
+                CoordinateReferenceSystem reordered = new CRSFactory()
+                        .createFromParameters(crs.getName(), append(params, "+axis=" + authorityAxis));
+                return new Crs(definition, source, ctx, reordered, def, true,
+                        authorityAxisNote(authorityAxis));
+            }
+        }
 
         if (policy == AxisOrderPolicy.AUTHORITY && !explicitAxis && geographic && params != null) {
             // Every geographic 2D CRS in EPSG uses ellipsoidal CS EPSG:6422, latitude then
@@ -1091,6 +1190,16 @@ public final class Proj {
         }
         return new Crs(definition, source, ctx, crs, def, explicitAxis,
                 axisNote(policy, declared || explicitAxis, false, crs));
+    }
+
+    /**
+     * The note for an axis order that was <em>read</em> from the configured database's coordinate
+     * system axes, which is the only case where AUTHORITY means what its name says.
+     */
+    private static String authorityAxisNote(String axis) {
+        return "AxisOrderPolicy.AUTHORITY: read from the configured CRS database's coordinate "
+                + "system axes as \"" + axis + "\". This is a value from the authority, not a rule "
+                + "applied -- isAxisOrderAuthoritative() is true.";
     }
 
     /**

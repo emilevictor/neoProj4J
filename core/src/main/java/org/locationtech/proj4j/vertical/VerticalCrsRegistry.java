@@ -28,7 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <h2>Why this exists at all, and how small it deliberately is</h2>
  *
  * <p><b>{@code proj4j-epsg}'s dictionary contains no vertical CRS whatsoever.</b>
- * {@code epsg/src/main/resources/proj4/nad/epsg} holds 5,755 entries and none of
+ * {@code epsg/src/main/resources/proj4/nad/epsg} holds 5,758 entries and none of
  * {@code 5773}, {@code 3855}, {@code 5798}, {@code 5714}, {@code 5715}, {@code 5703} or
  * {@code 4937} is among them; neither is {@code 4979}, the WGS 84 <em>geographic 3D</em>
  * CRS. That file is a PROJ.4-era {@code +init=epsg:} dictionary and a proj-string cannot
@@ -180,10 +180,10 @@ public final class VerticalCrsRegistry {
         }
         throw new UnknownVerticalCrsException(key(authority, code),
                 "vertical CRS " + key(authority, code) + " is not known to proj4j. The shipped "
-                        + "proj4j-epsg dictionary (proj4/nad/epsg) contains no vertical CRS at "
+                        + "neoproj4j-epsg dictionary (proj4/nad/epsg) contains no vertical CRS at "
                         + "all, because a PROJ.4 +init= dictionary cannot express one; only "
                         + knownCodes() + " are built in. Supply it with "
-                        + "VerticalCrsRegistry.register(...), or add the proj4j-db artifact when "
+                        + "VerticalCrsRegistry.register(...), or add the neoproj4j-db artifact when "
                         + "it ships.");
     }
 

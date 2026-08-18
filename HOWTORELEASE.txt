@@ -229,14 +229,30 @@ Every flag there is load-bearing.
       Carries central-publishing-maven-plugin and maven-gpg-plugin.
 
       This file used to say sources and javadoc jars are produced unconditionally by the root
-      build. That is wrong, measured against what 2.0.0 actually published to repo1:
-      neoproj4j-grids-us-legacy-2.0.0-javadoc.jar is a 404 -- there is no javadoc jar for that
-      module at all -- and neoproj4j-epsg's is a 317-byte manifest-only shell. Central accepted
-      the bundle anyway, so this is NOT a blocker and does not need fixing before a release;
-      the claim was simply untrue. Both modules contain zero .java files. grids-us-legacy sets
-      maven.compiler.skip and maven.test.skip (grids-us-legacy/pom.xml:49-50) and epsg does
-      not, which is the likeliest reason one produced nothing and the other produced an empty
-      jar -- UNCONFIRMED, not reproduced locally. Do not repeat it as fact.
+      build. That was wrong for the two data-only modules, and 2.3.0 fixes it. The history,
+      measured with HEAD requests against repo1 rather than inferred:
+
+          neoproj4j-epsg            2.0.0  200, 317 bytes (a manifest-only shell)
+                                    2.1.0  404
+                                    2.2.0  404
+          neoproj4j-grids-us-legacy 2.0.0  404
+                                    2.1.0  404
+                                    2.2.0  404
+
+      Central accepted all three bundles, so a missing javadoc jar is NOT a blocker. The cause
+      is that both modules contain zero .java files and maven-javadoc-plugin attaches no
+      artifact at all for a module without sources -- measured at the 2.3.0 commit by building
+      both modules before the fix and finding only a main jar and a sources jar. Why 2.0.0's
+      epsg run produced a 317-byte shell instead of nothing is UNEXPLAINED; the plugin config
+      differed only in doclint and detectOfflineLinks, and neither should matter. Do not build
+      on a guess about it.
+
+      Since 2.3.0 each of the two poms attaches its own -javadoc classifier jar through
+      maven-jar-plugin, from a one-page src/javadoc/index.html that says the artifact ships
+      data files and points at core's javadoc. Both are signed and staged like any other
+      attached artifact, so what to check in the staged bundle is simply that
+      neoproj4j-epsg-<v>-javadoc.jar and neoproj4j-grids-us-legacy-<v>-javadoc.jar are present
+      with a .asc beside each.
 
   -pl '!conformance'
       The publishing plugin is a build EXTENSION, so its publish goal is injected into

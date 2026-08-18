@@ -107,8 +107,36 @@
                 </executions>
             </plugin>
 
+            <!-- There are no Java sources here, and maven-javadoc-plugin produces nothing at all for
+                 a module without them - not an empty jar, no artifact. So 2.1.0 and 2.2.0 both went
+                 to Central with a sources jar and no javadoc jar, which Central asks for next to
+                 every published artifact. This attaches one by hand: src/javadoc holds a single page
+                 saying the artifact carries data files and pointing at core's javadoc, and the jar
+                 plugin publishes that directory under the -javadoc classifier. gpg and the
+                 central-publishing plugin pick up attached artifacts on their own, so nothing else
+                 needs to change. grids-us-legacy has the same gap and the same fix.
+
+                 Two traps. The root .gitignore's bare `index.html` pattern matches at any depth and
+                 swallowed src/javadoc/index.html on the first attempt, which would have published
+                 an empty javadoc jar - the exact defect this fixes; both stub pages are un-ignored
+                 by name there. And if a Java source file is ever added to this module, delete this
+                 execution: the javadoc plugin would then attach a real jar under the same
+                 classifier and the two would fight over it. -->
             <plugin>
                 <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>attach-javadoc-stub</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                        <configuration>
+                            <classifier>javadoc</classifier>
+                            <classesDirectory>${project.basedir}/src/javadoc</classesDirectory>
+                        </configuration>
+                    </execution>
+                </executions>
                 <configuration>
                     <archive>
                         <manifestEntries>

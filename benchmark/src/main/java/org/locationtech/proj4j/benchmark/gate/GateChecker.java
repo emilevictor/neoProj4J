@@ -210,8 +210,8 @@ public final class GateChecker {
 
     private void checkAllocation(Options options) throws IOException {
         System.out.println();
-        System.out.println("Tier 1 - allocation (bytes/op, blocking)");
-        System.out.println("---------------------------------------");
+        System.out.println("Tier 1 - allocation (bytes/op, fails this run; blocks no merge)");
+        System.out.println("---------------------------------------------------------------");
 
         if (options.jmhResult == null) {
             failures.add("Tier 1 needs a JMH result file. Run the benchmarks with "
@@ -408,8 +408,8 @@ public final class GateChecker {
 
     private void checkOpCounts(Options options) throws IOException {
         System.out.println();
-        System.out.println("Tier 2 - transcendental call counts (blocking)");
-        System.out.println("---------------------------------------------");
+        System.out.println("Tier 2 - transcendental call counts (fails this run; blocks no merge)");
+        System.out.println("---------------------------------------------------------------------");
 
         Map<String, Object> baseline = Json.asObject(
                 Json.parse(readText(options.opCounts, DEFAULT_OP_COUNTS)), "op-count baseline");

@@ -130,7 +130,7 @@ public class Unit implements Serializable {
      *
      * <p>Keeping the value identical is not fastidiousness: a changed hash reorders every
      * {@code HashMap} keyed on a {@code Unit}, a {@code Projection} or a CRS, and this repository
-     * measures behaviour with a 53,430-row golden master. An optimisation that also perturbs
+     * measures behaviour with a 53,450-row golden master. An optimisation that also perturbs
      * iteration order is two changes reported as one.
      *
      * <p>Two pre-existing inconsistencies are preserved rather than fixed here, because fixing

@@ -40,7 +40,7 @@ import org.locationtech.proj4j.proj.Projection;
  * {@code tgt.setValue(src)} then {@code projectRadians(tgt, tgt)} — so with {@code src == dst}
  * reading {@code dst} happens to read the input. Every test here that passes <b>distinct</b>
  * {@code src} and {@code dst} objects fails against the old code; every test that aliases them
- * passes against both, and those are here on purpose, because the aliased path is what 53,430
+ * passes against both, and those are here on purpose, because the aliased path is what 53,450
  * golden-master rows exercise and it must not move.
  *
  * <h2>Where the expected numbers come from</h2>

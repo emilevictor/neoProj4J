@@ -46,8 +46,8 @@ import org.locationtech.proj4j.conformance.parse.GieVerb;
  *
  * <p>{@code INVALID_DEFINITION} is the one bridge verdict that can manufacture a
  * <em>false pass</em>: {@code ExpectedFailureVerdict.ofConstructionFailure} promotes it
- * to {@code PASS_EXPECTED_FAILURE} on any row that is not a {@code coord_transfm*} /
- * {@code no_inverse_op} assertion. Every other verdict can only understate progress.
+ * to {@code PASS_EXPECTED_FAILURE} on any row that is not a {@code coord_transfm*}
+ * assertion. Every other verdict can only understate progress.
  *
  * <p>The corpus itself supplies the control. Cross-tabulate each {@code operation}'s
  * bridge verdict against what the corpus asserts about it:

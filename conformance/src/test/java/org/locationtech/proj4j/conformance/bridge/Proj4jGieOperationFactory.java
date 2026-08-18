@@ -34,6 +34,7 @@ import org.locationtech.proj4j.api.AuthorityUrn;
 import org.locationtech.proj4j.api.Proj;
 import org.locationtech.proj4j.api.ProjContext;
 import org.locationtech.proj4j.gie.GieIoUnits;
+import org.locationtech.proj4j.io.wkt.AxisOrderPolicy;
 import org.locationtech.proj4j.pipeline.PipelineDefinitionException;
 import org.locationtech.proj4j.pipeline.PipelineErrorCode;
 import org.locationtech.proj4j.pipeline.PipelineFactory;
@@ -122,8 +123,11 @@ public final class Proj4jGieOperationFactory implements GieOperationFactory {
      * core searches {@code classpath:proj4j-data/grids/} and {@code classpath:proj4/nad/}
      * and, deliberately, never the working directory, while
      * {@link org.locationtech.proj4j.conformance.runner.GieGridAvailability.OnClasspath}
-     * already answers {@code require_grid} from {@code /proj-data/}. The two were
-     * disagreeing: the runner said the grid was present and core could not find it.
+     * answers {@code require_grid} from the classpath. The two were disagreeing: the runner
+     * said the grid was present and core could not find it. They have to be kept in step in
+     * both directions — that class searches the same two prefixes registered below, and did
+     * not until 2.3.0, so a grid vendored under {@code proj-data-cdn/} was reported missing
+     * by {@code require_grid} while core was resolving it perfectly well.
      *
      * <p>Registered once per classloader, in a static initialiser rather than the
      * constructor, because {@code ResourceResolvers.addResolver} appends and a second call
@@ -132,10 +136,11 @@ public final class Proj4jGieOperationFactory implements GieOperationFactory {
     static {
         ResourceResolvers.addResolver(new ClasspathResourceResolver(
                 Proj4jGieOperationFactory.class.getClassLoader(), "proj-data", null, 10));
-        // The three PROJ-data grids the NKG operations end in, which are not part of the PROJ
-        // source tree and therefore cannot live in proj-data/ - sync-upstream.sh deletes that
-        // directory wholesale, and its manifest header claims PROJ 9.8.1 provenance, which would
-        // be a false statement about a CC-BY-4.0 file from a different repository. See
+        // Four grids from the PROJ-data package: the three the NKG operations end in, and
+        // fr_ign_RAF20.tif for epsg_grid.gie's French block. None is part of the PROJ source tree,
+        // so none can live in proj-data/ - sync-upstream.sh deletes that directory wholesale, and
+        // its manifest header claims PROJ 9.8.1 provenance, which would be a false statement about
+        // a file from a different repository under a different licence. See
         // src/test/resources/NOTICE-gie.md section 4.
         ResourceResolvers.addResolver(new ClasspathResourceResolver(
                 Proj4jGieOperationFactory.class.getClassLoader(), "proj-data-cdn", null, 11));
@@ -167,6 +172,21 @@ public final class Proj4jGieOperationFactory implements GieOperationFactory {
                     + "a missing database", e);
         }
     }
+
+    /**
+     * The context {@code crs_src}/{@code crs_dst} codes are resolved under: authority axis order,
+     * and the database when one is on the classpath.
+     *
+     * <p>{@link AxisOrderPolicy#AUTHORITY} is what gie means &mdash; see {@link #createCrs}. The
+     * database matters because without it the policy can only <em>infer</em> an order from the
+     * rule that EPSG gives every geographic 2D CRS the latitude-then-longitude ellipsoidal
+     * coordinate system EPSG:6422, and has no rule at all for a projected CRS. With it the
+     * coordinate system's axes are read.
+     */
+    private static final ProjContext AUTHORITY_CONTEXT =
+            (DB_CONTEXT == null ? ProjContext.builder() : DB_CONTEXT.toBuilder())
+                    .axisOrderPolicy(AxisOrderPolicy.AUTHORITY)
+                    .build();
 
     public Proj4jGieOperationFactory() {
         this.crsFactory = new CRSFactory();
@@ -718,15 +738,71 @@ public final class Proj4jGieOperationFactory implements GieOperationFactory {
         // returns degrees for a geographic CRS.
         GieIoUnits left = crsUnits(source);
         GieIoUnits right = crsUnits(target);
-        return new CrsToCrsOperation(src, dst, forward, inverse, left, right);
+        return new CrsToCrsOperation(src, dst, forward, inverse, left, right,
+                isLatOrNorthingFirst(target));
     }
 
+    /**
+     * gie's {@code isLatOrNorthingFirst(pj_dst)} (gie.cpp:669-717), read off the target CRS.
+     *
+     * <p>Upstream asks the coordinate system for its first axis name and answers yes when that
+     * name contains "latitude" or "northing". Proj4J has no axis-name metadata, but it does carry
+     * the resolved order as {@code +axis=}, which {@code createCrs} has just filled in from the
+     * authority. The first letter is the first axis's direction, so {@code n} or {@code s} is the
+     * same answer by a different route: {@code neu} is northing-first for a projected CRS and
+     * latitude-first for a geographic one, exactly the two cases upstream is testing for.
+     *
+     * <p>Absent {@code +axis=} means east-north-up, which is upstream's answer too.
+     */
+    private static boolean isLatOrNorthingFirst(CoordinateReferenceSystem crs) {
+        String[] params = crs.getParameters();
+        if (params == null) {
+            return false;
+        }
+        for (int i = 0; i < params.length; i++) {
+            String p = params[i];
+            if (p == null) {
+                continue;
+            }
+            // The leading '+' is optional throughout proj4j's parameter arrays; Crs.paramValue
+            // tolerates both spellings and so must this.
+            String token = p.startsWith("+") ? p.substring(1) : p;
+            if (token.length() > 5 && token.startsWith("axis=")) {
+                char first = Character.toLowerCase(token.charAt(5));
+                return first == 'n' || first == 's';
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Builds one side of a {@code crs_src}/{@code crs_dst} pair, at the axis order gie means.
+     *
+     * <p>An authority code goes through {@link Proj#createCrs(String, ProjContext)} under
+     * {@link AxisOrderPolicy#AUTHORITY} rather than through {@code CRSFactory.createFromName},
+     * which is fixed at {@link AxisOrderPolicy#LEGACY} and therefore always longitude-first.
+     * That default is right for the library's own callers and wrong for this harness: gie's
+     * {@code crs_to_crs_operation()} calls {@code proj_create_crs_to_crs} and deliberately does
+     * <em>not</em> call {@code proj_normalize_for_visualization}, so upstream gie reads
+     * {@code EPSG:4326} as latitude-first. Running {@code epsg_no_grid.gie} under real
+     * {@code gie} 9.8.1 gives 6 succeeded / 0 failed, and both of the values this harness used
+     * to report were bit-exact matches for a longitude-first misread of the same input.
+     *
+     * <p>This is a change to the instrument, not to the library, and it is deliberately confined
+     * here: {@link org.locationtech.proj4j.CRSFactory#createFromName} keeps its longitude-first
+     * default, which every existing caller relies on. The blast radius is the eight corpus
+     * assertions that use {@code crs_src} at all.
+     *
+     * <p>A PROJ string keeps the old path. gie applies no axis rule to one, the corpus rows that
+     * use one already agree with us, and {@code GieProjArgs.withImplicitDefaults} is harness
+     * behaviour that {@code Proj.createCrs} knows nothing about.
+     */
     private CoordinateReferenceSystem createCrs(String spec) {
         if (spec.startsWith("+") || spec.startsWith("proj=")) {
             GieProjArgs a = GieProjArgs.parse(spec);
             return crsFactory.createFromParameters(null, a.withImplicitDefaults().toProj4Args());
         }
-        return crsFactory.createFromName(spec);
+        return Proj.createCrs(spec, AUTHORITY_CONTEXT).asLegacy();
     }
 
     private static GieIoUnits crsUnits(CoordinateReferenceSystem crs) {

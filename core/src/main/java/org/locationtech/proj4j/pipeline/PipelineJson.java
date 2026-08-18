@@ -175,6 +175,50 @@ final class PipelineJson {
         return asArray(object.get(key), "The value of \"" + key + "\"");
     }
 
+    /**
+     * {@code getObjectMember} ({@code defmodel_impl.hpp:319-329}): the key must be present
+     * and its value must be an object.
+     *
+     * @param object the containing object
+     * @param key    the member name
+     * @return the nested object
+     */
+    static Map<String, Object> requiredObject(final Map<String, Object> object, final String key) {
+        if (!object.containsKey(key)) {
+            throw invalid("Missing \"" + key + "\" key");
+        }
+        return asObject(object.get(key), "The value of \"" + key + "\"");
+    }
+
+    /** {@code getReqDouble} ({@code defmodel_impl.hpp:310-312}): present, and a number. */
+    static double requiredDouble(final Map<String, Object> object, final String key) {
+        if (!object.containsKey(key)) {
+            throw invalid("Missing \"" + key + "\" key");
+        }
+        return number(object, key);
+    }
+
+    /**
+     * {@code getOptDouble} ({@code defmodel_impl.hpp:313-315}): absent yields
+     * <b>NaN</b>, not zero — upstream returns {@code quiet_NaN()} so that "no uncertainty
+     * was stated" cannot be mistaken for "the uncertainty is zero". Present must be a
+     * number.
+     */
+    static double optionalDouble(final Map<String, Object> object, final String key) {
+        if (!object.containsKey(key)) {
+            return Double.NaN;
+        }
+        return number(object, key);
+    }
+
+    private static double number(final Map<String, Object> object, final String key) {
+        final Object v = object.get(key);
+        if (!(v instanceof Double)) {
+            throw invalid("The value of \"" + key + "\" should be a number");
+        }
+        return ((Double) v).doubleValue();
+    }
+
     /** {@code getReqString}: present, and a string. */
     static String requiredString(final Map<String, Object> object, final String key) {
         if (!object.containsKey(key)) {

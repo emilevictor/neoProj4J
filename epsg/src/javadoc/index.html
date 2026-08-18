@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>neoproj4j-epsg</title>
+</head>
+<body>
+<h1>neoproj4j-epsg</h1>
+
+<p>This artifact contains no Java classes, so there is no API here to document. It ships the
+coordinate reference system dictionaries that <code>neoproj4j</code> reads off the classpath, under
+<code>/proj4/</code> &mdash; the EPSG-derived CSV tables, the <code>nad/</code> PROJ.4 name
+dictionaries, and the <code>wkt/</code> definitions.</p>
+
+<p>The API that reads these files lives in the <code>neoproj4j</code> artifact. Its javadoc is
+published alongside it on Maven Central and documents
+<code>org.locationtech.proj4j.CRSFactory</code>, <code>org.locationtech.proj4j.api.Proj</code> and
+everything else a caller touches.</p>
+
+<p>This page exists because Maven Central asks for a <code>-javadoc</code> jar next to every
+published artifact, and the javadoc tool produces nothing at all for a module with no sources. An
+empty jar would satisfy the check while telling a reader who opens it nothing; this says where to
+look instead.</p>
+</body>
+</html>

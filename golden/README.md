@@ -6,7 +6,7 @@
 > *correct*. See [Policy](#policy-gie-always-wins) — that distinction is the whole design.
 
 The gie/GIGS conformance module tells us whether we match PROJ 9.8.1. It says nothing about the
-behaviour PROJ never exercises — and proj4j's registry dictionaries hold **9,013 CRS** that the gie
+behaviour PROJ never exercises — and proj4j's registry dictionaries hold **9,017 CRS** that the gie
 corpus does not mention. Six streams are concurrently changing numerical behaviour (the Karney
 auxiliary-latitude core, `+rf`/`+f`/`+R` parsing, the Albers spherical inverse, `TYPE_UNKNOWN`
 hoisting, six new projections, the fail-closed work). This module is the mechanism that distinguishes
@@ -82,7 +82,7 @@ golden/
   pom.xml                        artifact proj4j-golden; never published
   README.md                      this file
   rules.yaml                     the change declarations; the only file most work touches
-  probes.tsv                     COMMITTED INPUT: 9,732 keys x 5 probes, hex doubles
+  probes.tsv                     COMMITTED INPUT: 9,736 keys x 5 probes, hex doubles
   pairs.tsv                      COMMITTED INPUT: 200 curated CRS->CRS pairs
   baseline/1.4.3/
     golden.tsv                   53,430 rows, 5.94 MiB -- the pinned observations
@@ -118,17 +118,32 @@ never published, so a YAML parser here costs downstream nothing.
 
 ## The input set
 
-53,430 rows over 14,502 cases, in four sections. Sections are emitted in US-ASCII order.
+53,450 rows over 14,506 cases, in four sections. Sections are emitted in US-ASCII order.
+
+The pinned baseline holds **53,430** rows over 14,502 cases, and the 20-row difference is not drift.
+The baseline is frozen at released 1.4.3 and is never regenerated, while the sweep enumerates the
+*current* dictionaries — so 2.3.0's four new defs (see the `REG` line below) make the generated table
+legitimately longer. Those 20 rows are declared as ADDED by `DICT-2.3.0-FOUR-DEFS-ADDED` in
+`rules.yaml`, accounted for in `baseline/1.4.3/golden-expect.txt`, and allowed by an explicit
+`declared_surplus=20` in `docker/run.sh` and `.github/workflows/golden.yaml` — which stays two-sided,
+so 19 rows and 21 rows both fail. All four move together, and the surplus returns to 0 whenever the
+baseline is refreshed.
 
 | section | keys | probes | what |
 |---|---|---|---|
 | `CSV` | 4,770 | 1 | the existing MetaCRS CSV rows, at their own pinned coordinates |
 | `PAIR` | 200 | 5 | curated non-WGS84-hub CRS→CRS pairs, all 25 `Datum.TYPE_*` combinations |
-| `REG` | 9,013 | 5 | every def in every registry dictionary, WGS84 lon/lat → CRS |
+| `REG` | 9,017 | 5 | every def in every registry dictionary, WGS84 lon/lat → CRS |
 | `SYN` | 519 | 5 | the synthetic parameter matrix |
 
-`REG` is `epsg` 5,755 · `esri` 2,954 · `nad27` 134 · `nad83` 123 · `world` 47 = **9,013**, asserted by
+`REG` is `epsg` 5,758 · `esri` 2,955 · `nad27` 134 · `nad83` 123 · `world` 47 = **9,017**, asserted by
 `ProbesTest.registryDictionaryCountsAreUnchanged`.
+
+It was 5,755 · 2,954 · … = 9,013 through 2.2.0. 2.3.0 added four defs — `EPSG:4979`, `EPSG:7843` and
+`EPSG:7912`, which `gie/epsg_no_grid.gie` names and no dictionary carried, plus `ESRI:102100`, which
+`proj4/nad/esri` skipped between 102108 and 102110. **Adding a def is not free here.** One def is one
+`REG` key, so five rows in `probes.tsv` and five rows in the generated table, and the frozen baseline
+cannot contain them.
 
 ### The synthetic matrix is not optional
 
@@ -958,7 +973,7 @@ Three details that are decisions rather than implementation:
    are different strings here because they are different strings in the dictionaries, and
    `SYN mod/*/datum_nad83_lower` exists to probe exactly that. A rule meaning both must list both.
 3. **The `REG` source's own `+datum=WGS84` is excluded.** The hub's datum would otherwise appear in all
-   9,013 `REG` rows and make the column useless; only the def's datum is recorded.
+   9,017 `REG` rows and make the column useless; only the def's datum is recorded.
 
 ### What the cluster looked like once it could be seen
 
@@ -1503,9 +1518,14 @@ together with a freshly generated baseline (see [Commands](#commands)).
   The remaining three files give 4,770 rows: `proj4-epsg.csv` 4,280 · `PROJ4_SPCS_nad27.csv` 265 ·
   `PROJ4_SPCS_EPSG_nad83.csv` 225 (220 live plus the **5 `#`-commented `ESRI:102631` `omerc` rows**,
   which are included on purpose — hiding a known-bad case behind `#` is how it stops being tracked).
-* **The registry dictionaries in `proj4j-epsg` 1.4.3 are byte-identical to the working tree's**, verified
-  by `cmp` on all five. So `baseline/1.4.3` and a current run enumerate the same 9,013 `REG` keys and
-  the diff is purely about code.
+* **The registry dictionaries in `proj4j-epsg` 1.4.3 were byte-identical to the working tree's through
+  2.2.0**, verified by `cmp` on all five, so `baseline/1.4.3` and a current run enumerated the same
+  9,013 `REG` keys and the diff was purely about code. **That is no longer true, and it is the one
+  premise here that has an expiry date.** 2.3.0 added four defs across `proj4/nad/epsg` and
+  `proj4/nad/esri`, so a current run enumerates 9,017 `REG` keys: the 9,013 the baseline knows, whose
+  diff is still purely about code, plus four the baseline cannot contain, which arrive as ADDED and are
+  declared by `DICT-2.3.0-FOUR-DEFS-ADDED`. `cmp` on the other three dictionaries still passes. Anyone
+  reading a `REG` diff should split it that way rather than treat all 9,017 keys alike.
 * `NO_PROBE` is how a def added to the dictionaries after the last probe regeneration announces itself,
   rather than silently acquiring a made-up probe.
 

@@ -90,7 +90,9 @@ public final class CrsOperationCandidate implements Comparable<CrsOperationCandi
          * engine and can be reached through {@code +proj=pipeline}; they are refused here for
          * reasons of their own &mdash; xyzgridshift works in geocentric cartesian metres and a
          * {@code Crs} is two-dimensional by construction, so there is no height to convert with.
-         * {@code gridshift} and {@code defmodel} are not implemented anywhere in this library. The
+         * {@code defmodel} joined them in 2.3.0 and is refused here for a reason of its own: a
+         * deformation model is only defined at an epoch, and this facade's coordinates carry no
+         * time. {@code gridshift} is not implemented anywhere in this library. The
          * wording here used to call all of them unimplemented, which stopped being true as the
          * pipeline engine grew operators; the per-operator reason lives in
          * {@code OperationSelector.operatorNote} and is reported in the exception message.

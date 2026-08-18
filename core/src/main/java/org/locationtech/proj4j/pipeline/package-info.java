@@ -52,20 +52,24 @@
  * transformed. It is <em>read</em>, though: from 2.2.0
  * {@link org.locationtech.proj4j.pipeline.HelmertOperator} uses it to evaluate a
  * 14-parameter helmert at the observation epoch.
- * Time-unit conversion ({@code +t_in}/{@code +t_out}),
- * {@code +proj=gridshift} and {@code +proj=defmodel} are <b>refused rather than
- * ignored</b>: each of them changes the answer, and a pipeline that quietly dropped
- * one would emit a plausible coordinate that is wrong by the size of the omitted
- * step.
+ * Time-unit conversion ({@code +t_in}/{@code +t_out}) is <b>refused rather than
+ * ignored</b>: it changes the answer, and a pipeline that quietly dropped it would emit
+ * a plausible coordinate that is wrong by the size of the omitted step.
+ * {@code +proj=defmodel} was on that list until 2.3.0 and is now implemented
+ * ({@link org.locationtech.proj4j.pipeline.DefmodelOperator}); it reads the
+ * coordinate's epoch and refuses a coordinate that has none, which is the one place
+ * in this package where the time ordinate is mandatory.
  *
- * <p>Three things this paragraph used to list as absent have since been built, and the
+ * <p>Four things this paragraph used to list as absent have since been built, and the
  * prose had not caught up: a user-facing {@code helmert}
  * ({@link org.locationtech.proj4j.pipeline.HelmertOperator}, which also brought
  * {@code molobadekas}), the {@code push}/{@code pop}/{@code set} stack
  * ({@link org.locationtech.proj4j.pipeline.CoordinateStack},
  * {@link org.locationtech.proj4j.pipeline.PushPopOperator},
- * {@link org.locationtech.proj4j.pipeline.SetOperator}), and {@code +geoc}, which is
- * both a flag on a classic projection and, from 2.2.0, an operator of its own. They
+ * {@link org.locationtech.proj4j.pipeline.SetOperator}), {@code +geoc}, which is
+ * both a flag on a classic projection and, from 2.2.0, an operator of its own, and
+ * {@code +proj=gridshift} ({@link org.locationtech.proj4j.pipeline.GridShiftOperator},
+ * 2.3.0). They
  * are named here rather than quietly deleted, because "we already decided against
  * that" is the most expensive kind of stale note: it stops the next person from
  * trying, instead of costing them one experiment.

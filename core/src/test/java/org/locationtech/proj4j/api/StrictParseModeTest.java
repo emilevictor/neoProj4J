@@ -81,8 +81,8 @@ import org.locationtech.proj4j.units.Units;
  *
  * <p>A mode that refused everything would pass every hostile test above and break the library, so
  * the load-bearing test here is {@link #strictAcceptsTheWholeShippedDictionaryBarOne()}: all
- * <b>9,013</b> definitions in the shipped {@code proj4/nad} dictionaries, parsed twice, once per
- * mode. Measured at the time of writing: 8,969 accepted by both modes, 43 refused by both for
+ * <b>9,016</b> definitions in the shipped {@code proj4/nad} dictionaries, parsed twice, once per
+ * mode. Measured at the time of writing: 8,972 accepted by both modes, 43 refused by both for
  * reasons that have nothing to do with the mode (unimplemented {@code +proj=} names), <b>exactly
  * one</b> accepted by default and refused by {@code STRICT}, and zero the other way round. That one
  * is {@code world:malay}, which carries {@code +rot_conv} &mdash; a token that is in PROJ 9.8.1's
@@ -98,8 +98,19 @@ public class StrictParseModeTest {
     /** The five dictionaries in {@code proj4j-epsg}, which is on core's test classpath. */
     private static final String[] DICTIONARIES = {"epsg", "esri", "world", "nad83", "nad27"};
 
-    /** Pinned: the population these dictionaries have had throughout this work. */
-    private static final int DICTIONARY_DEFINITIONS = 9013;
+    /**
+     * Pinned: the population these dictionaries have. Was 9,013 up to 2.2.0. It became 9,016 in
+     * 2.3.0, when {@code EPSG:4979}, {@code EPSG:7843} and {@code EPSG:7912} were added to
+     * {@code proj4/nad/epsg} so the {@code epsg_no_grid.gie} conformance blocks could resolve their
+     * CRSs at all. All three are {@code +proj=longlat}.
+     *
+     * <p>It became 9,017 later in 2.3.0, when {@code ESRI:102100} was added to
+     * {@code proj4/nad/esri} &mdash; a code the shipped authority database has and the dictionary
+     * jumped straight over (102108 &rarr; 102110). It is {@code +proj=merc}, which this library
+     * implements, so it lands in the accepted-by-both bucket like the other four and none of the
+     * other figures on this page move.
+     */
+    private static final int DICTIONARY_DEFINITIONS = 9017;
 
     private static final ProjContext STRICT =
             ProjContext.builder().parseMode(ParseMode.STRICT).build();
@@ -312,7 +323,7 @@ public class StrictParseModeTest {
      */
     @Test
     public void strictDoesNotReachAuthorityCodesWktOrProjJson() {
-        // An authority code resolves to a definition this library ships, and one of those 9,013
+        // An authority code resolves to a definition this library ships, and one of those 9,016
         // carries +rot_conv. Gating this path would refuse a CRS that is correct.
         assertNotNull("world:malay must keep resolving under STRICT",
                 Proj.createCrs("world:malay", STRICT));
@@ -435,11 +446,13 @@ public class StrictParseModeTest {
      * {@code STRICT} is driven over every definition the project ships and required to accept
      * essentially all of them.
      *
-     * <p>Measured when this landed: 9,013 definitions, <b>8,969 accepted by both modes</b>, 43
+     * <p>Measured when this landed: 9,016 definitions, <b>8,972 accepted by both modes</b>, 43
      * refused by both for reasons unrelated to the mode (a {@code +proj=} name this library has not
      * implemented), <b>1</b> accepted by default and refused by {@code STRICT}, 0 the other way.
+     * Re-measured after {@code ESRI:102100} was added: 9,017 definitions and <b>8,973</b> accepted
+     * by both, the other three buckets unmoved.
      *
-     * <p>The 8,969/43 split is asserted as a floor and a sum rather than pinned exactly, because
+     * <p>The 8,973/43 split is asserted as a floor and a sum rather than pinned exactly, because
      * implementing a missing projection legitimately moves a definition from the second bucket to
      * the first and must not fail this test. The bucket that would indicate a defect &mdash;
      * {@code DEFAULT_OK_STRICT_REFUSED} &mdash; is <b>enumerated by name</b>, never counted.

@@ -1,3 +1,436 @@
+# neoProj4J 2.3.0 release notes
+
+Released 2026-08-18 to Maven Central under the same groupId and artifactId as 2.2.0 — see the README
+for the coordinates. Every figure below was measured in the pinned container or counted out of a
+committed file at this commit, **not read off a published artifact**; where a number is still pending
+it says so.
+
+**2.2.0 was about which operation runs. 2.3.0 is about the two operators that were not there at all.**
+`+proj=gridshift` and `+proj=defmodel` were the two largest holes left in the pipeline package, and
+between them they accounted for 90 of the 92 conformance rows that were not passing. Both are now
+ported, and both files run clean. Around them: the last of the cheap conformance rows, four CRS codes
+that were missing from the legacy dictionary, and eight findings from the first consumer to try
+`neoproj4j-db` in anger — six of which were library defects and four of which were text.
+
+Conformance moves from **7,819 / 7,911 to 7,915 / 7,922 genuine passes, with zero regressions**. Read
+the next paragraph before you quote that.
+
+**Some of the gain came from correcting the instrument, not the library.** Our gie harness was building
+`crs_src`/`crs_dst` CRSs through the legacy lon-first path while `gie` means authority axis order. Two
+of the rows this release gains were failing for no other reason, and three more needed that harness
+change together with new dictionary codes before they would land. The harness was wrong and is now
+right, and real `gie` 9.8.1 passes all six rows in that file — but a measurement change and a library
+change are different things, and this project exists not to blur them. It is
+[item 2 of compatibility](#2-the-gie-harness-now-asks-for-authority-axis-order) and the
+[conformance section](#230-conformance) says which rows.
+
+If you only read one section, read [Compatibility](#230-compatibility-what-moves-and-by-how-much). If
+you only read one item, read item 1 if you catch `UnknownAuthorityCodeException`, and item 3 otherwise.
+
+**Where the numbers come from.** One full container run on 2026-08-17,
+`./docker/run.sh ci conformance golden determinism`, aarch64 / Temurin 21.0.11, **exit 0** with
+`golden` failing as designed. Bench was not run and nothing in this release starts it. The CI workflow
+files are committed; **nothing here should be read as a green CI run**.
+
+---
+
+## 2.3.0 compatibility: what moves, and by how much
+
+> **japicmp 0.26.1 has been run, from its command line**; it is still not wired into the Maven build.
+> It compared the `core` jar built from a clean checkout of the 2.2.0 release commit `12a5db4` against
+> the `core` jar built at this branch tip, at public visibility. In incompatible-changes-only mode the
+> report is **"No changes"**. The full public report is **2 new public methods, 0 new public types, 0
+> removed anything, and 3 modified classes** — `api/LegacyAdapters` gaining `crsFactory`, `api/ProjContext`
+> gaining `permissive()`, and `api/Proj`, which japicmp marks modified with nothing to show at public
+> visibility because its changes are all in non-public members. The two new grid operators add **no**
+> public types: they are package-private inside `pipeline`, reached through `+proj=` strings rather
+> than through Java.
+>
+> **And the one change in this release most likely to break a build is invisible to that report.**
+> `UnknownAuthorityCodeException extends CrsCreationException`, so item 1 below replaces a thrown
+> exception with its own **superclass**. No signature changed, so japicmp has nothing to say, and a
+> `catch (UnknownAuthorityCodeException)` that used to fire now does not.
+>
+> Same caveat as 2.2.0: japicmp skipped its semantic-versioning check, because a build from a detached
+> worktree stamps the version as `0.0.0-NO_WORKTREE_AND_INDEX` and japicmp will not reason about
+> semantic versioning at major version zero. The compatibility verdict was measured and is unaffected;
+> the version stamp was not machine-checked.
+
+Items 1 and 2 change observable behaviour. Items 3 through 6 are additions that can only turn a refusal
+into an answer. Item 7 is a default that deliberately did not change.
+
+### 1. A code the database knows and this library cannot build now throws `CrsCreationException`
+
+**What changed.** `Proj.createCrs` / `Proj.fromName`, given an authority code that the attached
+`neoproj4j-db` **has** and that `DatabaseCrsFactory` declines to build, now throws
+`CrsCreationException` with `ErrorCause.CRS_TYPE_NOT_SUPPORTED`, naming the CRS type. It used to throw
+one of two things, and which one you got depended on something irrelevant: whether the authority
+happened to have a dictionary file at all. `ESRI:102100` had one, so the code came out as
+`UnknownAuthorityCodeException` — "unknown code" for a code the configured database knew perfectly
+well. `IGNF:LAMB93` had none, so it came out as `DATABASE_UNAVAILABLE` — "no database" while one was
+attached and answering. Neither was the cause. The cause, for both, is that the database holds the
+code as a type this library builds only for geodetic CRSs.
+
+**What it breaks.** `UnknownAuthorityCodeException` is a subclass of `CrsCreationException`, so this is
+a widening. `catch (CrsCreationException)`, `catch (Proj4jException)` and `catch (RuntimeException)`
+are unaffected. **`catch (UnknownAuthorityCodeException)` stops matching.** The population is not
+small: across the shipped database, 5,048 projected CRSs plus 1,279 non-projected ones cannot be built
+from a code, and every one of them in an authority that has a dictionary file used to arrive as
+`UnknownAuthorityCodeException`.
+
+**Why it was worth doing anyway.** This makes the failure honest without making it resolve. A wrong
+reason is worse than a blunt one, because it sends the reader to the wrong place — the consumer report
+behind this change spent its effort on the dictionary and the classpath, which were both fine.
+
+### 2. The gie harness now asks for authority axis order
+
+**This is a change to how we measure, and it is not a change to the library.**
+`Proj4jGieOperationFactory.createCrs` built `crs_src`/`crs_dst` CRSs at the default
+`AxisOrderPolicy.LEGACY`, which guarantees lon-first, while `gie` means the authority's own axis
+order. Two rows were failing with got-values that are bit-exact matches for a lon-first misread —
+`proj +proj=utm +zone=32 +ellps=GRS80` on `55 12` reproduces our old answer to the digit. Upstream
+deliberately omits `proj_normalize_for_visualization` in its own `crs_to_crs_operation()`
+(`gie.cpp:1119-1158`), and real `gie` 9.8.1 runs `epsg_no_grid.gie` at 6 succeeded, 0 failed.
+
+Blast radius is bounded at the **8 corpus assertions that use `crs_src`** — nothing else in the
+harness reads a CRS by name. **Nothing shipped in the library changed here.** If you were relying on
+the old conformance figures as a like-for-like series, this is the discontinuity, and it is worth
+five rows of the ninety-six.
+
+### 3. `+proj=gridshift` and `+proj=defmodel` exist
+
+Additive in the sense that matters: a pipeline definition naming either used to throw
+`Unknown projection: gridshift` at construction, and now builds and transforms. No definition that
+worked before now behaves differently — the operator lookup only ever ran after every other route had
+declined.
+
+`gridshift` brings upstream's sample-role vocabulary (`latitude_offset`/`longitude_offset` for a
+geographic grid, `easting_offset`/`northing_offset` for a projected one, with the positional fallback
+that swaps the first two bands between those cases), projected grids, and the biquadratic NADCON5
+kernel. Two upstream behaviours that look like defects were reproduced rather than "improved": the
+biquadratic inverse **does not iterate**, which is what stops the San Francisco extract diverging, and
+the band-role reader **ignores** `positive_value="west"`, which our own `GeoTiffGrid` honours —
+copying that code instead would have sign-flipped longitude on nine rows.
+
+`defmodel` reads its master file with `PipelineJson` and its grids on the same generic layer as
+`xyzgridshift`. It requires the coordinate's epoch and refuses a coordinate that has none, which makes
+it the one operator in the package where the time ordinate is mandatory. Upstream's `isGeographicCRS`
+defaults to `true` when the lookup fails — the one place `defmodel_impl.hpp` is deliberately not
+fail-closed — and that is reproduced too, because tightening it kills a ten-row block.
+
+If you catch `Proj4jException` around pipeline construction to detect "not implemented", the two names
+have moved out of that bucket. `ConstructionThrowableKindTest` moved with them.
+
+### 4. Four CRS codes now resolve that did not
+
+`EPSG:4979`, `EPSG:7843`, `EPSG:7912` and `ESRI:102100`. All four were absent from all five legacy
+dictionaries; the three EPSG ones were already in the shipped `neoproj4j-db`, and `ESRI:102100` is
+absent from upstream's `esri` file too — it jumps 102108 → 102110 — so that one is an omission the
+fork inherited rather than created. **Every parameter string is PROJ's own**, from
+`projinfo <code> -o PROJ` on 9.8.1; `ESRI:102100` emits byte-identically to `EPSG:3857`, which is also
+what PROJ names as its replacement.
+
+Dictionary definitions go **9,013 → 9,017** (`epsg` 5,758, `esri` 2,955). The pinned count in
+`StrictParseModeTest` moved with them, and so did the golden table — see [gates](#230-gates).
+
+A code that used to throw now returns a CRS. If you were treating the exception as "this code does not
+exist", it no longer fires for these four.
+
+### 5. Message text changed in five places, and one message was a lie
+
+- **`proj4j-epsg` → `neoproj4j-epsg`** in four user-facing strings. The old names resolve on Maven
+  Central to upstream 1.4.3, so the advice was not merely stale, it pointed at a different library.
+- **"the legacy PROJ.4 dictionary is not on the classpath" was emitted without checking.** It sat on a
+  `catch (IllegalStateException)` branch, and `CRSFactory.createFromName` raises that for two different
+  situations: the dictionary is genuinely absent, *and* the dictionary is present with no file for that
+  authority. `IGNF`, `IAU_2015` and `NKG` are the second case. It is now a branch, and says which.
+- **The vintage note described the wrong context.** The message appended `databaseInfo().vintageNote()`,
+  and the no-argument form reads the *default* context, not the `ctx` whose lookup just failed. Attach a
+  database to an explicit `ProjContext` and the exception's tail described a deployment you were not
+  using — "An authority database is configured" and "No proj.db." could appear in the same sentence.
+  It is `databaseInfo(ctx)` now. 2.2.0 shipped the same bug.
+- **"adding the database cannot move a coordinate that already worked" was answering a different
+  question than the one a reader asks.** It is true about CRS *resolution*: the dictionary is tried
+  first, so a code the dictionary knows resolves to byte-identical parameters either way. It is false
+  about *coordinates*, because the database also decides which operation runs between two CRSs, and
+  that path does not care where either CRS came from. Both sites now say both halves, with the
+  consumer's own measured counts: of 5,162 codes the dictionary can produce, **529 answers move and
+  1,072 are withdrawn** under the strict defaults.
+
+Parse no message text. These are diagnostics.
+
+### 6. Two new entry points, both opt-in
+
+- **`ProjContext.permissive()`** — one call for `BallparkPolicy.ALLOW` + `GridPolicy.PROJ4_COMPAT` +
+  `BestOperationPolicy.ALLOW_DEGRADED`. A consumer who wanted "answer if you can" had to find three
+  knobs and had no way to learn there were three. **`DEFAULT` stays strict**; this has to be asked for
+  by name. It is `permissive()` and not `projCompatible()` on purpose: what the triple has been shown
+  to do is *not refuse* — the strict triple withdrew 1,664 answers in a consumer's measurement and this
+  one withdraws none — and that is a different claim from *returns PROJ 9.8.1's answer*.
+- **`LegacyAdapters.crsFactory(ProjContext)`** — a `CRSFactory` that can resolve a code only the
+  attached database knows, while still handing back legacy `CoordinateReferenceSystem` objects. One new
+  static method rather than eight overloads across `CRSFactory` and `CoordinateTransformFactory`, which
+  would also have dragged `api.ProjContext` into the root package's signatures. Documented limit: the
+  reader and `Registry` inside `CRSFactory` are `private static` and shared across instances, so a
+  subclass can change behaviour in the methods it overrides but cannot give itself a different
+  dictionary.
+
+### 7. `CRSFactory.createFromName`'s default is unchanged, and that is deliberate
+
+It stays `AxisOrderPolicy.LEGACY`. `LEGACY` exists to guarantee lon-first, and **1,657 of 5,708 EPSG
+projected CRSs plus 675 of 689 geographic 2D are not east-first under authority order**. Every existing
+consumer of the legacy API assumes lon-first. Item 2 changed the harness, not this.
+
+`ProjContext.DEFAULT` also still has no database, and `setDefaultContext` still does not govern the
+legacy factories. The reason is sharper than "silent movement": nothing distinguishes "never set" from
+"set to `DEFAULT`", so re-routing would hand every legacy caller `ProjContext.DEFAULT`, whose
+`BallparkPolicy` is `REJECT`, and `EPSG:4267 → EPSG:4269` would start throwing. That pair is the first
+assertion in `LegacyApiUnchangedTest`, and it is the stated reason the bridge exists.
+
+---
+
+## 2.3.0 conformance
+
+| | pass / denominator | fail | skip | vacuous |
+|---|---|---:|---:|---:|
+| branch point `12a5db4` | 7,819 / 7,911 | 90 | 2 | 12 |
+| **2.3.0** | **7,915 / 7,922** | **6** | **1** | **1** |
+
+**Quote the pair, never the percentage alone.** GIGS is unchanged at **1,170 / 1,170**.
+
+**The arithmetic, so it can be checked rather than believed.** `7,923 − 1 vacuous = 7,922`, then
+`7,922 − 6 FAIL − 1 SKIP = 7,915`. The branch point reproduces its own published figure the same way
+— `7,923 − 12 = 7,911`, then `7,911 − 90 − 2 = 7,819` — which is the control that says the method is
+right. The corpus index is byte-identical at **7,923 assertion keys across 42 files**, so no assertion
+appeared or disappeared; what moved is the manifest. `gie-expected-failures.tsv` goes from **104 data
+rows to 8: 96 removed, none added.** A key absent from that file is expected to pass, so removing rows
+makes the gate stricter, not looser.
+
+**Where the 96 went, by cause, summing to 96 exactly.**
+
+| file | rows | of which vacuous | what closed it |
+|---|---:|---:|---|
+| `gridshift.gie` | 57 | 6 | the operator |
+| `defmodel.gie` | 33 | 4 | the operator |
+| `epsg_no_grid.gie` | 5 | 0 | three changes, only sufficient together — see below |
+| `more_builtins.gie#74:0` | 1 | 1 | an `affine` message that was already right and only arrived at construction |
+
+The five `epsg_no_grid` rows are blocks 0, 1, 2, 3 and 5. Blocks 1, 2 and 3 were failing at CRS
+creation with `UnknownAuthorityCodeException` for `EPSG:4979` and `EPSG:7843`, so the new dictionary
+codes were necessary. Blocks 0 and 5 were failing on deviation alone, with got-values that are
+bit-exact lon-first misreads, so the harness's axis-order switch is what closed those. Teaching
+`Proj.applyAxisPolicy` to ask the database was needed so a projected CRS comes out in its own order at
+all. **Which of the three closed which of the five, beyond that two-and-three split, was not measured
+separately and is not claimed here.**
+
+**Eleven of the twelve vacuous rows became real measurements, which is why the denominator moved from
+7,911 to 7,922.** A vacuous row is one where PROJ built the operation and rejected the coordinate while
+proj4j could not build the operation at all: a naive harness scores that a pass, so it is evidence about
+neither engine and is excluded from both sides. De-vacuating is triggered by **registration**, not by
+correctness, so there was a real window during this work where the headline could have fallen while the
+library improved.
+
+**The six failures that remain, named.**
+
+- **Four krovak assertions, `builtins.gie#135:5-8`** — a deliberate divergence, already ruled on, and
+  permanent. PROJ's krovak inverse is not the inverse of PROJ's own forward: `krovak_setup` never sets
+  `P->ra` and never calls `pj_calc_ellipsoid_params`, so PROJ's own round trip misses by 138.6 m where
+  ours is exact. We keep ours correct and pin PROJ's as upstream. Worth 0.0505 pp of headroom that will
+  never be recovered.
+- **`epsg_no_grid.gie#4:0`** — the blocker is **operation discovery, not arithmetic**. Fed PROJ's own
+  pipeline string for the pair, our engine lands at about 0.09 mm against a 0.1 mm tolerance, so the
+  15-parameter time-dependent Helmert is already right. `db.operationsBetween("EPSG","7843","EPSG","7912")`
+  returns 0, because EPSG:8049 is published between the *geocentric* EPSG:7789 and EPSG:7842 and the
+  selector does not compose across that. Block 3 of the same file passes on the same CRS pair only
+  because EPSG:8049's static terms are all zero, so at its own reference epoch of 2020.0 doing nothing
+  is the right answer; block 4 is the same request six years later, where it is not. That is written
+  into the manifest reason rather than left to be rediscovered.
+- **`epsg_grid.gie#1:0` — a `SKIP` until this release, and the reason it did not become a pass is the
+  interesting part.** `fr_ign_RAF20.tif` (342,920 bytes, IGN France open licence, recorded in
+  `NOTICE-gie.md` §4) is now vendored under `proj-data-cdn/`, and `GieGridAvailability.OnClasspath`
+  searches that directory as well as `proj-data/` — it searched only the first, so a grid the library
+  could already resolve was still reported missing to `require_grid`. With the grid there the block
+  finally runs, and refuses at `crs_src EPSG:9785`: RGF93 v2b + NGF-IGN69 height, a **compound** CRS,
+  and `DatabaseCrsFactory` builds only geodetic types. Closing it needs compound and vertical CRS
+  construction from the database plus a selector that can pair a compound source with a 3D geographic
+  target through a geoid grid — its own release, alongside projected CRSs from the database. **Nothing
+  was lost by finding out**: `SKIP` and `FAIL` both sit in the denominator and neither is a pass, so
+  the ratio is identical either way.
+
+**The one remaining `SKIP` is `us_nga_egm08_25.tif`, deliberately not vendored: 80,585,622 bytes.** The
+licence is not the obstacle — NGA public domain, and PROJ marks it `direct_download=1`,
+`open_license=1` — and neither is the code. GitHub warns above 50 MB per file and a vendored copy could
+never be taken back out of the history. **Only one of the two grid files this release could have
+vendored was vendored, on purpose**, and the manifest says so in those words.
+
+**One row stays permanently vacuous.** `more_builtins.gie#39:0` is
+`+proj=ob_tran +o_proj=helmert`, which needs `ob_tran` to wrap something that is not a `Projection`;
+`helmert` is a pipeline step operator, not a `Projection`. One assertion, and the branch that would
+make it pass could also make it silently succeed on nonsense. Left alone.
+
+---
+
+## 2.3.0 gates
+
+One run, `./docker/run.sh ci conformance golden determinism --out /tmp/neoproj4j-out-230 --volume neoproj4j-m2-230`,
+2026-08-17, aarch64 / Temurin 21.0.11. **Exit 0.** Total 0m41s.
+
+| gate | result | figure |
+|---|---|---|
+| `ci` | PASS | **3,079** tests, 0 failures, 6 skipped, 280 report files |
+| `conformance` | PASS | **7,915 / 7,922**, regressed 0, 7,923 assertions evaluated |
+| `golden` | **FAIL, as designed** | 2,083 `UNEXPLAINED` rows, **55 of 55** rules pinned |
+| `determinism` | PASS | 22 tests, 0 failures, one leg |
+| `bench` | **not run** | `bench.yaml` is `workflow_dispatch` only and nothing here starts it |
+
+### ci — 3,079 against 3,029, both read off a run
+
+Neither number is the other plus a delta. That single integer once caught a half-merged PR when four
+green gates did not, so it is measured on both sides every time. Module split: core 2,621, conformance
+355, db 89, geoapi 14 — which sums to 3,079 as a second, independent count. The 2.2.0 release commit
+`12a5db4`, measured the same way, is 3,029 (core 2,573, conformance 354, db 88, geoapi 14).
+
+**The `CI_MIN_TESTS` floor stays at 3,000, and its safety margin is now 10 tests.** The floor is not a
+round number for its own sake: it is chosen as the highest multiple of 100 that still *fails* when the
+`db` module drops out of the reactor, which is the failure this gate exists to catch. `3,079 − 89 =
+2,990`, still under 3,000, so the property holds. It held by 59 tests at 2.2.0; this release added 50
+tests and spent 49 of that margin. **The next release that adds an ordinary test class has to raise the
+floor to 3,100 in the same change** — at a total of 3,089 a db-less run reads exactly 3,000 and passes.
+The durable fix is to assert the property directly instead of relying on a comment being read, and it
+is filed.
+
+### conformance — and the three counts that have to agree
+
+`notrun=0` against a 7,923-key index, and `skips == still_failing == manifest rows == 8`. When those
+three disagree the harness is measuring something other than what it reports, which is why all three
+are printed.
+
+### golden — red on purpose, and now 20 rows longer than its own baseline
+
+`11,944 UNCHANGED · 41,486 CHANGED · 20 ADDED · 0 REMOVED · 39,423 INTENDED · 2,083 UNEXPLAINED` over
+53,450 rows, 55 of 55 rules pinned, and none of `FIGURES_MOVED`, `COUNT_MISMATCH`, `DEAD_RULE`,
+`EXPIRED_RULE` or `PENDING_RULE_FIRED`.
+
+The baseline `golden/baseline/1.4.3/golden.tsv` is frozen at released upstream 1.4.3 and holds 53,430
+rows, while the sweep enumerates the *current* dictionaries. The four definitions this release adds
+therefore emit 20 rows (4 × 5 probes) that the baseline cannot contain. One new rule,
+`DICT-2.3.0-FOUR-DEFS-ADDED`, claims exactly those 20. The line-count check used to be a bare equality
+and is now `baseline + a declared surplus of 20`, still two-sided, so both 19 rows and 21 rows fail.
+**Set the surplus back to 0 when the baseline is refreshed.**
+
+**`golden/pairs.tsv` has drifted, for a reason that predates this release.** Regenerating the golden
+inputs also rewrites `pairs.tsv`, and 60 of its 200 rows change. That was proved pre-existing by
+regenerating against `git show HEAD:` copies of the dictionaries — the same 60 rows move — and the
+cause is that the curator's geographic `TYPE_GRIDSHIFT` bucket grew while its stride is size-sensitive.
+No test regenerates `pairs.tsv`, so the committed file stays valid and was left alone.
+
+### determinism — 22 tests, unchanged
+
+The same 22 as the branch point. Nothing in this release touches `determinism.yaml` or the
+`Math`-versus-`StrictMath` question, and the gate still finds at least one probe where they diverge,
+which is what stops it going vacuously green.
+
+### bench — not run, and nothing here touches a figure
+
+Seven allocation figures were re-pinned in a separate change *before* this one, with the reason
+recorded. Nothing in this release changes a bench figure or a bench baseline.
+
+---
+
+## The consumer report behind the database work
+
+Workstream 5 came from a defect report written by the first consumer to try `neoproj4j-db` against the
+published 2.2.0 artifacts. Eight findings; six were library defects and four of those were text. Two
+things in it deserve recording alongside the fixes.
+
+**The credit, because a changelog that lists only what was broken misrepresents the release.** The
+report records that `accuracy()`, `areaOfUse()`, `isBallparkTransformation()`, `ballparkReason()`,
+`missingGrids()` and `warnings()` supply the one thing the consumer could not compute for itself, and
+that this is why they intend to adopt the database eventually. They chose **not** to adopt it in their
+current change, because adoption moves coordinates — which is the correct reading of the strict
+defaults, not a complaint about them.
+
+**The caveat, which is closed but was real.** The report claimed the legacy API cannot reach the
+database at all. That is false: `LegacyAdapters.transformFactory(ProjContext)` has routed through
+`CrsOperation.create` and therefore through `OperationSelector` since 2.2.0, and the selector
+special-cases a legacy CRS explicitly. But **no test had ever exercised that path with a database
+attached** — all 15 `.database(` sites in the test tree went through the `Proj`/`CrsOperation` API.
+Coded, reachable, documented and unproven end to end is a gap worth naming rather than closing
+quietly, and `LegacyAdaptersWithDatabaseTest` now closes it. The most likely reason the consumer missed
+the method is that the failure messages fixed in item 5 sent them somewhere else.
+
+One finding is still open: whether the `NRCAN` authority earns its mention in the database
+documentation needs someone to read the transcoder first, so it was not guessed at.
+
+---
+
+## 2.3.0 documentation corrections
+
+Each of these was a statement in the repository that was measurably false, not a wording preference.
+
+- **`db/README.md` said the module is "deliberately not in the root `<modules>`".** It is in them, and
+  it is published. The genuinely profile-gated modules are `golden`, `benchmark` and `benchmark-ab`.
+- **`ProjDatabaseProvider`'s javadoc left the service file looking like an oversight.** Nothing in any
+  `src/main` calls `discover` or `openFirst`, and that is the design rather than a gap: core must never
+  scan the classpath for a database, because presence would then change which operation is selected.
+  The contrast that proves the distinction is `ResourceResolvers`, which *does* self-activate from the
+  classpath with no application call — safe precisely because the default `GridPolicy` is
+  `REQUIRE_ALL`, so an added grid pack turns a refusal into an answer and can never move an answer
+  already being returned. Same mechanism, opposite safety profile.
+- **`GenericGridSet` named the wrong `gridAt` overload for `defmodel`.** `defmodel.cpp:250-253` calls
+  the untyped two-argument form, so a deformation model picks whichever root covers the point
+  regardless of its `TYPE`. `gridshift` is the typed overload's only caller.
+- **`GieOperation` cited `dist.cpp:69` and "its first ordinate".** It is line 76, and the second
+  ordinate.
+- **The `ci` test count, the ESRI dictionary count and the golden row count were stale in five files.**
+  Now 3,079 / 2,955 / 53,450 everywhere they are asserted as current. Figures inside pasted transcripts
+  of past runs were left alone on purpose — editing a number inside a transcript fabricates a run that
+  never happened — and so were the sites that correctly describe the *frozen* 53,430-row baseline.
+- **Two gate tiers printed the word "blocking" while their own class javadoc said they block no merge.**
+  The measurement is trustworthy; where the gate is wired is a separate decision, and the printed text
+  now says which is which.
+- **The root pom said "each module ships its own javadoc jar", and two did not.** That sentence was
+  the stated reason it was safe to switch `detectOfflineLinks` off, and the reason still holds — a
+  link into apidocs the plugin never generates could not resolve either way. What was false is the
+  claim beside it. `neoproj4j-epsg` and `neoproj4j-grids-us-legacy` contain no `.java` file at all,
+  and at this commit `maven-javadoc-plugin` attaches nothing for a module without sources — not an
+  empty jar, nothing. So the `attach-javadocs` execution ran and produced no artifact, twice per
+  build, in silence, and **both modules went to Central in 2.1.0 and 2.2.0 with a sources jar and no
+  javadoc jar** — six HEAD requests against repo1 say so, and they also say `grids-us-legacy` never
+  had one and `epsg`'s at 2.0.0 was a 317-byte manifest-only shell. Why that one release produced a
+  shell rather than nothing is unexplained and is recorded as unexplained in `HOWTORELEASE.txt`
+  rather than guessed at. Fixed here: each of the two poms attaches a `-javadoc` classifier jar through
+  `maven-jar-plugin` holding one page that says the artifact ships data files, names the resource
+  root it publishes under (`/proj4/` and `/proj4j-data/grids/`), and points at core's javadoc for
+  the API that reads them. Nothing else in the release plumbing changed — gpg and the publishing
+  plugin pick up attached artifacts on their own. The already-published 2.1.0 and 2.2.0 artifacts
+  are unaffected; a released version cannot gain a file.
+
+---
+
+## 2.3.0 upgrade guidance
+
+1. **If you catch `UnknownAuthorityCodeException`** — read item 1. Widen to `CrsCreationException`, or
+  branch on `ErrorCause`. This is the only change here that can break a compile-clean build at runtime.
+2. **If you parse exception message text** — stop. Four strings changed name, one grew a branch, and
+  one now describes the context you actually passed.
+3. **If you pinned a count of dictionary definitions** — it is 9,017, up from 9,013.
+4. **If you use the gie harness or read our conformance figures as a series** — the axis-order change in
+  item 2 is a discontinuity in the instrument. Five of the ninety-six rows are on that side of the line.
+5. **If you build pipelines by string** — `gridshift` and `defmodel` now construct instead of throwing.
+  Definitions you were treating as permanently unsupported will start running.
+6. **If you wanted PROJ-like permissiveness** — `ProjContext.permissive()` is one call instead of three
+  knobs. It is opt-in and `DEFAULT` is still strict.
+7. **If you are on the legacy `CRSFactory` / `CoordinateTransformFactory` API** — nothing moved.
+  `LegacyAdapters.crsFactory(ProjContext)` is there when you want database-backed resolution while
+  keeping legacy types, and the transform side has worked that way since 2.2.0.
+8. **If you were waiting on `IGNF:LAMB93`** — still absent, and that is a decision. Its parameters are
+  as verifiable as `ESRI:102100`'s, bit-identical to `EPSG:2154`, but it needs a new `proj4/nad/ignf`
+  resource and that immediately raises the question of the other 259 IGNF codes. A packaging decision
+  should not be made as a side effect of fixing an error message.
+
+---
+
 # neoProj4J 2.2.0 release notes
 
 Released 2026-08-16 to Maven Central under the same groupId and artifactId as 2.1.0 — see the

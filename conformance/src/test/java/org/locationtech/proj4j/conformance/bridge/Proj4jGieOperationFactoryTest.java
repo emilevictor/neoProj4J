@@ -760,10 +760,15 @@ class Proj4jGieOperationFactoryTest {
     }
 
     @Test
-    @DisplayName("crsDstIsLatLonOrYX is the documented false, on both operation kinds")
-    void crsDstIsLatLonOrYXIsAlwaysFalse() {
+    @DisplayName("crsDstIsLatLonOrYX reads the target's axis order, and is false without one")
+    void crsDstIsLatLonOrYXFollowsTheTarget() {
+        // A bare `operation` has no target CRS to read, so it is false by construction.
         assertFalse(op("proj=merc ellps=GRS80").crsDstIsLatLonOrYX());
+        // EPSG:3857 is (E, N): east first, so still false.
         assertFalse(factory.createCrsToCrs("EPSG:4326", "EPSG:3857").crsDstIsLatLonOrYX());
+        // EPSG:2393 is Finland YKJ, whose authority axis order is (Northing, Easting). This is the
+        // case the flag exists for, and the reason it stopped being always-false in 2.3.0.
+        assertTrue(factory.createCrsToCrs("EPSG:4123", "EPSG:2393").crsDstIsLatLonOrYX());
     }
 
     // ====================================================== crs_src/crs_dst
@@ -784,7 +789,11 @@ class Proj4jGieOperationFactoryTest {
     void crsToCrsCorpusPair() {
         GieOperation o = factory.createCrsToCrs("EPSG:4258", "EPSG:25832");
         if (o.isUsable()) {
-            double[] out = o.transform(new double[] {12, 55, 0, 0}, GieDirection.FORWARD);
+            // Latitude first. EPSG:4258's authority axis order is (Lat, Lon), and since 2.3.0 this
+            // factory builds named CRSs under AxisOrderPolicy.AUTHORITY to match what gie itself
+            // does -- gie deliberately omits proj_normalize_for_visualization. The corpus block this
+            // test is named after writes the same pair the same way round: `accept 55.0 12.0`.
+            double[] out = o.transform(new double[] {55, 12, 0, 0}, GieDirection.FORWARD);
             assertNotNull(out);
             assertTrue(out[0] > 600000 && out[0] < 800000, "easting was " + out[0]);
             assertTrue(out[1] > 6000000 && out[1] < 6200000, "northing was " + out[1]);

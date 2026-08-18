@@ -135,6 +135,72 @@ rules:
       allow_nonfinite: true
 
   # ---------------------------------------------------------------------------------------------
+  # ORDERED SECOND, DELIBERATELY, and only because the rule above it cannot reach these rows: its
+  # match is `datums: [NAD27]` plus a CrsTransformException status, and all 20 of these are `OK` on
+  # WGS84 or a sphere. Every other rule in this file was written against CHANGED rows and several
+  # would match one of these four keys on `authorities`/`tgt_proj` alone; first-match-wins means the
+  # only safe place for a rule about ADDED rows is the front. An ADDED row has no baseline
+  # counterpart, so GoldenDiff.declines returns null for it and the `expect` clause is never
+  # consulted -- the match predicates ARE the whole test. That is why this rule names all four keys
+  # literally instead of globbing, and why it carries no `expect`: an `expect` here would read as a
+  # numeric check that is not happening.
+  - id: DICT-2.3.0-FOUR-DEFS-ADDED
+    status: active
+    expires: 2027-06-30
+    # PINNED, and pinnable because the row set is arithmetic rather than an observation: 4 new
+    # registry defs x PROBE_COUNT = 5 = 20 rows. Measured by regenerating golden/probes.tsv twice,
+    # once against the current dictionaries and once against `git show HEAD:` copies of
+    # proj4/nad/epsg and proj4/nad/esri, and diffing: the two runs differ in exactly these 20 REG
+    # rows (plus a PAIR drift that predates this release and is recorded in golden/README.md).
+    expected_rows: 20
+    reason: |
+      2.3.0 added four definitions to the dictionaries proj4j-epsg ships, so the sweep enumerates
+      four REG keys the frozen 1.4.3 baseline cannot contain. They arrive as ADDED, not CHANGED.
+
+      WHY EACH ONE WAS ADDED.
+        * EPSG:4979, EPSG:7843, EPSG:7912 -- gie/epsg_no_grid.gie names these as crs_src/crs_dst and
+          no dictionary carried any of them. All three are geographic 3D, and PROJ's own export
+          cannot express the third dimension either: `projinfo EPSG:4979 -o PROJ` on 9.8.1 emits
+          `+proj=longlat +datum=WGS84 +no_defs`, character-identical to EPSG:4326's. So the
+          definition text is PROJ's, not invented.
+        * ESRI:102100 -- absent from proj4/nad/esri, which jumps 102108 -> 102110 -> 102114.
+          `git log -S'102100'` on that file is empty, so this is an upstream omission rather than
+          something the fork removed. `projinfo ESRI:102100 -o PROJ` emits the byte-identical string
+          to `projinfo EPSG:3857 -o PROJ`, and marks 102100 deprecated with 3857 as its alternative.
+
+      WHAT VOUCHES FOR THE NUMBERS, since an ADDED row has nothing to be compared against. For the
+      three EPSG codes the answer is gie: they exist to serve epsg_no_grid.gie, which is where they
+      are checked, and all five probes come back status OK as the identity (fx = probe lon,
+      fy = probe lat, fz = 0), which is what `+proj=longlat` must do. For ESRI:102100 the check is
+      PROJ 9.8.1 directly. The generated table has probe 4 forwarding (5, 5) to
+      (0x1.0fc6ae86e479fp19, 0x1.101f283b97e4bp19) = (556597.4539663679, 557305.2572745768) metres,
+      and
+
+        echo "5 5" | cs2cs -f "%.9f" EPSG:4326 EPSG:3857
+          556597.453966368  557305.257274577 0.000000000
+
+      matches to every digit cs2cs prints. All four probes off the origin agree with PROJ in the same
+      way, sign-symmetrically, and each inverts back to exactly +/-0x1.4p2 -- so the round trip is
+      bit-exact, not merely close.
+
+      THE COST OF THE FOUR LINES, recorded here because it is not obvious from the diff and it is
+      what makes this rule necessary. One def is one REG key, which is five probe rows in
+      golden/probes.tsv and five rows in the generated golden table. The baseline is frozen at
+      released 1.4.3 and is never regenerated, so the generated table is now legitimately 20 rows
+      LONGER than the baseline -- which the row-count equality check in docker/run.sh and
+      .github/workflows/golden.yaml had to be taught, and which is accounted for in
+      golden/baseline/1.4.3/golden-expect.txt. The pinned dictionary counts in
+      RegistryDict.EXPECTED_COUNTS moved with them, 9,013 -> 9,017.
+
+      NOT A CORRECTNESS CLAIM, per this file's policy. This rule declares that four keys appeared and
+      says where each definition's text came from. Whether the arithmetic downstream of them is right
+      is gie's question, and gie answers it.
+    match:
+      classifications: [ADDED]
+      sections: [REG]
+      keys: ["epsg:4979", "epsg:7843", "epsg:7912", "esri:102100"]
+
+  # ---------------------------------------------------------------------------------------------
   - id: PROJ-GEOCENT-LON0-APPLIED
     status: active
     expires: 2027-06-30

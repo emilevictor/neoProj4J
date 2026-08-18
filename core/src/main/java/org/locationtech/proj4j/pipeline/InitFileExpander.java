@@ -122,7 +122,7 @@ final class InitFileExpander {
             // Proj4FileReader signals a missing resource this way.
             throw new PipelineDefinitionException(PipelineErrorCode.INVALID_INIT_KEY,
                     "+init=" + key + ": no init file \"" + file + "\" on the classpath. The EPSG "
-                            + "init dictionary ships in the separate proj4j-epsg artifact.", e);
+                            + "init dictionary ships in the separate neoproj4j-epsg artifact.", e);
         }
         if (params == null || params.length == 0) {
             throw new PipelineDefinitionException(PipelineErrorCode.INVALID_INIT_KEY,

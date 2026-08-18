@@ -89,6 +89,11 @@ public interface ProjDatabase extends Closeable {
     /**
      * Every authority that owns at least one object, e.g.
      * {@code [EPSG, ESRI, IAU_2015, IGNF, NKG, NRCAN, OGC, PROJ]}. Unmodifiable, sorted.
+     *
+     * <p><b>An object, not a CRS</b>, and the difference shows up in this very list: measured against
+     * the shipped index, {@code NRCAN} appears here while {@link #crsCodes(String)
+     * crsCodes("NRCAN")} is <em>empty</em>. It owns two {@code grid_transformation} rows and nothing
+     * else. So membership here does not promise that a CRS of that authority resolves.
      */
     SortedSet<String> authorities();
 

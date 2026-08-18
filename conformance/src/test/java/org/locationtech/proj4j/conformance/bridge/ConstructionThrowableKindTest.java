@@ -100,10 +100,12 @@ class ConstructionThrowableKindTest {
 
     /**
      * {@code geotiff_grids.gie:159} and {@code :165} — the manifest's {@code geotiff_grids.gie#20:0}
-     * and {@code #21:0}. Neither {@code .tif} is vendored under
-     * {@code conformance/src/test/resources/proj-data/tests/}, so proj4j cannot tell "invalid
-     * channel type" from "absent" and does not have to: the errno these rows name is
-     * {@code invalid_op_file_not_found_or_invalid}, whose own name covers both.
+     * and {@code #21:0}. Both {@code .tif}s <em>are</em> vendored under
+     * {@code conformance/src/test/resources/proj-data/tests/}, but this test runs with no resolver
+     * pointed at that directory, so what it measures is the absent case. Either way the kind is the
+     * same: the errno these rows name is {@code invalid_op_file_not_found_or_invalid}, whose own
+     * name covers both "cannot be read" and "is not there", and proj4j reports {@code MISSING_GRID}
+     * for both. (This comment used to say neither file was vendored. They were added later.)
      */
     @Test
     @DisplayName("geotiff_grids' two unreadable vertical .tif operations are MISSING_GRID too")
@@ -145,28 +147,49 @@ class ConstructionThrowableKindTest {
     // ============================================ the guard against widening
 
     /**
-     * The four rows that are correctly vacuous and must stay so. They are the <em>other</em> four
-     * {@code errno invalid_op_file_not_found_or_invalid} rows in the corpus — the same errno as the
-     * three that flip — and all four fail for an unrelated reason: {@code +proj=defmodel} and
-     * {@code +proj=gridshift} are not in proj4j's {@code Registry}, so the refusal is a statement
-     * about proj4j and not about a grid. If any of them moves, the arm has widened.
+     * <b>This test used to hold the rows that were correctly vacuous, and it is empty of them now.</b>
+     *
+     * <p>There were four, all {@code errno invalid_op_file_not_found_or_invalid} — the same errno as
+     * the three that flip — and all four failed for an unrelated reason: the operator name was not
+     * one proj4j had, so the refusal was a statement about proj4j and not about a grid. Both
+     * operators landed in 2.3.0, so all four rows now reach an operator that opens the file itself
+     * and reports what it found:
      *
      * <ul>
-     *   <li>{@code defmodel.gie#1:0} / {@code #2:0} — {@code defmodel.gie:14} and {@code :18}</li>
-     *   <li>{@code gridshift.gie#15:0} / {@code #16:0} — {@code gridshift.gie:284} and {@code :290}</li>
+     *   <li>{@code gridshift.gie#15:0} / {@code #16:0} — {@code gridshift.gie:284} and {@code :290} —
+     *       see {@link #theUnreadableGridshiftGridsAreMissingGrid} below.</li>
+     *   <li>{@code defmodel.gie#1:0} / {@code #2:0} — {@code defmodel.gie:14} and {@code :18} —
+     *       {@code +model=i_do_not_exist} and {@code +model=proj.ini} now reach
+     *       {@code DefmodelOperator}'s own file read and JSON parse.</li>
      * </ul>
      *
-     * <p>Note the last three name a file. That is the point: the operator lookup fails before
-     * anything looks at the file, so a grid-shaped definition is still not a grid failure.
+     * <p>All four went from vacuous to genuine passes, which is the arm doing its job rather than
+     * widening: the classification changed because the underlying refusal changed from "proj4j has no
+     * such operator" to "this file is missing or is not readable as what it claims to be". So what
+     * this test now guards is the other direction — that neither pair has fallen back to
+     * {@code NOT_IMPLEMENTED}, which is what would happen if an operator were unregistered again.
      */
     @Test
-    @DisplayName("the four unregistered-operator rows stay NOT_IMPLEMENTED, not MISSING_GRID")
+    @DisplayName("neither operator reports NOT_IMPLEMENTED any more")
     void unregisteredOperatorsAreNotMissingGrids() {
-        assertKind(GieFailureKind.NOT_IMPLEMENTED, "proj=defmodel model=i_do_not_exist");
-        assertKind(GieFailureKind.NOT_IMPLEMENTED, "proj=defmodel model=proj.ini");
-        assertKind(GieFailureKind.NOT_IMPLEMENTED,
+        assertKind(GieFailureKind.MISSING_GRID, "proj=defmodel model=i_do_not_exist");
+        assertKind(GieFailureKind.MISSING_GRID, "proj=defmodel model=proj.ini");
+    }
+
+    /**
+     * {@code gridshift.gie:284} and {@code :290} — the manifest's {@code gridshift.gie#15:0} and
+     * {@code #16:0}, both {@code expect failure errno invalid_op_file_not_found_or_invalid}. They
+     * were vacuous while the operator did not exist: proj4j refused the <em>name</em>
+     * {@code gridshift}, which is a statement about proj4j rather than about a grid. Now the operator
+     * opens the grid list itself and reports what it found, so both rows pass for the reason the
+     * corpus is asking about.
+     */
+    @Test
+    @DisplayName("gridshift's two unreadable-grid operations are MISSING_GRID")
+    void theUnreadableGridshiftGridsAreMissingGrid() {
+        assertKind(GieFailureKind.MISSING_GRID,
                 "proj=gridshift grids=tests/test_vgrid_unsupported_byte.tif");
-        assertKind(GieFailureKind.NOT_IMPLEMENTED,
+        assertKind(GieFailureKind.MISSING_GRID,
                 "proj=gridshift grids=tests/i_do_not_exist.tif");
     }
 

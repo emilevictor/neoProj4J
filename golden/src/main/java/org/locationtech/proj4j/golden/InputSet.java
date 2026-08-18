@@ -30,7 +30,7 @@ import java.util.TreeSet;
  *     <td>the existing MetaCRS CSV rows, at their own pinned coordinates</td></tr>
  * <tr><td>{@code PAIR}</td><td>~200</td><td>5 probes each</td>
  *     <td>curated non-WGS84-hub CRS&rarr;CRS pairs, one group per {@code Datum.TYPE_*} pair</td></tr>
- * <tr><td>{@code REG}</td><td>9,013</td><td>5 probes each</td>
+ * <tr><td>{@code REG}</td><td>9,017</td><td>5 probes each</td>
  *     <td>every def in every registry dictionary, WGS84 lon/lat &rarr; CRS</td></tr>
  * <tr><td>{@code SYN}</td><td>~500</td><td>5 probes each</td>
  *     <td>the synthetic parameter matrix</td></tr>
@@ -355,7 +355,7 @@ public final class InputSet {
                     null,
                     "longlat", d.proj(), d.paramKeys(),
                     // The REG source is the WGS84 hub, whose own +datum=WGS84 would appear in every
-                    // one of the 9,013 rows and make the column useless. Only the def's datum is
+                    // one of the 9,017 rows and make the column useless. Only the def's datum is
                     // recorded, which is the one a rule about a registry entry means.
                     datumsOf(d), true));
         }

@@ -3,9 +3,9 @@
 **This file is a licence obligation, not documentation.** Three of the four bodies of vendored
 material carry conditions that bind anyone who redistributes them: PROJ's MIT/X11 notice must
 travel with the copies, the IOGP GIGS copyright requires both that the source be acknowledged
-and that *every subsequent recipient be informed of its terms*, and the three CC-BY-4.0 grids in
-`proj-data-cdn/` require attribution. Shipping the files without this file does not satisfy any of
-the three. If these resources end up inside a published artifact, this notice (or its content) must
+and that *every subsequent recipient be informed of its terms*, and the four grids in
+`proj-data-cdn/` require attribution — three under CC-BY-4.0 and one under the Etalab Open Licence.
+Shipping the files without this file does not satisfy any of the three. If these resources end up inside a published artifact, this notice (or its content) must
 go with them.
 
 Nothing here is authored in this repository. Everything in `gie/`, `gigs/` and `proj-data/` is a
@@ -21,7 +21,7 @@ covered by section 4.
 | `gie/` | `9.8.1:test/gie/` | 22 |
 | `gigs/` | `9.8.1:test/gigs/` | 20 `.gie` + 10 `.gie.failing` |
 | `proj-data/` | `9.8.1:data/` — the `for_tests` whitelist built by `data/CMakeLists.txt` | 96 (82 under `tests/`, plus promoted copies) |
-| `proj-data-cdn/` | OSGeo [PROJ-data](https://github.com/OSGeo/PROJ-data) / `https://cdn.proj.org/` | 3 GeoTIFF grids, CC-BY-4.0 |
+| `proj-data-cdn/` | OSGeo [PROJ-data](https://github.com/OSGeo/PROJ-data) / `https://cdn.proj.org/` | 4 GeoTIFF grids — 3 CC-BY-4.0, 1 Etalab Open Licence |
 
 `test/gie/tinshift_gpkg.gie` and `test/gie/tinshift_gpkg_network.gie` are **not** vendored: they do
 not exist at 9.8.1, having been added to PROJ `master` afterwards.
@@ -240,7 +240,7 @@ different terms, and proj4j's existing `LICENSE.EPSG` covers only the EPSG porti
 
 ---
 
-## 4. `proj-data-cdn/**` — three production grids from OSGeo PROJ-data
+## 4. `proj-data-cdn/**` — four production grids from OSGeo PROJ-data
 
 ### What is here, and why it is not in `proj-data/`
 
@@ -249,13 +249,24 @@ different terms, and proj4j's existing `LICENSE.EPSG` covers only the EPSG porti
 | `eur_nkg_nkgrf03vel_realigned.tif` | 362,495 | `a646bd863c427c7623eb2b365878351bab9a0a9b67aa6792b2dd31c3ef58e0b9` | Nordic Geodetic Commission |
 | `eur_nkg_nkgrf17vel.tif` | 715,692 | `515f68aeb59f659a3f3c340626cd060f58de6f93b4546df67732b906949e0d66` | Nordic Geodetic Commission |
 | `no_kv_NKGETRF14_EPSG7922_2000.tif` | 2,026,550 | `4f198074a4940171e130edbd7ec59cb1a3ba024c39f18a94404a13f285ef35c6` | Kartverket (SK), the Norwegian Mapping Authority |
+| `fr_ign_RAF20.tif` | 342,920 | `dc0cc2a38f0ea1029fe72cca3b5b7ed6dfe7e1db2a8d8482b7326ce3d6f25605` | Institut Géographique National (IGN) France |
 
-These three are needed by `gie/nkg.gie`, whose 33 assertions name their operation as an OGC URN and
+The first three are needed by `gie/nkg.gie`, whose 33 assertions name their operation as an OGC URN and
 resolve, through the operation database, to pipelines whose second or third step is
 `+proj=deformation +grids=…` or `+proj=xyzgridshift +grids=…`. Without the grids the pipelines build
 and then cannot run.
 
-They are **deliberately not** under `proj-data/`, for two reasons, and moving them there will break
+`fr_ign_RAF20.tif` is the geoid model behind `gie/epsg_grid.gie`'s second block, RGF93 v2b +
+NGF-IGN69 height to RGF93 v2b geographic 3D. It is named by that block's `require_grid`, so without
+it the assertion could only ever be skipped.
+
+**One grid the corpus asks for is deliberately absent: `us_nga_egm08_25.tif`, 80,585,622 bytes.** It
+backs the other `epsg_grid.gie` block. GitHub warns above 50 MB per file and a vendored copy could
+never be removed from the history, so that block stays a permanent `SKIP` — which is, on purpose,
+scored as neither a pass nor a failure but still counted in the denominator. The choice was made
+knowing the row is closeable; the 80 MB is the reason it was not closed.
+
+All four are **deliberately not** under `proj-data/`, for two reasons, and moving them there will break
 the build:
 
 1. `conformance/sync-upstream.sh` begins its second phase with `rm -rf proj-data`, so anything put
@@ -270,7 +281,7 @@ the build:
 above, taken into the PROJ repository as format fixtures. They cover a few cells and cannot satisfy
 `gie/nkg.gie`, which probes points across seven countries. They are not substitutes.
 
-### Licence — CC-BY-4.0, verified four ways
+### Licence, the three NKG grids — CC-BY-4.0, verified four ways
 
 | evidence | what it says |
 |---|---|
@@ -290,6 +301,29 @@ Attribution, and an indication of any changes. So:
 - **Attribution** is the table above, and it must travel with any redistribution of these bytes.
 - **No changes.** The files are byte-identical to the PROJ-data release; the SHA-256 column is how
   that is checked. They are not resampled, recompressed or cropped.
+
+### Licence, `fr_ign_RAF20.tif` — Etalab Open Licence, verified three ways
+
+This one is **not** CC-BY-4.0, so it gets its own statement rather than being folded into the table
+above.
+
+| evidence | what it says |
+|---|---|
+| The file's own `TIFFTAG_COPYRIGHT`, read out of the vendored bytes | `Derived from work by IGN France. Open License https://www.etalab.gouv.fr/wp-content/uploads/2014/05/Open_Licence.pdf` |
+| PROJ-data's `copyright_and_licenses.csv` | `fr_ign_RAF20.tif,Institut Géographique National (IGN) France,Open License France - https://www.etalab.gouv.fr/wp-content/uploads/2014/05/Open_Licence.pdf,1.11` |
+| `proj.db`'s `grid_alternatives` table | `direct_download = 1` and `open_license = 1` against `https://cdn.proj.org/fr_ign_RAF20.tif`. The same CHECK constraint applies, so this is again PROJ's own assertion that the CDN copy may be freely redistributed |
+
+The fourth line of evidence the NKG grids have — `README.DATA`'s Open Source Definition rule — covers
+this file too, but it is a statement about the package rather than about this grid, so it is not
+counted twice.
+
+**What the Etalab Open Licence requires of us** is attribution to the producer and a mention of the
+licence and its version. Both are in the table. Redistribution and derivation are expressly permitted
+and there is no share-alike term.
+
+**And the file is already a derived work**, which its own copyright tag says: PROJ-data converted
+`RAF20.tac`, last modified 2022-06-09, into this GeoTIFF. We change nothing further — the bytes are
+the ones the CDN serves and the SHA-256 above is how that is checked.
 
 ### Chain of custody
 

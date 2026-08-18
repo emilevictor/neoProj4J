@@ -3,6 +3,7 @@ ntv2_0_downsampled.gsb
 egm96_15_downsampled.gtx
 subset_of_gr3df97a.tif
 nkgrf03vel_realigned_extract.tif
+test_gridshift_projected.tif
 test_hgrid_degree.tif
 test_hgrid_extra_ifd_with_other_info.tif
 test_hgrid_lon_shift_first.tif
@@ -38,3 +39,4 @@ test_vgrid_with_subgrid.tif
 us_noaa_geoid06_ak_subset_at_antimeridian.tif
 us_noaa_nadcon5_nad83_1986_nad83_harn_conus_extract_sanfrancisco.tif
 us_noaa_nadcon5_nad83_2007_nad83_2011_alaska_extract.tif
+us_noaa_nadcon5_nad83_2007_nad83_2011_conus_extract.tif

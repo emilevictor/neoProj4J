@@ -34,12 +34,27 @@ import org.locationtech.proj4j.conformance.manifest.AssertionOutcome;
  *
  * <ol>
  *   <li><strong>Does the row assert that PROJ got as far as a coordinate?</strong> A
- *       {@code coord_transfm*} or {@code no_inverse_op} errno can only be raised after
- *       {@code proj_create} returned an object, so it does. proj4j did not get that far, so nothing
- *       was compared: {@link #VACUOUS_EXPECTED_FAILURE}, regardless of how the bridge classified its
- *       own failure. 794 of the corpus's errno expectations are
+ *       {@code coord_transfm*} errno can only be raised after {@code proj_create} returned an
+ *       object, so it does. proj4j did not get that far, so nothing was compared:
+ *       {@link #VACUOUS_EXPECTED_FAILURE}, regardless of how the bridge classified its own failure.
+ *       794 of the corpus's errno expectations are
  *       {@code coord_transfm_outside_projection_domain} alone, and they are the whole
- *       {@code adams_hemi}/{@code guyou}/{@code peirce_q} population.</li>
+ *       {@code adams_hemi}/{@code guyou}/{@code peirce_q} population.
+ *
+ *       <p><b>{@code no_inverse_op} used to be on that list and is not any more, because the claim
+ *       was wrong.</b> It said the errno is "raised by {@code proj_trans}, not by
+ *       {@code proj_create}". A pipeline raises it from {@code pipeline_setup} — the
+ *       "Require a forward path through the pipeline" loop at
+ *       {@code 9.8.1:src/pipeline.cpp:534-556} returns
+ *       {@code destructor(P, PROJ_ERR_OTHER_NO_INVERSE_OP)} at {@code :546} when a step carries
+ *       {@code inv} and has no inverse. {@code affine} nulls its own {@code P->inv} for a singular
+ *       matrix ({@code 9.8.1:src/transformations/affine.cpp:158-164}), so
+ *       {@code more_builtins.gie:1043} fails inside {@code proj_create} upstream exactly as it does
+ *       here. The corpus says as much in its own comment above that block: <em>"the forward path
+ *       does not exist"</em>. All three {@code no_inverse_op} rows in the corpus were checked
+ *       against this change: {@code :457} stays vacuous ({@code NOT_IMPLEMENTED} is still never
+ *       promoted), {@code :1005} is untouched because it fails at transform, and {@code :1043} is
+ *       the one that becomes a genuine pass.</p></li>
  *   <li><strong>Otherwise, does proj4j claim the <em>definition</em> is bad?</strong>
  *       {@link GieFailureKind#INVALID_DEFINITION} means, by its own documented contract, "PROJ 9.8.1
  *       would refuse this too" — which is exactly what such a row asserts, so it is a genuine
@@ -78,8 +93,6 @@ public enum ExpectedFailureVerdict {
     /** The one errno that is raised while <em>building</em> an operation from a grid file. */
     private static final String FILE_NOT_FOUND = "invalid_op_file_not_found_or_invalid";
 
-    /** Raised by {@code proj_trans}, not by {@code proj_create}: the object exists, the inverse does not. */
-    private static final String NO_INVERSE = "no_inverse_op";
 
     private final AssertionOutcome outcome;
 
@@ -156,7 +169,6 @@ public enum ExpectedFailureVerdict {
      * @return {@code true} if the row asserts a built operation
      */
     static boolean assertsProjBuiltTheOperation(String canonicalErrno) {
-        return canonicalErrno != null
-                && (canonicalErrno.startsWith(COORD_TRANSFM_PREFIX) || canonicalErrno.equals(NO_INVERSE));
+        return canonicalErrno != null && canonicalErrno.startsWith(COORD_TRANSFM_PREFIX);
     }
 }
