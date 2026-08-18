@@ -27,8 +27,11 @@ package org.locationtech.proj4j.conformance.runner;
  * passes.
  *
  * <p>Three of the corpus's {@code require_grid} uses are live at 9.8.1: {@code BETA2007.gsb}
- * (vendored under {@code proj-data/}, so always present) and the two GeoTIFF grids
- * {@code us_nga_egm08_25.tif} and {@code fr_ign_RAF20.tif} (not vendored, so always skipped).
+ * (vendored under {@code proj-data/}), {@code fr_ign_RAF20.tif} (343 KB, vendored under
+ * {@code proj-data-cdn/} in 2.3.0) and {@code us_nga_egm08_25.tif}, which is <b>deliberately not
+ * vendored</b> — it is 80,585,622 bytes, past the size GitHub warns about, and it would sit in the
+ * history for good. That last one always skips, and that is the whole of the corpus's remaining
+ * SKIP count.
  */
 public interface GieGridAvailability {
 
@@ -39,7 +42,15 @@ public interface GieGridAvailability {
     boolean isAvailable(String gridFilename);
 
     /**
-     * Resolves grids against the vendored {@code proj-data/} directory on the test classpath.
+     * Resolves grids against both vendored grid directories on the test classpath.
+     *
+     * <p>There are two of them, and this class has to search both or it disagrees with the library it
+     * is measuring. {@code proj-data/} is what {@code conformance/sync-upstream.sh} writes and is
+     * wholly PROJ 9.8.1; {@code proj-data-cdn/} holds grids that come from the separate PROJ-data
+     * repository, which that script would delete and whose manifest header would misdescribe. Core
+     * searches both — {@code Proj4jGieOperationFactory}'s static initialiser registers a resolver for
+     * each, at priority 10 and 11 — so a {@code require_grid} that consulted only the first would
+     * report a grid missing that the transform then went on to use.
      *
      * <p>Stateless and immutable, so a single instance is safe to share.
      */
@@ -47,6 +58,9 @@ public interface GieGridAvailability {
 
         /** Where {@code conformance/sync-upstream.sh} puts the vendored grids. */
         public static final String RESOURCE_PREFIX = "/proj-data/";
+
+        /** Where grids from the PROJ-data repository go instead. See the class comment. */
+        public static final String CDN_RESOURCE_PREFIX = "/proj-data-cdn/";
 
         /** The shared instance. */
         public static final OnClasspath INSTANCE = new OnClasspath();
@@ -64,12 +78,14 @@ public interface GieGridAvailability {
             }
             // proj_grid_info() takes a bare filename and searches PROJ_LIB; there is no notion of a
             // path here, so a slash would be a corpus bug rather than something to resolve.
-            return OnClasspath.class.getResource(RESOURCE_PREFIX + name) != null;
+            return OnClasspath.class.getResource(RESOURCE_PREFIX + name) != null
+                    || OnClasspath.class.getResource(CDN_RESOURCE_PREFIX + name) != null;
         }
 
         @Override
         public String toString() {
-            return "GieGridAvailability.OnClasspath[" + RESOURCE_PREFIX + "]";
+            return "GieGridAvailability.OnClasspath[" + RESOURCE_PREFIX + ", "
+                    + CDN_RESOURCE_PREFIX + "]";
         }
     }
 

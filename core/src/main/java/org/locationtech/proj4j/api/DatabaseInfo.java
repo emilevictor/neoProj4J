@@ -28,8 +28,9 @@ import org.locationtech.proj4j.spi.ProjDatabase;
  * <h2>There is no {@code proj.db}, and this class says so</h2>
  *
  * <p>PROJ 9.8.1 resolves an authority code against {@code proj.db}, a 10&nbsp;MB SQLite database
- * carrying <b>EPSG v12.029</b> plus ESRI, IGNF, IAU_2015, NKG and NRCAN. Proj4J ships nothing of
- * the kind. What it ships, in the separate {@code proj4j-epsg} artifact, is a <b>PROJ.4
+ * carrying <b>EPSG v12.029</b> plus ESRI, IGNF, IAU_2015, NKG and NRCAN. The tail of that list is
+ * smaller than it reads: measured, NKG owns 2 CRSs and NRCAN owns <b>none</b>, contributing two
+ * {@code grid_transformation} rows and nothing else. Proj4J ships nothing of the kind. What it ships, in the separate {@code proj4j-epsg} artifact, is a <b>PROJ.4
  * {@code +init=} dictionary</b>: flat text files of the form
  * {@code <4326> +proj=longlat +datum=WGS84 +no_defs}, generated from <b>EPSG v9.2</b>.
  *
@@ -228,21 +229,24 @@ public final class DatabaseInfo {
                     .append(". Operation selection, accuracy and area of use are read from it. ");
             sb.append(dictionaryPresent
                     ? "The legacy PROJ.4 dictionary (EPSG " + DICTIONARY_VINTAGE + ") is also "
-                            + "present and stays authoritative for the codes it knows, so adding the "
-                            + "database cannot move a coordinate that already worked; the database is "
-                            + "consulted for codes the dictionary cannot produce."
+                            + "present and stays authoritative for the codes it knows, so the "
+                            + "parameters those codes resolve to do not change when the database is "
+                            + "added, and the database is consulted only for codes the dictionary "
+                            + "cannot produce. That is a statement about CRSs, not about answers: "
+                            + "the database also decides which operation runs between two CRSs, "
+                            + "however those two were built, so a coordinate CAN move."
                     : "The legacy PROJ.4 dictionary is absent, so authority:code lookups resolve "
                             + "against the database alone -- which builds geodetic CRSs but not "
-                            + "projected ones. Add proj4j-epsg for those.");
+                            + "projected ones. Add neoproj4j-epsg for those.");
             return sb.toString();
         }
         if (!dictionaryPresent) {
             return "No CRS metadata of any kind is on the classpath: no proj.db, and not the "
-                    + "legacy PROJ.4 dictionary either (add proj4j-epsg for authority:code "
+                    + "legacy PROJ.4 dictionary either (add neoproj4j-epsg for authority:code "
                     + "lookups). PROJ.4 parameter strings, WKT and PROJJSON still work.";
         }
         return "No proj.db. Authority codes resolve against the legacy PROJ.4 +init= dictionary in "
-                + "proj4j-epsg, generated from EPSG " + DICTIONARY_VINTAGE + "; PROJ 9.8.1 ships "
+                + "neoproj4j-epsg, generated from EPSG " + DICTIONARY_VINTAGE + "; PROJ 9.8.1 ships "
                 + "EPSG " + PROJ_EPSG_VERSION + " instead. The dictionary carries no version stamp, "
                 + "so no version string is reported rather than a guessed one. Codes added, "
                 + "deprecated or re-parameterised after EPSG " + DICTIONARY_VINTAGE + " are absent "

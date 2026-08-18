@@ -14,8 +14,8 @@
 #
 #     check         mirrors                              expected today
 #     ------------  -----------------------------------  ------------------------------------------
-#     ci            ci.yaml   job build-and-test          passes; 3,029 tests, 6 skipped
-#     conformance   conformance.yaml  job corpus          passes, 7819/7911, regressed 0
+#     ci            ci.yaml   job build-and-test          passes; 3,079 tests, 6 skipped
+#     conformance   conformance.yaml  job corpus          passes, 7915/7922, regressed 0
 #     golden        golden.yaml       job golden          FAILS on 2,083 UNEXPLAINED rows
 #     determinism   determinism.yaml  job bits (one leg)  passes, 22 tests
 #     bench         bench.yaml        job gate            passes; OPT-IN, ~21 min, needs a quiet box
@@ -85,7 +85,7 @@ Checks (default: all)
   all             ci + conformance + golden + determinism  (bench is NOT included)
   ci              mvn clean install                        - mirrors ci.yaml/build-and-test
   conformance     the PROJ 9.8.1 gie/GIGS corpus sweep     - mirrors conformance.yaml/corpus
-  golden          the 53,430-row behavioural sweep         - mirrors golden.yaml/golden
+  golden          the 53,450-row behavioural sweep         - mirrors golden.yaml/golden
   determinism     the raw-bit StrictMath golden, one leg   - mirrors determinism.yaml/bits
   bench           the Tier 1/2 performance gate            - mirrors bench.yaml/gate  [~21 min]
 
@@ -316,13 +316,14 @@ break_conformance() {
 # =====================================================================================
 # CHECK: ci   -- mirrors .github/workflows/ci.yaml, job build-and-test
 # =====================================================================================
-# A FLOOR, NOT AN EXPECTED COUNT. The reading it guards is 3,029 tests - core 2,573, conformance 354
-# (its unit tests; the corpus sweep is behind -Pconformance and does not run here), db 88, geoapi
-# 14, and no test sources in epsg or grids-us-legacy. Measured 2026-08-16 on the assembled 2.2.0
+# A FLOOR, NOT AN EXPECTED COUNT. The reading it guards is 3,079 tests - core 2,621, conformance 355
+# (its unit tests; the corpus sweep is behind -Pconformance and does not run here), db 89, geoapi
+# 14, and no test sources in epsg or grids-us-legacy. Measured 2026-08-17 on the assembled 2.3.0
 # stack with `./docker/run.sh ci conformance golden determinism`, whose own tally line reads
-# `tests=3029 failures=0 errors=0 skipped=6  across 276 report files`; the four module totals above
-# are the `Tests run:` lines of the same log and they sum to 3,029 exactly, which is the second,
-# independent count. The 2.1.0 release commit 6ae23b7, measured the same way, reads 2,667 - core
+# `tests=3079 failures=0 errors=0 skipped=6  across 280 report files`; the four module totals above
+# are the `Tests run:` lines of the same log and they sum to 3,079 exactly, which is the second,
+# independent count. The 2.2.0 release commit 12a5db4, measured the same way, reads 3,029 - core
+# 2,573, conformance 354, db 88, geoapi 14. The 2.1.0 release commit 6ae23b7 reads 2,667 - core
 # 2,234, conformance 345, db 75, geoapi 13. READ BOTH OFF A RUN AND
 # NEVER SUBTRACT ONE FROM THE OTHER TO GET THE THIRD: this one integer is what caught a half-merged
 # PR when four green gates did not, and a computed delta would have agreed with itself and hidden it.
@@ -336,19 +337,22 @@ break_conformance() {
 # a skip is never a pass.
 #
 # 3,000 IS CHOSEN, NOT ROUNDED, and the rule that chooses it is the same one that once chose 2,500 and
-# then 2,600: it is the highest multiple of 100 that STILL FAILS when the db module (88 tests) drops
-# out of the reactor. 3,029 - 88 = 2,941, and 2,941 < 3,000, so the gate goes red. That property is
-# the whole reason this floor exists. The admissible interval is therefore (2,941, 3,029] - above the
+# then 2,600: it is the highest multiple of 100 that STILL FAILS when the db module (89 tests) drops
+# out of the reactor. 3,079 - 89 = 2,990, and 2,990 < 3,000, so the gate goes red. That property is
+# the whole reason this floor exists. The admissible interval is therefore (2,990, 3,079] - above the
 # db-less reading so losing db is caught, at or below today's reading so a clean tree passes - and
 # both 2,900 and 3,100 are outside it, which is what makes 3,000 the only round hundred available
 # rather than a preference.
 #
-# THE PROPERTY NOW HOLDS BY 59 TESTS. The db-less reading is 2,941 against a floor of 3,000. The
-# margin shrinks every time the suite grows, because the floor is fixed and the db-less reading rises
-# with it. THE EXACT BREAKING POINT IS A TOTAL OF 3,088: at 3,088 the db-less reading is
-# 3,088 - 88 = 3,000, which is no longer BELOW the floor, and the entire db module could drop out with
-# the gate still green. WHOEVER PUSHES THE TOTAL PAST 3,087 MUST RAISE THIS FLOOR IN THE SAME CHANGE -
-# to 3,100, which restores the property against a db-less 3,000 and buys another 100.
+# THE PROPERTY NOW HOLDS BY 10 TESTS, AND THAT IS THE THINNEST IT HAS EVER BEEN. The db-less reading
+# is 2,990 against a floor of 3,000. It was 59 tests of margin at 2.2.0; 2.3.0 added 50 tests and
+# spent 49 of them. THE EXACT BREAKING POINT IS A TOTAL OF 3,089: at 3,089 the db-less reading is
+# 3,089 - 89 = 3,000, which is no longer BELOW the floor, and the entire db module could drop out with
+# the gate still green. WHOEVER PUSHES THE TOTAL PAST 3,088 MUST RAISE THIS FLOOR IN THE SAME CHANGE -
+# to 3,100, which restores the property against a db-less 3,000 and buys another 100. Ten tests is one
+# ordinary test class, so expect that to be the next release rather than a distant one, and note that
+# the breaking point moves with `db`'s own count as well as with the total: every test added to `db`
+# raises the db-less reading by nothing but raises the trigger by one.
 #
 # THE PREVIOUS FLOOR OF 2,600 HAD LOST THE PROPERTY, and how it lost it is the lesson. 2,600 was
 # chosen against a 2,667 reading where db was 75 tests, and the comment at that reading named 2,674 as
@@ -361,11 +365,11 @@ break_conformance() {
 # rose to 2,560, 60 clear of the floor. The floor never breaks; reality moves out from under it, which
 # is why it needs raising rather than defending.
 #
-# What it deliberately does NOT catch: geoapi's 14 tests vanishing (3,015, still over). No floor can
+# What it deliberately does NOT catch: geoapi's 14 tests vanishing (3,065, still over). No floor can
 # catch a 14-test module and still leave room for ordinary additions. Losing conformance IS caught -
-# 3,029 - 354 = 2,675, well under. The room for a legitimate test DELETION is 29 tests, narrower than
-# the 67 the old floor allowed; that is the price of keeping the multiple-of-100 rule and the db
-# property at the same time. When either margin runs out, RAISE THE FLOOR, never lower it.
+# 3,079 - 355 = 2,724, well under. The room for a legitimate test DELETION is 79 tests; that room grows
+# as the suite grows, while the db margin above shrinks, so the two margins move in opposite directions
+# and the db one is always the binding constraint. When either runs out, RAISE THE FLOOR, never lower it.
 #
 # AND THE REAL FIX IS TO STOP DEPENDING ON THIS COMMENT BEING READ. "Losing a whole module turns this
 # gate red" is arithmetic over the per-module totals, and this script already parses those - the four
@@ -600,7 +604,7 @@ check_conformance() {
 # CHECK: golden -- mirrors .github/workflows/golden.yaml, job golden
 # =====================================================================================
 check_golden() {
-    hdr "golden  -- the 53,430-row behavioural sweep   (golden.yaml / golden)"
+    hdr "golden  -- the 53,450-row behavioural sweep   (golden.yaml / golden)"
     cd "$WORK" || return 2
     rm -rf golden/target/golden golden/target/surefire-reports
 
@@ -655,10 +659,32 @@ check_golden() {
         record golden FAIL "baseline golden.tsv missing" "nothing to compare the generated table against"
         return
     fi
-    if [ "$got" -ne "$want" ]; then
-        bad "the generated table has $got lines but the baseline has $want. A row-count mismatch"
-        bad "means the sweep did not cover the same input set, so the diff is not comparable."
-        record golden FAIL "$got rows generated vs $want baseline" "the sweep covered a different input set"
+    # The generated table is allowed to be LONGER than the baseline by exactly this many rows, and
+    # by no other number. The baseline is frozen at released 1.4.3 and is never regenerated, but the
+    # sweep enumerates the CURRENT dictionaries - so adding a definition to proj4/nad/* necessarily
+    # makes the generated table longer, and a plain equality check reads that as "the sweep covered a
+    # different input set" and fails structurally.
+    #
+    # 2.3.0 added four defs (EPSG:4979, EPSG:7843, EPSG:7912, ESRI:102100) x 5 probes = 20 rows.
+    # Those 20 rows are claimed by DICT-2.3.0-FOUR-DEFS-ADDED in golden/rules.yaml, which names each
+    # key literally and says where each definition's text came from, and they are accounted for in
+    # golden/baseline/1.4.3/golden-expect.txt as ADDED. So the surplus is declared in three places
+    # and this number is the fourth; changing it without the other three is the thing to catch.
+    #
+    # Set it back to 0 whenever the baseline is refreshed. The check stays TWO-SIDED: 19 rows fails,
+    # 21 rows fails, and a SHORTER table fails as it always did. The only thing that passes is the
+    # surplus somebody wrote down.
+    #
+    # MIRRORED at .github/workflows/golden.yaml. The two must move together or they stop mirroring.
+    local declared_surplus=20
+    local allowed=$(( want + declared_surplus ))
+    if [ "$got" -ne "$allowed" ]; then
+        bad "the generated table has $got lines but the baseline has $want and the declared surplus"
+        bad "is $declared_surplus, so $allowed was expected. A row-count mismatch means the sweep did"
+        bad "not cover the input set anybody declared, so the diff is not comparable. If a definition"
+        bad "was added or removed, move the surplus in this script, .github/workflows/golden.yaml,"
+        bad "golden/rules.yaml and golden/baseline/1.4.3/golden-expect.txt together."
+        record golden FAIL "$got rows generated vs $want baseline + $declared_surplus declared" "the sweep covered a different input set"
         return
     fi
 
@@ -687,12 +713,14 @@ check_golden() {
         record golden FAIL "$totalskip skips" "an Assume fired inside the golden module"
         return
     fi
-    say "Non-vacuity satisfied: the gate ran, over the full $want-line table, with no skips."
+    say "Non-vacuity satisfied: the gate ran, over the full $got-line table, with no skips."
 
     # ---- classify the failure ----------------------------------------------------------
-    # 54 rules, all `status: active` and all with a pinned expected_rows, is the state the backlog
-    # is being worked against - measured 2026-08-16 on the assembled 2.2.0 stack, and the pins sum
-    # to 39,403, which is the INTENDED figure. The count is read from the file below rather than
+    # 55 rules, all `status: active` and all with a pinned expected_rows, is the state the backlog
+    # is being worked against - measured 2026-08-17 on the assembled 2.3.0 stack, and the pins sum
+    # to 39,423, which is the INTENDED figure. It was 54 rules summing to 39,403 at 2.2.0; 2.3.0
+    # added DICT-2.3.0-FOUR-DEFS-ADDED, whose 20 rows are the four new dictionary defs. The count
+    # is read from the file below rather than
     # trusted from this comment - it has been written down as 38, 41, 42, 44, 48, 49 and 50 at
     # various points and was wrong each time.
     local rules pinned
@@ -755,8 +783,8 @@ check_golden() {
 # matters. What it gives up is catching a DROP that stays above the floor, and that is why the
 # drift line below prints on every run rather than only on failure.
 #
-# RAISE BOTH when tests are added on purpose. It is a ratchet, not a ceiling, and the two constants
-# must move together.
+# RAISE BOTH when tests are added on purpose. The number is a floor that only ever goes up, not a
+# ceiling - it is there to catch tests going missing - and the two constants must move together.
 DET_FLOOR_TESTS=22
 DET_WORKFLOW_FLOOR=22
 check_determinism() {
@@ -804,7 +832,7 @@ check_determinism() {
     local drift="" driftwhy=""
     if [ "$ran" -gt "$DET_WORKFLOW_FLOOR" ]; then
         drift=" [drifted UP: determinism.yaml's floor is $DET_WORKFLOW_FLOOR, +$((ran - DET_WORKFLOW_FLOOR))]"
-        driftwhy="$ran determinism tests match the pattern today against a floor of $DET_WORKFLOW_FLOOR in both .github/workflows/determinism.yaml and this script. Not a failure - a floor is a ratchet - but raise both so the floor keeps tracking reality."
+        driftwhy="$ran determinism tests match the pattern today against a floor of $DET_WORKFLOW_FLOOR in both .github/workflows/determinism.yaml and this script. Not a failure - the floor only ever goes up - but raise both so it keeps tracking reality."
         say ""
         say "DRIFT, not a failure: $ran tests matched the pattern and the floor in both"
         say ".github/workflows/determinism.yaml and this script is $DET_WORKFLOW_FLOOR. Raise"
@@ -902,7 +930,7 @@ check_bench() {
     # 200 leaves 45 arms of headroom, which matters more here than elsewhere because the arm count
     # is a product of @Param combinations and moves in jumps: this suite went 181 -> 245 in one
     # change. It is still tight enough that losing any whole class fails. RAISE IT when arms are
-    # added; it is a ratchet, same as everywhere else in this file.
+    # added; it is a floor that only ever goes up, same as everywhere else in this file.
     #
     # Note this is a backstop, not the primary check: run-gate.sh enumerates the expected arms with
     # JMH's own `-lp` and dies per shard if a shard returns fewer than it should. This catches the

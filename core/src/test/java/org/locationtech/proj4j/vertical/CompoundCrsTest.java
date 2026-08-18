@@ -15,10 +15,12 @@
  */
 package org.locationtech.proj4j.vertical;
 
+import java.util.Arrays;
 import java.util.List;
 
 import org.junit.Test;
 import org.locationtech.proj4j.CRSFactory;
+import org.locationtech.proj4j.CoordinateReferenceSystem;
 import org.locationtech.proj4j.InvalidValueException;
 import org.locationtech.proj4j.UnknownAuthorityCodeException;
 
@@ -34,7 +36,7 @@ import static org.junit.Assert.fail;
  *
  * <h2>What is actually missing, verified rather than taken on report</h2>
  *
- * <p>{@code epsg/src/main/resources/proj4/nad/epsg} has <b>5,755</b> entries. Grepping it for
+ * <p>{@code epsg/src/main/resources/proj4/nad/epsg} has <b>5,758</b> entries. Grepping it for
  * each code in turn:
  *
  * <table>
@@ -43,7 +45,8 @@ import static org.junit.Assert.fail;
  * <tr><td>{@code 4326}</td><td>WGS 84, geographic 2D</td><td>yes</td></tr>
  * <tr><td>{@code 27700}</td><td>British National Grid</td><td>yes</td></tr>
  * <tr><td>{@code 4936}, {@code 4978}</td><td>ETRS89 / WGS 84 geocentric</td><td>yes</td></tr>
- * <tr><td><b>{@code 4979}</b></td><td><b>WGS 84, geographic 3D</b></td><td><b>no</b></td></tr>
+ * <tr><td><b>{@code 4979}</b></td><td><b>WGS 84, geographic 3D</b></td>
+ *     <td><b>yes, and only as its horizontal half</b></td></tr>
  * <tr><td>{@code 4937}</td><td>ETRS89, geographic 3D</td><td>no</td></tr>
  * <tr><td>{@code 5773}</td><td>EGM96 height</td><td>no</td></tr>
  * <tr><td>{@code 3855}</td><td>EGM2008 height</td><td>no</td></tr>
@@ -51,13 +54,15 @@ import static org.junit.Assert.fail;
  * <tr><td>{@code 5703}</td><td>NAVD88 height</td><td>no</td></tr>
  * </table>
  *
- * <p>So the report was right that {@code EPSG:4979} is absent — and the reason is
- * structural, not an omission: {@code projinfo EPSG:4979 -o PROJ} is
+ * <p>{@code EPSG:4979} was absent until 2.3.0, when it was added along with {@code 7843} and
+ * {@code 7912} because {@code epsg_no_grid.gie} names all three as a {@code crs_src}. <b>Adding
+ * it did not make it three-dimensional.</b> {@code projinfo EPSG:4979 -o PROJ} is
  * {@code +proj=longlat +datum=WGS84 +no_defs}, <em>byte-identical</em> to {@code EPSG:4326}'s
- * entry. A PROJ.4 {@code +init=} dictionary has no way to say "and this one has a third
- * axis", so adding a {@code <4979>} line would create an entry indistinguishable from
- * {@code <4326>}. Vertical CRSs are absent for the same reason, one level worse: a
- * proj-string cannot denote a standalone vertical CRS at all.
+ * entry: a PROJ.4 {@code +init=} dictionary has no way to say "and this one has a third axis",
+ * and neither has PROJ's own export. So the entry is honest about what it is — the horizontal
+ * half — and a caller who wants the height interpreted still needs {@link CompoundCrs}. Vertical
+ * CRSs remain absent for the same reason, one level worse: a proj-string cannot denote a
+ * standalone vertical CRS at all.
  *
  * <h2>What a compound CRS reduces to</h2>
  *
@@ -232,20 +237,35 @@ public class CompoundCrsTest {
     // ------------------------------------------------------------------ what is missing
 
     /**
-     * {@code EPSG:4979} is not in the shipped dictionary and this test says so out loud, with
-     * the reason. If a later change adds it, this test fails and the reason has to be revisited
-     * rather than the absence being rediscovered.
+     * {@code EPSG:4979} resolves, and to the horizontal half of the 3D CRS &mdash; not to a
+     * compound one.
+     *
+     * <p>This test used to assert the opposite, that the code was absent, and told whoever made it
+     * resolve to check what it resolved <em>to</em> before celebrating. That is what this now does.
+     * The code was added to {@code proj4/nad/epsg} for the gie corpus, where
+     * {@code epsg_no_grid.gie} names it as a {@code crs_src}.
+     *
+     * <p><b>The height is still not carried.</b> {@code EPSG:4979} is WGS 84 <em>3D</em>, and the
+     * entry is {@code +proj=longlat +datum=WGS84 +no_defs} &mdash; byte-identical to
+     * {@code EPSG:4326}'s, because the PROJ.4 format cannot say "3D" and neither can PROJ's own
+     * export ({@code projinfo EPSG:4979 -o PROJ} gives the same string). So a caller who asks for
+     * 4979 gets the 2D CRS, and the z they pass is carried through unchanged rather than
+     * interpreted as an ellipsoidal height against a datum. That is the same contract
+     * {@link CompoundCrs} exists to improve on, and it is why adding the code does not make this
+     * class redundant.
      */
     @Test
-    public void epsg4979IsAbsentFromTheShippedDictionary() {
-        try {
-            crsFactory.createFromName("EPSG:4979");
-            fail("EPSG:4979 resolved. It is absent from proj4/nad/epsg, and its PROJ.4 form "
-                    + "(+proj=longlat +datum=WGS84 +no_defs) is byte-identical to EPSG:4326's - "
-                    + "so if it now resolves, check what it resolves TO before celebrating.");
-        } catch (UnknownAuthorityCodeException expected) {
-            assertTrue(expected.getMessage(), expected.getMessage().contains("4979"));
-        }
+    public void epsg4979ResolvesToTheHorizontalHalfOnly() {
+        CoordinateReferenceSystem three = crsFactory.createFromName("EPSG:4979");
+        CoordinateReferenceSystem two = crsFactory.createFromName("EPSG:4326");
+
+        assertEquals("the PROJ.4 form cannot express the third dimension, so 4979 and 4326 are "
+                        + "the same parameters",
+                Arrays.toString(two.getParameters()), Arrays.toString(three.getParameters()));
+        assertFalse("resolving 4979 must not manufacture a vertical component out of nothing; "
+                        + "a caller who wants the height interpreted still needs createCompound",
+                Arrays.toString(three.getParameters()).contains("geoidgrids")
+                        || Arrays.toString(three.getParameters()).contains("vunits"));
     }
 
     /** An unknown vertical code names itself and says where the data has to come from. */

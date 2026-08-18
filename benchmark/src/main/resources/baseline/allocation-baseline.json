@@ -1,12 +1,13 @@
 {
   "_format": 1,
   "_doc": [
-    "TIER 1 BASELINE - allocation, bytes per operation, blocking on every PR.",
+    "TIER 1 BASELINE - allocation, bytes per operation. Fails the run it is in; blocks no merge,",
+    "because bench.yaml is workflow_dispatch only and ./docker/run.sh bench is opt-in.",
     "",
     "The measurement is JMH's `-prof gc` secondary metric `gc.alloc.rate.norm`: bytes allocated",
     "divided by operations performed. It is a property of the BYTECODE, not of the machine, so it",
-    "reads the same on a laptop and on a shared CI runner. That is why this tier can block a PR",
-    "while absolute ns/op cannot.",
+    "reads the same on a laptop and on a shared CI runner. That is why this tier is safe to fail a",
+    "run on while absolute ns/op is not.",
     "",
     "TWO COLUMNS, AND THE DIFFERENCE MATTERS:",
     "  targetBytesPerOp - the POLICY. What the number should be once the optimisation work has",

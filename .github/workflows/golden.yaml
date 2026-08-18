@@ -3,7 +3,7 @@ name: Golden Master
 # THE BEHAVIOURAL CHANGE DETECTOR.
 #
 # `golden` answers exactly one question - "did we change proj4j's behaviour in a way we did not
-# mean to?" - over 53,430 rows covering 9,013 registry CRS plus a synthetic parameter matrix and
+# mean to?" - over 53,450 rows covering 9,017 registry CRS plus a synthetic parameter matrix and
 # the MetaCRS CSVs. Every row that differs from the pinned 1.4.3 baseline must be claimed by
 # exactly one rule in golden/rules.yaml, with an exact row count, a reason and an expiry, or the
 # build fails. See golden/README.md.
@@ -18,9 +18,11 @@ name: Golden Master
 #
 # THIS JOB IS EXPECTED TO FAIL, AND THAT IS THE CORRECT OUTCOME. Its current assertion reads:
 #
-#     11,944 UNCHANGED · 41,486 CHANGED · 0 ADDED · 0 REMOVED · 39,403 INTENDED · 2,083 UNEXPLAINED
+#     11,944 UNCHANGED · 41,486 CHANGED · 20 ADDED · 0 REMOVED · 39,423 INTENDED · 2,083 UNEXPLAINED
 #
-# (Measured 2026-08-16 on this tree with `./docker/run.sh golden`, and pasted from that run. The
+# (Measured 2026-08-17 on this tree with `./docker/run.sh golden`, and pasted from that run. It read
+# 0 ADDED and 39,403 INTENDED at 2.2.0; 2.3.0 adds four dictionary definitions, so the sweep emits 20
+# rows the frozen baseline cannot contain, and one new rule claims them. The
 # 2.1.0 release branch read 11,994 · 41,436 · 39,149 · 2,287 on 2026-08-14; it read
 # 11,996 · 41,434 · 39,147 on that same branch before
 # NUM-SOMERC-FDLIBM-TRANSCENDENTALS landed, 12,002 · 41,428 · 39,141 on 2026-08-13, and said
@@ -43,20 +45,22 @@ name: Golden Master
 # status checks, so an assertion added here would gate nothing on a PR. In the test it runs
 # wherever the sweep runs, including docker/run.sh.
 # What this job adds on top is: the test ran exactly once and was not skipped, at least 55
-# tests ran in the module with none skipped, and the generated table has the same line count as the
-# committed baseline. GoldenMasterTest itself fails on any UNEXPLAINED row or on DEAD_RULE /
+# tests ran in the module with none skipped, and the generated table has the baseline's line count
+# plus the declared surplus - 20 as of 2.3.0, for the four added dictionary definitions - checked
+# two-sided, so one row either way fails. GoldenMasterTest itself fails on any UNEXPLAINED row or on DEAD_RULE /
 # PENDING_RULE_FIRED / EXPIRED_RULE / COUNT_MISMATCH. Since the test is already red on the backlog,
 # its pass/fail bit carries no information about a change - which is why the figure check reports a
-# separate, named, greppable failure rather than relying on the exit code. rules.yaml carries 54
+# separate, named, greppable failure rather than relying on the exit code. rules.yaml carries 55
 # rules, all `status: active` and all with a pinned integer `expected_rows` - count them rather than
 # quoting a number from prose, which has now been wrong three times in this same sentence: it said
 # 44 on 2026-08-13 when the real count was 48; 48 until 2026-08-14, when
 # NUM-SOMERC-FDLIBM-TRANSCENDENTALS made it 49; and then 49 and 50 in two neighbouring clauses at
 # once, until this release added PROJ-ISEA-NO-INVERSE-OFF-THE-DEFAULT-ORIENTATION and
-# PROJ-CHAMB-MOD-KROVAK-OEA-ROUSS-REGISTERED and made it 51, and three more have landed since.
+# PROJ-CHAMB-MOD-KROVAK-OEA-ROUSS-REGISTERED and made it 51, and three more have landed since; then
+# 2.3.0 added DICT-2.3.0-FOUR-DEFS-ADDED and made it 55.
 # Both `grep -c "^  - id:" golden/rules.yaml` and
-# `grep -c "    status: active" golden/rules.yaml` say 54, and the pinned
-# rows sum to 39403 - the same number the run prints as INTENDED. Sum them anchored on the
+# `grep -c "    status: active" golden/rules.yaml` say 55, and the pinned
+# rows sum to 39423 - the same number the run prints as INTENDED. Sum them anchored on the
 # four-space indent: `grep -oE '^    expected_rows: [0-9]+$' golden/rules.yaml | awk -F': '
 # '{s+=$2} END{print s}'`. A comment further down this file quotes another rule's
 # "expected_rows: 944", so a looser pattern adds that 944 in - which is how this sentence came to
@@ -251,11 +255,27 @@ jobs:
             echo "::error::the repository, so this is a broken checkout or a deleted baseline, not a"
             echo "::error::test result. Without it the row-count comparison below is vacuous."
             exit 1; }
-          [ "$got" -eq "$want" ] || {
-            echo "::error::the generated table has $got lines but the baseline has $want."
-            echo "::error::A row-count mismatch means the sweep did not cover the same input set,"
-            echo "::error::so the diff below it is not comparable. Do not re-pin to make this"
-            echo "::error::agree - find out which inputs went missing."
+          #     The generated table may be LONGER than the baseline by exactly declared_surplus rows
+          #     and by no other number. The baseline is frozen at released 1.4.3 and is never
+          #     regenerated, but the sweep enumerates the CURRENT dictionaries - so adding a def to
+          #     proj4/nad/* necessarily lengthens the generated table, and a plain equality check
+          #     reads that as a truncated sweep and fails structurally. 2.3.0 added four defs
+          #     (EPSG:4979, EPSG:7843, EPSG:7912, ESRI:102100) x 5 probes = 20 rows, claimed by
+          #     DICT-2.3.0-FOUR-DEFS-ADDED in golden/rules.yaml and accounted for as ADDED in
+          #     golden/baseline/1.4.3/golden-expect.txt. Set it back to 0 when the baseline is
+          #     refreshed. The check stays TWO-SIDED - 19 fails, 21 fails, shorter fails - so the
+          #     only thing that passes is the surplus somebody wrote down.
+          #     MIRRORED at docker/run.sh; the two must move together or they stop mirroring.
+          declared_surplus=20
+          allowed=$(( want + declared_surplus ))
+          [ "$got" -eq "$allowed" ] || {
+            echo "::error::the generated table has $got lines but the baseline has $want and the"
+            echo "::error::declared surplus is $declared_surplus, so $allowed was expected."
+            echo "::error::A row-count mismatch means the sweep did not cover the input set anybody"
+            echo "::error::declared, so the diff below it is not comparable. Do not re-pin to make"
+            echo "::error::this agree - find out which inputs went missing. If a definition was added"
+            echo "::error::or removed on purpose, move the surplus in this file, docker/run.sh,"
+            echo "::error::golden/rules.yaml and golden/baseline/1.4.3/golden-expect.txt together."
             exit 1; }
 
           # (4) Every golden test must have run and none may be skipped. rules.yaml schema
@@ -278,7 +298,7 @@ jobs:
           [ "$totalskip" -eq 0 ] || {
             echo "::error::$totalskip golden tests were skipped. Skips are never passes."; exit 1; }
 
-          echo "Non-vacuity satisfied: the gate ran, over the full $want-line table, with no skips."
+          echo "Non-vacuity satisfied: the gate ran, over the full $got-line table, with no skips."
 
       # THE POINT OF THE JOB IS THIS ARTEFACT. When the gate fails, the per-row verdict file is the
       # answer - it names, for every changed row, the rule that claimed it or the rules that

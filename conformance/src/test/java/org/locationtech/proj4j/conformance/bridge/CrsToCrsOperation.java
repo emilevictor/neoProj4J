@@ -41,13 +41,34 @@ import org.locationtech.proj4j.gie.GieIoUnits;
  * {@code epsg_no_grid.gie} (7 pairs, 6 assertions) and {@code epsg_grid.gie}
  * (3 pairs, 2 assertions). Measured by counting invocations over a full sweep:
  * {@link #transform} is entered <b>3 times</b> in the whole 7,923-assertion run, for
- * two distinct CRS pairs, and reaches the bottom of the method <b>once</b>. All 8 of
- * those assertions currently score FAIL (6) or SKIP (2) — <b>none is a pass</b>, so
- * no figure in the headline depends on anything this class decides. That is also why
- * this class is the <em>only</em> route from the corpus into
+ * two distinct CRS pairs, and reaches the bottom of the method <b>once</b>. Of those
+ * 8 assertions, <b>5 now pass</b>, 1 fails and 2 are skipped for want of a grid file.
+ * All five passes arrived in 2.3.0: four from building named CRSs under
+ * {@code AxisOrderPolicy.AUTHORITY} plus three codes added to the legacy dictionary,
+ * and the fifth from teaching {@code Proj.applyAxisPolicy} to ask the CRS database
+ * for a projected CRS's axis order. So the headline <em>does</em> now depend on what
+ * this class decides — an earlier version of this paragraph said it did not, which
+ * was true when it was written and stopped being true the moment those rows closed.
+ * That is also why this class is the <em>only</em> route from the corpus into
  * {@code BasicCoordinateTransform}: every other operation goes to
  * {@code SingleProjectionOperation} or {@code PipelineGieOperation}, neither of which
  * touches {@code CoordinateTransform}.
+ *
+ * <h2>One of those five passes is weaker than it looks</h2>
+ *
+ * <p>{@code epsg_no_grid.gie}'s fourth block, {@code EPSG:7843 → EPSG:7912} at epoch
+ * <b>2020.0</b>, passes because <b>no shift is applied at all</b> — not because the
+ * time-dependent Helmert was computed and came out right. EPSG:8049's static terms
+ * are all zero and only its rotation rates are non-zero, so at the reference epoch
+ * the correct answer <em>is</em> the identity, and doing nothing scores a pass.
+ *
+ * <p>The control that shows this is the very next block, the same pair at epoch
+ * <b>2026.0</b>, which still fails. Do not read the 2020.0 pass as evidence that the
+ * 15-parameter arithmetic works here; read the 2026.0 failure as the honest state.
+ * (That arithmetic is in fact correct — fed PROJ's own pipeline string it lands at
+ * 0.086436 mm — so what the 2026.0 row is blocked on is operation <em>discovery</em>:
+ * {@code db.operationsBetween("EPSG","7843","EPSG","7912")} is empty, because
+ * EPSG:8049 is published between the geocentric EPSG:7789 and EPSG:7842.)
  */
 final class CrsToCrsOperation implements GieOperation {
 
@@ -57,17 +78,20 @@ final class CrsToCrsOperation implements GieOperation {
     private final CoordinateTransform inverse;
     private final GieIoUnits left;
     private final GieIoUnits right;
+    private final boolean targetIsLatOrNorthingFirst;
 
     private GieFailure lastFailure;
 
     CrsToCrsOperation(String source, String target, CoordinateTransform forward,
-            CoordinateTransform inverse, GieIoUnits left, GieIoUnits right) {
+            CoordinateTransform inverse, GieIoUnits left, GieIoUnits right,
+            boolean targetIsLatOrNorthingFirst) {
         this.source = source;
         this.target = target;
         this.forward = forward;
         this.inverse = inverse;
         this.left = left;
         this.right = right;
+        this.targetIsLatOrNorthingFirst = targetIsLatOrNorthingFirst;
     }
 
     @Override
@@ -99,13 +123,16 @@ final class CrsToCrsOperation implements GieOperation {
 
     @Override
     public boolean crsDstIsLatLonOrYX() {
-        // See GieOperation#crsDstIsLatLonOrYX, which now records what this costs and
-        // what it does not. Short version: proj4j exposes no axis metadata to detect
-        // latitude-first targets with, but returning the right answer here would not
-        // move EPSG:2393 ("Finland YKJ Northing, Easting") -- that row is compared in
-        // metres, where the swap is a no-op, and its error is axis order on both
-        // sides. Do not treat this method as the fix for it.
-        return false;
+        // gie.cpp:751 sets this from isLatOrNorthingFirst(pj_dst), the target CRS's first axis
+        // name. The factory reads the equivalent off the resolved +axis= and hands it in here.
+        //
+        // Two things this does NOT do, so that nobody reaches for it as the fix for either.
+        // In the EUCLIDEAN_METRES branch the swap is a mathematical no-op -- hypot is symmetric
+        // and both operands are swapped -- so EPSG:2393 ("Finland YKJ Northing, Easting") does
+        // not move because of this flag. And it is not what decides the axis order in the first
+        // place; that is the AUTHORITY policy in Proj4jGieOperationFactory#createCrs. This flag
+        // only tells the comparator which way round the answer already is.
+        return targetIsLatOrNorthingFirst;
     }
 
     @Override

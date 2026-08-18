@@ -116,7 +116,7 @@ public class InitAuthorityGuardTest {
     @Test
     public void everyShippedAuthorityStillResolves() throws IOException {
         // Codes read out of the shipped files, not guessed: the first entry of each
-        // epsg/src/main/resources/proj4/nad/<authority>. epsg has 5,755 entries, esri 2,954,
+        // epsg/src/main/resources/proj4/nad/<authority>. epsg has 5,758 entries, esri 2,955,
         // world 47, nad83 123 and nad27 134.
         String[][] cases = {
                 {"epsg", "4326"},

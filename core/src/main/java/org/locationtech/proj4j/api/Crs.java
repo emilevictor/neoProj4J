@@ -767,8 +767,9 @@ public final class Crs {
      * <p>Present only for a CRS the <em>database</em> resolved &mdash; not for one the legacy PROJ.4
      * dictionary resolved under the same code, because those parameters come from the dictionary and
      * attributing them to the database would misstate where the numbers came from. The dictionary
-     * stays authoritative for every code it knows, so that adding {@code proj4j-db} cannot move a
-     * coordinate that already worked.
+     * stays authoritative for every code it knows, so adding {@code neoproj4j-db} does not change the
+     * parameters such a code resolves to. It can still change the <em>answer</em>, because the
+     * database also picks the operation between two CRSs; see {@code Proj.fromName}'s note.
      *
      * @return the row, or empty
      */

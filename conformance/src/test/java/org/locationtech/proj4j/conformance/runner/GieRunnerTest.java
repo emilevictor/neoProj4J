@@ -204,12 +204,19 @@ class GieRunnerTest {
     }
 
     @Test
-    @DisplayName("the vendored BETA2007.gsb resolves and the GeoTIFF grids do not")
+    @DisplayName("both vendored directories are searched, and the 80 MB grid is still absent")
     void classpathGridAvailabilityMatchesWhatIsVendored() {
         GieGridAvailability grids = GieGridAvailability.OnClasspath.INSTANCE;
         assertTrue(grids.isAvailable("BETA2007.gsb"), "BETA2007.gsb is vendored under proj-data/");
+        // The second prefix, added in 2.3.0. Until then this class searched only proj-data/, so a
+        // grid vendored under proj-data-cdn/ was reported missing while core resolved it perfectly
+        // well -- the two have to agree in both directions, not just one.
+        assertTrue(grids.isAvailable("fr_ign_RAF20.tif"),
+                "fr_ign_RAF20.tif is vendored under proj-data-cdn/");
+        assertTrue(grids.isAvailable("eur_nkg_nkgrf17vel.tif"),
+                "the NKG grids live under proj-data-cdn/ too");
+        // Deliberately not vendored: 80,585,622 bytes. See NOTICE-gie.md section 4.
         assertFalse(grids.isAvailable("us_nga_egm08_25.tif"));
-        assertFalse(grids.isAvailable("fr_ign_RAF20.tif"));
         assertFalse(grids.isAvailable(""));
         assertFalse(grids.isAvailable(null));
     }
@@ -394,13 +401,15 @@ class GieRunnerTest {
     @Test
     @DisplayName("the classification rule, stated as a table")
     void theClassificationRuleIsATableAndThisIsIt() {
-        // Rows the corpus says PROJ BUILT: coord_transfm* and no_inverse_op. Nothing survives them.
+        // Rows the corpus says PROJ BUILT: coord_transfm* and nothing else. Nothing survives them.
+        // no_inverse_op used to be on this list and was taken off in 2.3.0: a pipeline raises it
+        // from pipeline_setup, inside proj_create (9.8.1:src/pipeline.cpp:546), so it is not
+        // evidence that PROJ reached a coordinate. See ExpectedFailureVerdict's enum javadoc.
         for (String errno : new String[] {
             "coord_transfm",
             "coord_transfm_invalid_coord",
             "coord_transfm_outside_projection_domain",
             "coord_transfm_outside_grid",
-            "no_inverse_op",
         }) {
             assertTrue(ExpectedFailureVerdict.assertsProjBuiltTheOperation(errno), errno);
             for (GieFailureKind kind : GieFailureKind.values()) {

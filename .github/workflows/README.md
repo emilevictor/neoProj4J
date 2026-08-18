@@ -69,7 +69,7 @@ Five workflows:
 | `ci.yaml` | `determinism` — `en_US/UTF-8/UTC/arm64` | advisory | push, PR | Cross-architecture *smoke*: `core`'s suite still passes on AArch64. **Superseded for the `StrictMath` claim** by `determinism.yaml`, which compares bits rather than pass/fail. | ~4 min |
 | `determinism.yaml` | `bits` (6 legs: x86-64 × aarch64, JDK 11/17/21) | **blocking** | push, PR | Each leg asserts the committed 54,265-result raw-bit golden for `StrictMath` and `FastStrictTrig`. Six green legs = six architecture/JDK combinations produced identical bits. | ~3–5 min per leg |
 | `determinism.yaml` | `cross-arch` | **blocking** | push, PR | (a) every leg reported; (b) **at least one leg shows `Math` diverging** from the golden — the non-vacuity check, which cannot be made inside a leg; (c) reports the NaN-payload carve-out across architectures. | ~1 min |
-| `conformance.yaml` | `corpus` | **blocking** — green today | push, PR | `mvn -Pconformance -pl conformance -am verify` with `-Dtest='…conformance.**.*Test'`: the full vendored gie/GIGS sweep (**7,819 / 7,911**, `regressed 0`), diffed against the checked-in expected-outcome manifest. Catches any pass→fail regression. | sweep itself **0.7 s**, whole reactor **8 s** warm; the 90-min timeout is all cold cache, untuned |
+| `conformance.yaml` | `corpus` | **blocking** — green today | push, PR | `mvn -Pconformance -pl conformance -am verify` with `-Dtest='…conformance.**.*Test'`: the full vendored gie/GIGS sweep (**7,915 / 7,922**, `regressed 0`), diffed against the checked-in expected-outcome manifest. Catches any pass→fail regression. | sweep itself **0.7 s**, whole reactor **8 s** warm; the 90-min timeout is all cold cache, untuned |
 | `conformance.yaml` | `vendored-corpus-matches-upstream` | **blocking** | push, PR | The vendored corpus is byte-for-byte what PROJ `9.8.1` (`f08fa86…`) produces: manifest verified with `shasum -a 256 -c`, `sync-upstream.sh` re-run against a real PROJ checkout, then `git diff --exit-code`. | ~4–6 min (a full PROJ clone dominates) |
 | `conformance.yaml` | `upstream-drift` | advisory | weekly cron (Mon 04:17 UTC), `workflow_dispatch` | What syncing from PROJ **`master`** instead of the pin would change. A news feed, so upstream corpus changes are known before re-pin time. Never fails the build. | ~4–6 min |
 | `golden.yaml` | `golden` | **not a PR or push check** — de-scoped in `052e627`; runs weekly and on demand, and is **expected to fail** on the 2,083-row backlog | `schedule` (weekly), `workflow_dispatch` | `mvn -Pgolden -pl golden -am verify`: generate the table from the working tree, merge-join against `baseline/1.4.3`, apply `rules.yaml`. Fails on any `UNEXPLAINED` row, `FIGURES_MOVED`, `DEAD_RULE`, `PENDING_RULE_FIRED`, `EXPIRED_RULE` or `COUNT_MISMATCH`. | ~20 s of sweep on top of the reactor build |
@@ -84,16 +84,17 @@ Five workflows:
 
 - **~~`build-and-test` / the JDK 17 leg~~ — FIXED. The three tests now SKIP, with the reason
   printed, and a skip is reported as a skip.** `mvn -B clean install` exits **0** with javadoc
-  enabled across the whole default reactor. Per-module surefire counts measured 2026-08-16 on the
-  2.2.0 integration tree with `./docker/run.sh ci`, which runs the job's exact command: `core`
-  **2,573** with 5 skipped, `db` **88**, `geoapi` **14**, `epsg` and `grids-us-legacy` 0 (no test
-  sources), and `conformance` **354** with 1 skipped — only its unit tests, because the corpus sweep
+  enabled across the whole default reactor. Per-module surefire counts measured 2026-08-17 on the
+  2.3.0 integration tree with `./docker/run.sh ci`, which runs the job's exact command: `core`
+  **2,621** with 5 skipped, `db` **89**, `geoapi` **14**, `epsg` and `grids-us-legacy` 0 (no test
+  sources), and `conformance` **355** with 1 skipped — only its unit tests, because the corpus sweep
   is behind `-Pconformance` and is `conformance.yaml`'s business, not this job's. The run reports
-  **3,029** in total with **6** skipped, across 276 report files — read that total off the run rather
-  than adding the modules up — and `docker/run.sh`'s `CI_MIN_TESTS` floor was **raised 2,600 → 3,000
-  in this change** to sit against it, because at 2,600 the floor no longer failed when `db` (88
-  tests) dropped out. It is a floor and not a ceiling: it is `-lt`, and added test methods can only
-  move the count away from it.
+  **3,079** in total with **6** skipped, across 280 report files — read that total off the run rather
+  than adding the modules up. `docker/run.sh`'s `CI_MIN_TESTS` floor stays at **3,000**: its property
+  is that it still fails when `db` drops out, and 3,079 − 89 = 2,990 is still under 3,000. **That
+  margin is now 10 tests, down from 59 at 2.2.0**, so the next release that adds a test class has to
+  raise the floor to 3,100. It is a floor and not a ceiling: it is `-lt`, and added test methods can
+  only move the count away from it.
 
   **The tree these figures come from is not a release branch.** They were taken on the 2.2.0
   integration worktree while several parity streams were in flight, so the per-module numbers are a
@@ -157,7 +158,7 @@ Five workflows:
   **Why the fix passes `Locale.ROOT`.** That string is a classpath resource name, not text for a
   reader, so it has to fold the same way in every locale. Under `tr_TR` the Turkish casing rule maps
   `I` to the dotless `ı` (U+0131), so `"ESRI"` lowercases to `"esrı"`, the lookup for
-  `proj4/nad/esri` never resolves, and every ESRI definition becomes unreachable — **2,954 of them**,
+  `proj4/nad/esri` never resolves, and every ESRI definition becomes unreachable — **2,955 of them**,
   counted 2026-08-14 as the code entries in `epsg/src/main/resources/proj4/nad/esri`. That is the
   reason for the argument, and it is why the argument must not be dropped again.
   `NoAmbientLocaleInCoreTest` scans `core` for the whole class of defect, and
@@ -169,13 +170,14 @@ Five workflows:
   shown this leg green. Removing the marker now would assert a pass nobody has observed, which is the
   failure this file exists to prevent. **One green run of that leg is what justifies removing it.**
 - **`conformance` / `corpus`** is no longer in this list. The job's exact command has been run
-  locally and is green — **7,819 / 7,911 genuine passes with `regressed 0`**, re-measured
-  2026-08-16 with `./docker/run.sh conformance` (the same tree read 7,584 / 7,905 on 2026-08-14,
-  after `+proj=airocean` and `+proj=isea` were registered, and 7,449 / 7,902 before those two;
-  master at `2fc5989` reads 7,448 / 7,902; it read 7,378 / 7,895 on 2026-08-01 and
-  7,441 / 7,900 on 2026-08-02; both the numerator and the denominator have moved every time, so
-  quote the pair, never one of them -- the denominator grew by 3 on 2026-08-14 because three `expect
-  failure` rows were vacuous only for want of the operator). It has been shown to go red both on an injected
+  locally and is green — **7,915 / 7,922 genuine passes with `regressed 0`**, re-measured
+  2026-08-17 with `./docker/run.sh conformance` (2.2.0 read 7,819 / 7,911 on 2026-08-16; the same
+  tree read 7,584 / 7,905 on 2026-08-14, after `+proj=airocean` and `+proj=isea` were registered,
+  and 7,449 / 7,902 before those two; master at `2fc5989` reads 7,448 / 7,902; it read
+  7,378 / 7,895 on 2026-08-01 and 7,441 / 7,900 on 2026-08-02; both the numerator and the
+  denominator have moved every time, so quote the pair, never one of them -- the denominator grew by
+  3 on 2026-08-14 because three `expect failure` rows were vacuous only for want of the operator,
+  and by 11 on 2026-08-17 when `+proj=gridshift` and `+proj=defmodel` landed together). It has been shown to go red both on an injected
   regression and on an absent baseline. See the section at the end of this file. The *YAML* has
   still never executed on a runner; treat the first run as its first test.
 - **`jdk-ea`** goes yellow rather than red whenever Adoptium has no `27-ea` build. That is the

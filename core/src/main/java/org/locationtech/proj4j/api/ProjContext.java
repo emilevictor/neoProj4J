@@ -130,6 +130,41 @@ public final class ProjContext {
     }
 
     /**
+     * A builder whose three refusal policies are all turned off: {@link BallparkPolicy#ALLOW},
+     * {@link GridPolicy#PROJ4_COMPAT} and {@link BestOperationPolicy#ALLOW_DEGRADED}.
+     *
+     * <p><strong>This exists because the three had to be found and set one at a time, and a consumer
+     * who wanted "answer if you can" had no way to know that was three knobs rather than one.</strong>
+     * That is a discoverability fix, not a change of mind about the defaults: {@link #DEFAULT} stays
+     * strict, and a caller has to ask for this by name.
+     *
+     * <p><strong>What it delivers is "does not refuse", and that is all it is being called.</strong>
+     * Measured by a consumer against the published 2.2.0 artifacts with an authority database
+     * attached, the strict triple withdrew 1,664 answers and this triple withdraws none. It is
+     * deliberately <em>not</em> named for PROJ compatibility, because "returns an answer" and "returns
+     * PROJ 9.8.1's answer" are different claims and only the first one has been measured. An answer
+     * you get here may be a ballpark one, or one computed without a grid PROJ would have used; ask
+     * {@link CrsOperation#isBallparkTransformation()}, {@link CrsOperation#accuracy()} and
+     * {@link CrsOperation#missingGrids()} which it was.
+     *
+     * <p>Everything else &mdash; axis order, domain errors, parse mode, ESRI datums &mdash; keeps its
+     * {@link #DEFAULT} value. Chain the rest as usual:
+     *
+     * <pre>{@code
+     * ProjContext ctx = ProjContext.permissive().database(Proj4jDb.open()).build();
+     * }</pre>
+     *
+     * @return a fresh builder; never null
+     * @since 2.3.0
+     */
+    public static Builder permissive() {
+        return new Builder(DEFAULT)
+                .ballparkPolicy(BallparkPolicy.ALLOW)
+                .gridPolicy(GridPolicy.PROJ4_COMPAT)
+                .bestOperationPolicy(BestOperationPolicy.ALLOW_DEGRADED);
+    }
+
+    /**
      * A builder pre-loaded with this context's values.
      *
      * @return a fresh builder; never null
@@ -238,7 +273,7 @@ public final class ProjContext {
      * <ul>
      * <li><b>{@code authority:code} names.</b> Those resolve to a definition this library ships,
      *     not one the caller wrote, so an allow-list buys nothing there &mdash; and it would cost
-     *     something: of the <b>9,013</b> definitions in the shipped {@code proj4/nad}
+     *     something: of the <b>9,017</b> definitions in the shipped {@code proj4/nad}
      *     dictionaries, exactly <b>one</b> carries a key outside the allow-list, {@code world:malay}
      *     with {@code +rot_conv}. That token is in PROJ 9.8.1's own {@code data/world} (line 113,
      *     the {@code malay} entry) and is read nowhere in its {@code src/} &mdash; {@code NEWS.md}

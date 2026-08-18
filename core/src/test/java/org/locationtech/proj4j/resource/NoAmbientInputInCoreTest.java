@@ -305,9 +305,9 @@ public class NoAmbientInputInCoreTest {
         }
         assertEquals("the java.net source sites have changed; a new one is a new network surface "
                 + "and needs the justification the class comment demands",
-                "[org/locationtech/proj4j/api/DatabaseInfo.java:103, "
-                + "org/locationtech/proj4j/api/Proj.java:637, "
-                + "org/locationtech/proj4j/api/Proj.java:647, "
+                "[org/locationtech/proj4j/api/DatabaseInfo.java:104, "
+                + "org/locationtech/proj4j/api/Proj.java:642, "
+                + "org/locationtech/proj4j/api/Proj.java:652, "
                 + "org/locationtech/proj4j/resource/ClasspathResourceResolver.java:23]",
                 sorted(code).toString());
     }

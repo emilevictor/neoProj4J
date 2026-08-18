@@ -23,6 +23,7 @@ import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -589,5 +590,31 @@ public class PjdxDatabaseTest {
         assertEquals(864, db.crsCodes("IGNF").size());
         assertEquals(2, db.crsCodes("NKG").size());
         assertEquals(472, db.gridAlternatives().size());
+    }
+
+    /**
+     * {@code authorities()} means "owns an object", not "owns a CRS", and NRCAN is the case that
+     * separates the two. Documentation in three places read its presence in that list as a body of
+     * Canadian CRSs; there are none. Asserted here so the wording cannot drift back.
+     *
+     * <p>What it does own is two geoid-model rows for the same pair EPSG publishes at a later epoch,
+     * so all three come back as alternatives. That is the fact the docs should carry, and losing
+     * either row would be a real loss rather than tidying.
+     */
+    @Test
+    public void nrcanOwnsOperationsAndNotASingleCrs() {
+        assertTrue("NRCAN owns an object, so it must be listed",
+                db.authorities().contains("NRCAN"));
+        assertEquals("NRCAN publishes no CRS of its own", 0, db.crsCodes("NRCAN").size());
+
+        List<String> refs = new ArrayList<String>();
+        for (DbOperation op : db.operationsBetween("EPSG", "8254", "EPSG", "5713")) {
+            refs.add(op.authName() + ":" + op.code() + " " + op.gridNames());
+        }
+        assertEquals("NAD83(CSRS)v7 to CGVD28 height: EPSG's 2010 model plus NRCAN's 1997 and 2002",
+                Arrays.asList("EPSG:9987 [HT2_2010v70.byn]",
+                        "NRCAN:HT2_1997_NAD83CSRSV7 [HT2_1997.byn]",
+                        "NRCAN:HT2_2002_NAD83CSRSV7 [HT2_2002v70.byn]"),
+                refs);
     }
 }

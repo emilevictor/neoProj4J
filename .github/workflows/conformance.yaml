@@ -11,9 +11,9 @@ name: Conformance
 # outside CI on Temurin 21, against a scratch local Maven repository, with three controls:
 #
 #   1. unmodified              -> exit 0, genuine passes with diff.regressed 0. The current
-#                                 reading is 7,819 / 7,911, measured 2026-08-16 with
-#                                 `./docker/run.sh conformance` on the whole 2.2.0 tree; the
-#                                 same tree read 7,774 / 7,906 on 2026-08-15 and
+#                                 reading is 7,915 / 7,922, measured 2026-08-17 on the 2.3.0
+#                                 tree; 2.2.0 read 7,819 / 7,911 on 2026-08-16, and the same
+#                                 tree read 7,774 / 7,906 on 2026-08-15 and
 #                                 7,584 / 7,905 partway through it, with only
 #                                 +proj=airocean and +proj=isea registered, and 7,449 / 7,902
 #                                 before those two. master at 2fc5989 reads 7,448 / 7,902, and
@@ -23,9 +23,14 @@ name: Conformance
 #                                 vacuous only because the operator they name did not exist, and
 #                                 implementing those operators moved all four into it - three
 #                                 for airocean and isea, one for the pipeline operators. Five
-#                                 more have joined it the same way since, which is what took
-#                                 the denominator from 7,906 to 7,911, leaving 12 vacuous rows
-#                                 out of the 7,923 evaluated.
+#                                 more joined it the same way, which is what took the
+#                                 denominator from 7,906 to 7,911, leaving 12 vacuous rows.
+#                                 2.3.0 then moved eleven of those twelve at once, when
+#                                 +proj=gridshift and +proj=defmodel landed: 7,911 -> 7,922,
+#                                 leaving 1 vacuous row out of the 7,923 evaluated. That is the
+#                                 largest single move the denominator has made, and it moved
+#                                 against us by construction - registering an operator turns a
+#                                 free row into one that has to be earned.
 #   2. one manifest row removed -> exit 1, naming the assertion key as REGRESSED
 #   3. baseline file absent    -> exit 1, naming the ABSENT BASELINE as the cause, not a
 #                                 regression count

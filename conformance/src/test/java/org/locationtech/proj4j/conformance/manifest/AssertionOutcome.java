@@ -86,8 +86,8 @@ public enum AssertionOutcome {
      * is asking for a definition to be rejected or for a coordinate to be rejected:
      *
      * <ul>
-     *   <li>The corpus named a <strong>{@code coord_transfm*}</strong> or {@code no_inverse_op} errno.
-     *       Those errnos can only be raised after {@code proj_create} succeeded, so the row asserts
+     *   <li>The corpus named a <strong>{@code coord_transfm*}</strong> errno. Those errnos can only
+     *       be raised after {@code proj_create} succeeded, so the row asserts
      *       that PROJ <em>built</em> the operation. A construction failure here is
      *       {@code VACUOUS_EXPECTED_FAILURE} whatever proj4j calls it — including
      *       {@link org.locationtech.proj4j.conformance.bridge.GieFailureKind#INVALID_DEFINITION}, whose
@@ -131,8 +131,16 @@ public enum AssertionOutcome {
      * projection or operator proj4j does not implement at all — {@code gie/adams_hemi.gie} (388),
      * {@code gie/guyou.gie} (386), {@code gie/peirce_q.gie} (80), {@code gie/adams_ws1.gie} and
      * {@code gie/adams_ws2.gie} (57 each), and the pipeline-, grid- and deformation-dependent files
-     * {@code axisswap}, {@code defmodel}, {@code deformation}, {@code geotiff_grids}, {@code gridshift},
-     * {@code tinshift}, {@code unitconvert} and {@code 4D-API_cs2cs-style}. {@code gie/ellipsoid.gie}
+     * {@code axisswap}, {@code defmodel}, {@code deformation}, {@code geotiff_grids},
+     * {@code tinshift}, {@code unitconvert} and {@code 4D-API_cs2cs-style}.
+     * {@code gridshift} and {@code defmodel} were both on that list until 2.3.0 implemented them.
+     * Ten of their rows were vacuous then — six and four — and none is now, and the arithmetic of
+     * that is worth keeping in view: those ten were free, scored as passes by upstream {@code gie}
+     * and as nothing here, and implementing the operators turned them into rows that have to be
+     * earned, which <em>raises the denominator</em>. Here they were earned, so the headline rose
+     * (measured: 7,819/7,911 to 7,915/7,922, with the vacuous count falling from 12 to 1). Had any
+     * of the ten not been earned, the same change would have lowered it. That is the intended shape
+     * of this classification rather than a defect in it. {@code gie/ellipsoid.gie}
      * is the file that most clearly does <em>not</em> reclassify: its rows exist to have a definition
      * refused, proj4j refuses them as {@code INVALID_DEFINITION}, and they stay passes. See
      * {@code target/conformance/expect-failures.tsv} for the per-file split as measured by the run in

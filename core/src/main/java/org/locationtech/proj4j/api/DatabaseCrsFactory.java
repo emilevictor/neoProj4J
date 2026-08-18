@@ -39,11 +39,19 @@ import org.locationtech.proj4j.spi.ProjDatabase;
  *
  * <p>Only <b>geodetic</b> CRSs &mdash; geographic 2D, geographic 3D reduced to its horizontal half,
  * and geocentric. A projected CRS is refused, because building one means turning a
- * {@code conversion}'s parameters into a {@code Projection}: 4,312 conversion rows across dozens of
+ * {@code conversion}'s parameters into a {@code Projection}: <b>4,312 rows in the shipped database's
+ * {@code conversion} table</b>, of which 4,106 are reachable from a projected CRS, across dozens of
  * EPSG method codes, each with its own parameter slots and its own units, and every mis-slotted
  * parameter is a plausible coordinate in the wrong place. The legacy dictionary already carries
  * 5,708 projected CRSs with parameters that have been in production for fifteen years, so it stays
  * authoritative for them and this class does not compete with it.
+ *
+ * <p><b>Three different numbers get confused here, so they are all named.</b> 4,312 and 4,106 count
+ * <em>conversions</em> &mdash; the recipes &mdash; and both are asserted in
+ * {@code db}'s {@code VerifyIndexFieldCoverageTest}. A separate count of <em>CRSs</em> measures the
+ * cost from the other end: of 13,790 CRS rows, 10,316 are projected and 5,048 of those cannot be
+ * resolved by code today. One is a count of recipes and the other a count of dishes; neither is a
+ * stale version of the other.
  *
  * <p>What that leaves is exactly the useful half of the vintage gap. The dictionary is EPSG v9.2-era
  * and the shipped database is v12.029, so geodetic codes added since &mdash; the WGS 84 ensemble
@@ -121,6 +129,45 @@ final class DatabaseCrsFactory {
                 CrsOperationCandidate.smallestExtent(db.extentsFor(crs.ref())));
         return Crs.fromDatabase(definition, ctx, legacy, crs, area, axisAuthoritative,
                 axisNote(ctx, db, crs, axis, axisAuthoritative));
+    }
+
+    /**
+     * The CRS type the database has for this code, when {@link #create} refused it <em>because of
+     * that type</em> rather than because the code is unknown.
+     *
+     * <p>This exists so a caller can tell "no such code" apart from "the authority has this code and
+     * we decline to build that kind of CRS". Before 2.3.0 the two were reported identically, as an
+     * {@code UnknownAuthorityCodeException}, which told a reader the code did not exist when it plainly
+     * did &mdash; {@code ESRI:102100} is the case that surfaced it. A wrong reason costs more than no
+     * reason, because it sends the reader looking in the wrong place.
+     *
+     * @param authCode the {@code authority:code} name
+     * @param ctx      the context, whose database is consulted
+     * @return the type name, or null if there is no database, no such code, or the refusal was for
+     *         some other reason (a missing datum, ellipsoid or unit)
+     */
+    static String unbuildableTypeOf(String authCode, ProjContext ctx) {
+        if (!ctx.hasDatabase()) {
+            return null;
+        }
+        int colon = authCode.lastIndexOf(':');
+        if (colon <= 0 || colon == authCode.length() - 1) {
+            return null;
+        }
+        DbCrs crs = ctx.database().crs(authCode.substring(0, colon).trim(),
+                authCode.substring(colon + 1).trim());
+        if (crs == null) {
+            return null;
+        }
+        switch (crs.type()) {
+            case PROJECTED:
+            case VERTICAL:
+            case COMPOUND:
+            case ENGINEERING:
+                return crs.type().name();
+            default:
+                return null;
+        }
     }
 
     /**
@@ -262,6 +309,35 @@ final class DatabaseCrsFactory {
      * {@code rowPositive}, {@code See associated operation}. None of those has a {@code +axis=}
      * spelling, and inventing one would be a silent transposition.
      */
+    /**
+     * The authority's axis order for an {@code authority:code}, or null when there is no database,
+     * no such code, or no cardinal answer.
+     *
+     * <p>This exists for the codes the legacy dictionary resolves first, which never reach
+     * {@link #create}. That is most of them, and it includes every projected CRS &mdash; the one
+     * family {@code create} deliberately refuses to build. So without this the axis order of, say,
+     * {@code EPSG:2393} (Finland YKJ, <em>Northing, Easting</em>) could never be read even with the
+     * database on the classpath: the dictionary would answer with the parameters and the policy
+     * would assume east-north-up.
+     *
+     * <p>Reading only the axis order from a code the dictionary already built is deliberate. It
+     * takes the one fact the dictionary cannot express and leaves the parameters &mdash; fifteen
+     * years in production &mdash; exactly as they were.
+     */
+    static String axisOrderFor(String authCode, ProjContext ctx) {
+        if (authCode == null || !ctx.hasDatabase()) {
+            return null;
+        }
+        int colon = authCode.lastIndexOf(':');
+        if (colon <= 0 || colon == authCode.length() - 1) {
+            return null;
+        }
+        ProjDatabase db = ctx.database();
+        DbCrs crs = db.crs(authCode.substring(0, colon).trim(),
+                authCode.substring(colon + 1).trim());
+        return crs == null ? null : authorityAxisOrder(db, crs);
+    }
+
     static String authorityAxisOrder(ProjDatabase db, DbCrs crs) {
         DbObjectRef csRef = crs.coordinateSystem();
         if (csRef == null) {

@@ -30,7 +30,9 @@ import org.locationtech.proj4j.benchmark.CrsPair;
  * <p><b>Determinism, which is the entire value proposition.</b> One transform, one pinned input point,
  * counters zeroed immediately before. Nothing here samples, times, or averages, so two runs on two
  * machines produce byte-identical output or one of them has a bug. That is what makes Tier 2 safe to
- * block a PR on when Tier 3 is not.
+ * fail a run on when Tier 3 is not. It fails no merge today - {@code bench.yaml} is
+ * {@code workflow_dispatch} only - but that is a decision about where the gate is wired, not about
+ * whether its measurement is trustworthy.
  *
  * <p>Three specific things are done to keep it that way:
  * <ol>

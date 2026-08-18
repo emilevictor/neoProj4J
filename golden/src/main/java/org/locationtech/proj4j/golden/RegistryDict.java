@@ -23,11 +23,15 @@ import java.util.TreeMap;
  * Reads the five PROJ.4 init dictionaries that {@code proj4j-epsg} ships, straight off the
  * classpath, and hands back an ordered list of {@code (code, definition text)}.
  *
- * <p>Measured at the pinned 1.4.3 data (byte-identical to the working tree's as of this commit):
- * {@code epsg} 5,755 &middot; {@code esri} 2,954 &middot; {@code world} 47 &middot; {@code nad83} 123
- * &middot; {@code nad27} 134 = <b>9,013 CRS</b>. Those five numbers are asserted by the self-tests,
- * so a dictionary edit is visible immediately rather than as an unexplained mass of ADDED/REMOVED
- * rows two hours later.
+ * <p>Measured on the working tree at 2.3.0: {@code epsg} 5,758 &middot; {@code esri} 2,955
+ * &middot; {@code world} 47 &middot; {@code nad83} 123 &middot; {@code nad27} 134 = <b>9,017 CRS</b>.
+ * Those five numbers are asserted by the self-tests, so a dictionary edit is visible immediately
+ * rather than as an unexplained mass of ADDED/REMOVED rows two hours later.
+ *
+ * <p>The pinned 1.4.3 data holds 9,013 &mdash; {@code epsg} 5,755 and {@code esri} 2,954, the other
+ * three identical. It was byte-identical to the working tree's through 2.2.0; 2.3.0 added four defs,
+ * which is why the generated golden table is 20 rows longer than a baseline that is never
+ * regenerated. See {@link #EXPECTED_COUNTS}.
  *
  * <p>This is a second, independent parser for a format proj4j already parses
  * ({@code io/Proj4FileReader} uses a {@code StreamTokenizer}). That duplication is intentional: the
@@ -56,10 +60,20 @@ public final class RegistryDict {
     /** The five dictionaries, in the order the golden table's REG section walks them. */
     public static final String[] AUTHORITIES = {"epsg", "esri", "nad27", "nad83", "world"};
 
-    /** Expected def counts, asserted by the self-tests. */
-    public static final int[] EXPECTED_COUNTS = {5755, 2954, 134, 123, 47};
+    /**
+     * Expected def counts, asserted by the self-tests.
+     *
+     * <p>These were {@code {5755, 2954, 134, 123, 47}}, totalling 9,013, until 2.3.0 added four
+     * definitions: {@code EPSG:4979}, {@code EPSG:7843} and {@code EPSG:7912}, which
+     * {@code epsg_no_grid.gie} needs and no dictionary carried, and {@code ESRI:102100}, which
+     * {@code proj4/nad/esri} skipped between 102108 and 102110. Adding a def is not free here &mdash;
+     * it adds one REG key, so five probe rows in {@code probes.tsv} and five rows to the generated
+     * golden table, which the frozen 1.4.3 baseline cannot contain. See
+     * {@code golden/baseline/1.4.3/golden-expect.txt} for how that is accounted for.
+     */
+    public static final int[] EXPECTED_COUNTS = {5758, 2955, 134, 123, 47};
 
-    public static final int EXPECTED_TOTAL = 9013;
+    public static final int EXPECTED_TOTAL = 9017;
 
     /** One definition: its code within its authority, and its parameter tokens. */
     public static final class Def {

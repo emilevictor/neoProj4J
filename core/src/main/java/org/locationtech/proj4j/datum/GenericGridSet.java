@@ -51,8 +51,11 @@ import org.locationtech.proj4j.resource.Resources;
  * {@link #gridAt(String, double, double)} skips every root whose {@link GenericGrid#type()} differs
  * from the one asked for, so a single file carrying both a {@code HORIZONTAL_OFFSET} and a
  * {@code VERTICAL_OFFSET} image over the same area can answer both questions without ambiguity.
- * proj4j had only the first half of this. {@code xyzgridshift} uses the untyped
- * {@link #gridAt(double, double)}; {@code gridshift} and {@code defmodel} will need the typed one.
+ * proj4j had only the first half of this. {@code xyzgridshift} and {@code defmodel} both use the
+ * untyped {@link #gridAt(double, double)} — {@code defmodel.cpp:250-253} calls
+ * {@code realGridSet->gridAt(x, y)} with two arguments, so a deformation model picks whichever root
+ * covers the point regardless of its {@code TYPE}. {@code gridshift} is the typed one's only
+ * caller today.
  *
  * <h2>Everything is decoded up front</h2>
  *

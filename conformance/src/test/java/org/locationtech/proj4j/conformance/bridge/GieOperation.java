@@ -96,43 +96,40 @@ public interface GieOperation {
      * differences ({@code src/dist.cpp:94}); {@code GieComparator} ports both
      * sites anyway, and says so at its {@code default:} case.
      *
-     * <p><b>Known limitation: this always returns {@code false}.</b> proj4j
-     * carries no axis-order metadata on a {@code CoordinateReferenceSystem} —
-     * {@code Projection.axes} defaults to {@code AxisOrder.ENU} and is only ever
-     * populated from an explicit {@code +axis=}, never from the EPSG database, so
-     * there is nothing to read. Fixing that needs axis metadata in the EPSG
-     * module, which is out of this bridge's scope.
+     * <p>A bare {@code operation} has no target CRS to read and so answers
+     * {@code false} by construction. {@link CrsToCrsOperation} reads it from the
+     * target's axis order, which since 2.3.0 comes from the authority rather
+     * than from an assumption: named CRSs are built under
+     * {@code AxisOrderPolicy.AUTHORITY}, and {@code Proj.applyAxisPolicy} now
+     * asks the configured CRS database for the axis order even when the legacy
+     * dictionary resolved the parameters. Before that, a projected
+     * northing-first CRS came out east-north-up and there was nothing to read.
      *
-     * <p>What that limitation actually costs is not what an earlier version of
-     * this comment claimed. It said "roughly one degree of arc", which is wrong
-     * in both of the cases the corpus can reach:
+     * <p>Two things about what this flag is worth, both measured rather than
+     * assumed, and both contradicting an earlier version of this comment that
+     * put the cost at "roughly one degree of arc":
      *
      * <ul>
      *   <li><b>A projected latitude-first target costs nothing at all.</b> The
-     *   only such row reachable today is {@code epsg_no_grid.gie}'s
+     *   only such row in the corpus is {@code epsg_no_grid.gie}'s
      *   {@code EPSG:4123 → EPSG:2393} ("Finland YKJ Northing, Easting"). Its
      *   expectation is in metres, so it takes the Euclidean branch, where the
      *   swap is the no-op described above — the flag's value cannot move that
-     *   row's deviation by so much as an ulp. Its real deviation is 342.4 km,
-     *   and that comes from axis order on <em>both</em> sides at once: the
-     *   source is read longitude-first while a PROJ.4 {@code +proj=tmerc} emits
-     *   {@code (E, N)} against a northing-first authority definition. The two
-     *   errors partially cancel; each alone is about 4,700–5,000 km.
-     *   <b>Implementing {@code CrsToCrsOperation.crsDstIsLatLonOrYX()} does not
-     *   fix this row.</b> Anyone who wants it has to fix the source-side read as
-     *   well, and should measure the two changes as a 2×2 rather than in
-     *   sequence, or the first one will look worthless.</li>
+     *   row's deviation by so much as an ulp. What actually closed that row was
+     *   reading the authority's axis order on <em>both</em> sides, so that the
+     *   source is no longer read longitude-first and the target's {@code (N, E)}
+     *   is honoured. Reporting this flag was necessary but not sufficient; the
+     *   two changes had to land together, and measuring them in sequence would
+     *   have made the first look worthless.</li>
      *   <li><b>A geographic latitude-first target costs a NaN, not a
      *   degree.</b> There the comparison is in degrees, so the swap is live and
-     *   the deviation goes through {@code proj_lp_dist}, which hands its first
-     *   ordinate to {@code geod_inverse} as a latitude
-     *   ({@code src/dist.cpp:69}). With latitude and longitude transposed that
-     *   argument leaves ±90° — {@code geod -I} on a "latitude" of 151.2077
-     *   returns {@code nan} — and {@code proj_lpz_dist} then hypots the NaN, so
-     *   the whole deviation is NaN and the row fails without a usable
-     *   magnitude. The candidate rows are the {@code EPSG:7843 → EPSG:7912}
-     *   pair, which currently fail earlier for an unrelated reason, so this is
-     *   the mechanism rather than a present-day measurement.</li>
+     *   the deviation goes through {@code proj_lp_dist}, which hands its
+     *   <em>second</em> ordinate ({@code a.lpz.phi}) to {@code geod_inverse} as
+     *   a latitude ({@code src/dist.cpp:76}). With latitude and longitude
+     *   transposed that argument leaves ±90° — {@code geod -I} on a "latitude"
+     *   of 151.2077 returns {@code nan} — and {@code proj_lpz_dist} then hypots
+     *   the NaN, so the whole deviation is NaN and the row fails without a
+     *   usable magnitude.</li>
      * </ul>
      */
     boolean crsDstIsLatLonOrYX();

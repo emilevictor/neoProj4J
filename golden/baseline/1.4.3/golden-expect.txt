@@ -371,4 +371,58 @@
 # COUNT_MISMATCH, DEAD_RULE, EXPIRED_RULE or PENDING_RULE_FIRED. The absence of a COUNT_MISMATCH is
 # what confirms both pins two-sidedly, and it also confirms that NUM-KARNEY-LATITUDE-CORE is still at
 # 19309 -- the ordering held and nothing was stolen from it.
-golden diff: 11944 UNCHANGED, 41486 CHANGED, 0 ADDED, 0 REMOVED; 39403 INTENDED, 2083 UNEXPLAINED (baseline 53430 rows, current 53430 rows)
+#
+# RE-PINNED 2026-08-17 BY 2.3.0's FOUR NEW DICTIONARY DEFS. THIS IS THE FIRST RE-PIN IN THIS FILE
+# WHERE THE TABLE CHANGES LENGTH, so it is worth saying what did and did not move. Three figures
+# move: ADDED 0 -> 20, INTENDED 39403 -> 39423, and the current row count 53430 -> 53450. UNCHANGED
+# holds at 11944, CHANGED at 41486, REMOVED at 0, and UNEXPLAINED holds at 2083 -- the triage backlog
+# is untouched, which is the property to check first.
+#
+# THE ROWS BEHIND EVERY FIGURE THAT MOVED, which is what this file demands of a re-pin. 2.3.0 added
+# four definitions to the dictionaries proj4j-epsg ships: EPSG:4979, EPSG:7843 and EPSG:7912, which
+# gie/epsg_no_grid.gie names as crs_src/crs_dst and no dictionary carried, and ESRI:102100, which
+# proj4/nad/esri skipped between 102108 and 102110. One def is one REG key and REG carries five
+# probes, so 4 x 5 = 20 new rows. The baseline is frozen at released 1.4.3 and is never regenerated,
+# so those 20 rows have no counterpart and arrive as ADDED. All 20 are claimed by
+# DICT-2.3.0-FOUR-DEFS-ADDED in golden/rules.yaml, which names all four keys literally, is ordered
+# second so no broader rule can take them first, and records where each definition's text came from
+# (PROJ 9.8.1's own `projinfo -o PROJ` output in all four cases). 39403 + 20 = 39423 is therefore the
+# whole of the INTENDED move and NO EXISTING PIN CHANGES -- confirmed by the absence of a
+# COUNT_MISMATCH, which checks every pin two-sidedly.
+#
+# THE PIN SUM IS NOW 55 RULES SUMMING TO EXACTLY 39423. Sum them with the anchored pattern,
+# `grep -Eo '^ +expected_rows: [0-9]+'`; unanchored also picks up a commented-out
+# `expected_rows: 944` inside a note in rules.yaml and returns one rule too many.
+#
+# WHY 0 ADDED WAS NOT SIMPLY A GOOD PROPERTY TO KEEP. An ADDED row has no baseline counterpart, so
+# GoldenDiff.declines returns null for it and no `expect` clause can constrain it numerically -- the
+# match predicates are the entire test. That is a genuinely weaker check than the one CHANGED rows
+# get, and the honest response is not to pretend otherwise but to say what does vouch for these
+# numbers. For the three EPSG codes it is gie, which is the only reason they were added. For
+# ESRI:102100 it is PROJ 9.8.1 directly: the generated table forwards (5, 5) to
+# (556597.4539663679, 557305.2572745768) metres and `echo "5 5" | cs2cs -f "%.9f" EPSG:4326
+# EPSG:3857` prints 556597.453966368 557305.257274577, agreeing to every digit cs2cs emits, with
+# each of the four off-origin probes inverting back to exactly +/-0x1.4p2.
+#
+# THE ROW COUNT DIVERGING IS ITSELF A NEW SITUATION AND IS DECLARED IN FOUR PLACES, NOT ONE. The
+# generated table is now legitimately 20 lines longer than the baseline, which the row-count equality
+# check in docker/run.sh and .github/workflows/golden.yaml read as a truncated sweep. Both now hold a
+# `declared_surplus=20` and stay two-sided: 19 fails, 21 fails, and a SHORTER table fails as before.
+# Those two, this line, and DICT-2.3.0-FOUR-DEFS-ADDED must move together; the surplus goes back to 0
+# the moment the baseline is refreshed. RegistryDict.EXPECTED_COUNTS moved with them, 9013 -> 9017.
+#
+# golden/pairs.tsv WAS DELIBERATELY NOT REGENERATED, and this is the trap for whoever re-baselines
+# next. Running GoldenInputs rewrites pairs.tsv as well as probes.tsv, and 60 of its 200 rows change
+# -- 300 PAIR probe rows. That drift PREDATES this release and was proved not to be ours by control:
+# a regeneration against `git show HEAD:` copies of proj4/nad/epsg and proj4/nad/esri produces the
+# same 60 changed pair rows. The cause is that the curator's geographic TYPE_GRIDSHIFT bucket has
+# grown since pairs.tsv was curated and `srcs.get((j * SRC_STRIDE) % srcs.size())` is size-sensitive.
+# Nothing regenerates pairs.tsv as part of a test, so the committed file stays valid; a large diff
+# there is not yours.
+#
+# MEASURED, NOT COMPOSED. `mvn -B -ntp -Pgolden -pl golden -am verify -Dmaven.javadoc.skip=true`
+# prints the data line below and lists `DICT-2.3.0-FOUR-DEFS-ADDED: 20` among its matched counts,
+# with no hit for COUNT_MISMATCH, DEAD_RULE, EXPIRED_RULE or PENDING_RULE_FIRED, and ProbesTest green
+# on the corrected dictionary counts. To be confirmed in the pinned container by
+# `./docker/run.sh golden --out /tmp/neoproj4j-out-230 --volume neoproj4j-m2-230`.
+golden diff: 11944 UNCHANGED, 41486 CHANGED, 20 ADDED, 0 REMOVED; 39423 INTENDED, 2083 UNEXPLAINED (baseline 53430 rows, current 53450 rows)

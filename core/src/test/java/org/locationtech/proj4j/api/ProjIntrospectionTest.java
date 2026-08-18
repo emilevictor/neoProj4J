@@ -57,8 +57,12 @@ public class ProjIntrospectionTest {
         // Core's own test classpath has no ProjDatabase implementation -- deliberately, so that
         // everything here is exercised in the deployment a consumer gets before adding proj4j-db.
         // version() must say so rather than let a reader assume authority metadata is available.
+        // And it must say *whose* context it is describing. Until 2.3.0 the clause read "no
+        // authority database configured", which is a statement about the default context phrased as
+        // a statement about the process -- so a caller who had attached a database to their own
+        // ProjContext read it as false.
         assertTrue("version() must not imply an authority database is present: " + v,
-                v.contains("no authority database configured"));
+                v.contains("no authority database on the default context"));
     }
 
     @Test

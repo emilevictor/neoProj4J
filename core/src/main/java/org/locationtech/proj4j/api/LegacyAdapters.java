@@ -16,6 +16,7 @@
 package org.locationtech.proj4j.api;
 
 import org.locationtech.proj4j.BulkCoordinateTransform;
+import org.locationtech.proj4j.CRSFactory;
 import org.locationtech.proj4j.CoordinateReferenceSystem;
 import org.locationtech.proj4j.CoordinateTransform;
 import org.locationtech.proj4j.CoordinateTransformFactory;
@@ -95,6 +96,68 @@ public final class LegacyAdapters {
     }
 
     /**
+     * A {@link CRSFactory} whose {@link CRSFactory#createFromName(String) createFromName} resolves
+     * through this package &mdash; so an {@code authority:code} only the configured authority
+     * database knows resolves, while the caller keeps the legacy type.
+     *
+     * <p>This is the other half of {@link #transformFactory(ProjContext)}, and it closes a real gap:
+     * before 2.3.0 a legacy caller could get database-backed <em>operation selection</em> and still
+     * had no way to <em>resolve</em> a code the legacy dictionary lacks without leaving the 1.x types
+     * behind. Substitutable for {@code new CRSFactory()} the same way, at the same kind of call site:
+     *
+     * <pre>{@code
+     * CRSFactory factory = LegacyAdapters.crsFactory(ctx);
+     * CoordinateReferenceSystem crs = factory.createFromName("EPSG:9057");
+     * }</pre>
+     *
+     * <p>What changes, and only this:
+     * <ul>
+     * <li>a code the legacy dictionary lacks resolves from the context's authority database, if one
+     * is attached and the type is geodetic;</li>
+     * <li>the context's {@link org.locationtech.proj4j.io.wkt.AxisOrderPolicy} is honoured, because
+     * unlike {@link #transformFactory(ProjContext)} this method <em>builds</em> the CRS rather than
+     * being handed one somebody else built &mdash; so under
+     * {@link org.locationtech.proj4j.io.wkt.AxisOrderPolicy#AUTHORITY} {@code EPSG:4326} comes back
+     * with {@code +axis=neu}, where the plain factory is always lon-first;</li>
+     * <li>WKT and PROJJSON are accepted too, since {@link Proj#createCrs(String, ProjContext)}
+     * detects the notation. That is a superset and breaks nothing: the plain
+     * {@code createFromName} treats a WKT document as a name and throws.</li>
+     * </ul>
+     *
+     * <h4>It does not fall back to the plain factory, deliberately</h4>
+     *
+     * <p>Falling back on failure would be the obvious shape and it is the wrong one. The strict path
+     * already tries the legacy dictionary first, so a fallback could only ever fire on a definition
+     * the strict path <em>refused</em> &mdash; and there the two outcomes are a policy refusal turned
+     * into the CRS the caller's own policy declined to build, or, where the plain factory would fail
+     * too, a considered message replaced by a bare {@code UnknownAuthorityCodeException}. Neither is
+     * an improvement. A caller who wants the policies not to apply already has
+     * {@code new CRSFactory()}.
+     *
+     * <p><b>Only {@code createFromName} is overridden.</b> The parameter-string methods are the plain
+     * ones, because {@code createFromParameters} takes a display {@code name} alongside the
+     * parameters and {@link Proj#createCrs(String, ProjContext)} has nowhere to put it &mdash; routing
+     * them would quietly rename callers' CRSs. {@link CRSFactory#createCompound(String)} is likewise
+     * unchanged; {@code Crs} is two-dimensional and has nothing to add there.
+     *
+     * <p>Two further limits, stated rather than discovered later. The reader and {@link
+     * org.locationtech.proj4j.Registry} inside {@code CRSFactory} are {@code private static} and
+     * shared by every instance, so this factory cannot be given a different dictionary &mdash; only
+     * different behaviour in the method it overrides. And an unknown code still arrives as
+     * {@link org.locationtech.proj4j.UnknownAuthorityCodeException}, unchanged, because
+     * {@link Proj#createCrs(String, ProjContext)} rethrows that one verbatim; other refusals arrive
+     * as {@link CrsCreationException} carrying the reason.
+     *
+     * @param context the policies to build under, including the authority database if one is
+     *                attached; null means {@link Proj#defaultContext()}
+     * @return a factory; never null
+     * @since 2.3.0
+     */
+    public static CRSFactory crsFactory(ProjContext context) {
+        return new StrictCrsFactory(context == null ? Proj.defaultContext() : context);
+    }
+
+    /**
      * Wraps an already-built legacy CRS so that this package's introspection can be used on it.
      *
      * <p>The CRS is wrapped, not re-parsed, so nothing about it changes &mdash; including its axis
@@ -157,6 +220,29 @@ public final class LegacyAdapters {
         @Override
         public String toString() {
             return "LegacyAdapters.transformFactory(" + context + ")";
+        }
+    }
+
+    /**
+     * The factory {@link #crsFactory(ProjContext)} returns. Private and final for the same reason
+     * {@link StrictFactory} is: a caller should hold the {@link CRSFactory} type.
+     */
+    private static final class StrictCrsFactory extends CRSFactory {
+
+        private final ProjContext context;
+
+        StrictCrsFactory(ProjContext context) {
+            this.context = context;
+        }
+
+        @Override
+        public CoordinateReferenceSystem createFromName(String name) {
+            return Proj.createCrs(name, context).asLegacy();
+        }
+
+        @Override
+        public String toString() {
+            return "LegacyAdapters.crsFactory(" + context + ")";
         }
     }
 }

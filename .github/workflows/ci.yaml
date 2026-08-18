@@ -373,7 +373,7 @@ jobs:
           # is a classpath resource name, not text for a reader, so it has to fold the same way
           # in every locale. Under tr_TR the Turkish casing rule maps 'I' to the dotless 'ı'
           # (U+0131), so "ESRI" lowercases to "esrı", the lookup for the resource
-          # proj4/nad/esri never resolves, and all 2,954 ESRI codes become unreachable. This
+          # proj4/nad/esri never resolves, and all 2,955 ESRI codes become unreachable. This
           # leg is what would catch that being undone. NoAmbientLocaleInCoreTest scans core for
           # the same class of defect and pins this site.
           - label: tr_TR / UTF-8 / Europe-Istanbul / x64

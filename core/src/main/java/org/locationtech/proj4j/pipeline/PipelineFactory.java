@@ -68,12 +68,12 @@ import org.locationtech.proj4j.vertical.VGridShiftOperator;
  *
  * <p>The operator set is {@code longlat} (and its three aliases), {@code geocent},
  * {@code unitconvert}, {@code axisswap}, {@code cart}, {@code vgridshift},
- * {@code hgridshift}, {@code deformation}, {@code xyzgridshift}, {@code tinshift},
- * {@code affine}, {@code geogoffset}, {@code geoc}, {@code noop}, {@code push},
- * {@code pop}, {@code set}, {@code vertoffset}, {@code topocentric},
+ * {@code hgridshift}, {@code gridshift}, {@code deformation}, {@code xyzgridshift},
+ * {@code tinshift}, {@code affine}, {@code geogoffset}, {@code geoc}, {@code noop},
+ * {@code push}, {@code pop}, {@code set}, {@code vertoffset}, {@code topocentric},
  * {@code molodensky}, {@code helmert}, {@code molobadekas}, and every projection in
  * {@link Registry}.
- * The twenty that are not projections are named by {@link #handlesOperator}, which is
+ * The twenty-one that are not projections are named by {@link #handlesOperator}, which is
  * how a caller knows that {@code +proj=axisswap order=2,1} — a complete operation with
  * no {@code +step} and no {@code +init=} — belongs here rather than on the
  * {@code CRSFactory} path.
@@ -97,20 +97,24 @@ import org.locationtech.proj4j.vertical.VGridShiftOperator;
  * {@code +theta} throw rather than being ignored, which {@link HelmertOperator}
  * explains.
  *
- * <p>Deliberately absent, each a refusal rather than a silent omission:
- * {@code gridshift} and {@code defmodel}, neither of which is written yet.
+ * <p><b>Nothing is on the deliberately-absent list any more.</b> {@code gridshift} and
+ * {@code defmodel} were the last two names on it, and both landed in 2.3.0.
  *
- * <p>Both refusals used to give their reason as the absent GeoTIFF grid reader, and both
- * reasons were false. The reader landed in 2.1.0 and the generic N-sample grid layer
- * ({@code datum.GenericGrid}, {@code datum.GenericGridSet}) in 2.2.0. What is missing is
- * each operator's own body, and nothing in the grid layer: {@code gridshift} needs its
- * sample-role vocabulary — {@code latitude_offset}/{@code longitude_offset} for a
- * geographic grid, {@code easting_offset}/{@code northing_offset} for a projected one,
- * with a positional fallback that swaps the first two bands between those two cases
- * ({@code gridshift.cpp:257-315}) — plus its projected-grid handling and its biquadratic
- * NADCON5 interpolation; {@code defmodel} needs a JSON deformation-model reader.
- * The reasons are recorded rather than deleted, because a stale "we already decided
- * against that" stops the work instead of costing an experiment.
+ * <p>Those refusals used to give their reason as the absent GeoTIFF grid reader, and the
+ * reason was false. The reader landed in 2.1.0 and the generic N-sample grid layer
+ * ({@code datum.GenericGrid}, {@code datum.GenericGridSet}) in 2.2.0. What was left was each
+ * operator's own body, and nothing in the grid layer. The reasons are recorded rather than
+ * deleted, because a stale "we already decided against that" stops the work instead of
+ * costing an experiment.
+ *
+ * <p>{@link GridShiftOperator} implements the whole of {@code gridshift.cpp}: the sample-role
+ * vocabulary — {@code latitude_offset}/{@code longitude_offset} for a geographic grid,
+ * {@code easting_offset}/{@code northing_offset} for a projected one, with a positional
+ * fallback that swaps the first two bands between those two cases
+ * ({@code gridshift.cpp:257-315}) — plus projected grids and the biquadratic NADCON5
+ * interpolation. {@link DefmodelOperator} and {@link DefmodelEvaluator} read their master
+ * file with {@link PipelineJson} and their grids on the same generic layer as
+ * {@code xyzgridshift}.
  *
  * <p>{@code +proj=deformation +grids=} was on that absent list for the same false reason
  * and is <b>no longer</b>: {@link DeformationOperator} reads the single-file three-channel
@@ -158,12 +162,13 @@ public final class PipelineFactory {
      * agreeing about who owns a projection.
      *
      * <p>Sorted, so a reader can see at a glance what is claimed. {@link #handlesOperator}
-     * scans it linearly: twenty string comparisons once per step is not worth a binary
+     * scans it linearly: twenty-two string comparisons once per step is not worth a binary
      * search, and the sort is for the reader.
      */
     private static final String[] PIPELINE_ONLY_OPERATORS = {
-        "affine", "axisswap", "cart", "deformation", "geoc", "geogoffset", "helmert",
-        "hgridshift", "molobadekas", "molodensky", "noop", "pop", "push", "set",
+        "affine", "axisswap", "cart", "defmodel", "deformation", "geoc", "geogoffset",
+        "gridshift", "helmert", "hgridshift", "molobadekas", "molodensky", "noop", "pop",
+        "push", "set",
         "tinshift", "topocentric", "unitconvert", "vertoffset", "vgridshift",
         "xyzgridshift",
     };
@@ -429,8 +434,13 @@ public final class PipelineFactory {
         } else if ("hgridshift".equals(projName)) {
             operator = TimeGatedOperator.wrap(
                     HGridShiftOperator.fromGrids(expanded.value("grids")), expanded);
+        } else if ("gridshift".equals(projName)) {
+            // No TimeGatedOperator: gridshift reads neither +t_epoch nor +t_final.
+            operator = new GridShiftOperator(expanded);
         } else if ("deformation".equals(projName)) {
             operator = new DeformationOperator(registry, expanded);
+        } else if ("defmodel".equals(projName)) {
+            operator = new DefmodelOperator(registry, expanded);
         } else if ("xyzgridshift".equals(projName)) {
             operator = new XyzGridShiftOperator(registry, expanded);
         } else if ("cart".equals(projName)) {
