@@ -99,8 +99,27 @@
                 </executions>
             </plugin>
 
+            <!-- The -javadoc classifier jar, attached by hand for the same reason as in epsg/pom.xml:
+                 maven-javadoc-plugin emits no artifact whatsoever for a module with no Java sources,
+                 so 2.1.0 and 2.2.0 published a sources jar and no javadoc jar. src/javadoc holds one
+                 page saying what this artifact is and where the API lives. The size budget below
+                 names the main jar by path and is unaffected. As in epsg, this execution has to go
+                 if a Java source file is ever added here. -->
             <plugin>
                 <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>attach-javadoc-stub</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                        <configuration>
+                            <classifier>javadoc</classifier>
+                            <classesDirectory>${project.basedir}/src/javadoc</classesDirectory>
+                        </configuration>
+                    </execution>
+                </executions>
                 <configuration>
                     <archive>
                         <manifestEntries>

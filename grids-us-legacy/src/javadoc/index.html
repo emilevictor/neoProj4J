@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>neoproj4j-grids-us-legacy</title>
+</head>
+<body>
+<h1>neoproj4j-grids-us-legacy</h1>
+
+<p>This artifact contains no Java classes, so there is no API here to document. It ships two
+datum-shift grids redistributed verbatim from PROJ 9.8.1 &mdash; the CTABLE V2 files
+<code>conus</code> and <code>alaska</code> &mdash; under <code>/proj4j-data/grids/</code>, where the
+<code>neoproj4j</code> resolver chain finds them. Putting this jar on the classpath is the whole
+interface; there is no call to make.</p>
+
+<p>The reader is <code>org.locationtech.proj4j.datum.CTABLEV2</code> and the resolver chain is
+<code>org.locationtech.proj4j.resource.ResourceResolvers</code>, both in the <code>neoproj4j</code>
+artifact, whose javadoc is published alongside it on Maven Central.</p>
+
+<p>This page exists because Maven Central asks for a <code>-javadoc</code> jar next to every
+published artifact, and the javadoc tool produces nothing at all for a module with no sources. An
+empty jar would satisfy the check while telling a reader who opens it nothing; this says where to
+look instead.</p>
+</body>
+</html>

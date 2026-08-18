@@ -3,6 +3,12 @@ index.js
 package.html
 lib
 
+# The bare `index.html` above matches at any depth, and it silently swallowed the two hand-written
+# javadoc stub pages for the data-only modules - which would have published an empty javadoc jar,
+# the exact defect they exist to fix. These two are source, not generated output.
+!epsg/src/javadoc/index.html
+!grids-us-legacy/src/javadoc/index.html
+
 project/boot
 project/plugins/project
 project/plugins/target

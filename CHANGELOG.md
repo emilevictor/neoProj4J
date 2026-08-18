@@ -93,6 +93,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`db/README.md` said the module is "deliberately not in the root `<modules>`".** It is in them, at
   `pom.xml:353`, and it is published. The genuinely profile-gated modules are `golden`, `benchmark`
   and `benchmark-ab`
+- **`neoproj4j-epsg` and `neoproj4j-grids-us-legacy` now publish a javadoc jar.** Neither had one in
+  2.1.0 or 2.2.0, and `grids-us-legacy` never had one; `epsg`'s 2.0.0 javadoc jar was a 317-byte
+  manifest-only shell. All six of those are HEAD requests against repo1, not inferences. Both modules
+  are data-only with no `.java` file at all, and at this commit `maven-javadoc-plugin` attaches no
+  artifact whatsoever for a module without sources — not an empty jar, nothing — so the
+  `attach-javadocs` execution ran and attached nothing, twice per build, in silence. The sources jars
+  were always there, which is why this went unnoticed for two releases. Each of the two
+  poms now attaches a `-javadoc` classifier jar through `maven-jar-plugin` carrying a single page
+  that says the artifact ships data files, names the resource root it publishes under, and points at
+  core's javadoc for the API that reads them. The root pom's javadoc comment claimed "each module
+  ships its own javadoc jar" as a reason it was safe to turn `detectOfflineLinks` off; the reason
+  holds, the claim did not, and it now says which two modules get their javadoc jar from somewhere
+  else
 
 ### Changed
 

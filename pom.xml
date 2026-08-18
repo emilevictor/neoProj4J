@@ -175,7 +175,12 @@
                          dependency's apidocs directory. `epsg` is a dependency of core and geoapi
                          but has no Java sources, so its apidocs has no element-list and javadoc
                          logs `Error fetching link ... Ignored it.` at ERROR level twice per build.
-                         Nothing is lost by turning this off - each module ships its own javadoc jar.
+                         Nothing is lost by turning this off - a link into apidocs that this plugin
+                         never generates cannot resolve anyway. Note the second consequence of the
+                         same fact: this plugin attaches no javadoc jar for epsg or grids-us-legacy
+                         either, so those two poms attach a stub one under the -javadoc classifier
+                         through maven-jar-plugin. Every module ships a javadoc jar; two of them do
+                         not get it from here.
                          This is a SEPARATE parameter from <links>, so geoapi's external link to
                          geoapi.org is unaffected. -->
                     <detectOfflineLinks>false</detectOfflineLinks>

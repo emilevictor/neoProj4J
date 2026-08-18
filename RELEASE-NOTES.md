@@ -389,6 +389,22 @@ Each of these was a statement in the repository that was measurably false, not a
 - **Two gate tiers printed the word "blocking" while their own class javadoc said they block no merge.**
   The measurement is trustworthy; where the gate is wired is a separate decision, and the printed text
   now says which is which.
+- **The root pom said "each module ships its own javadoc jar", and two did not.** That sentence was
+  the stated reason it was safe to switch `detectOfflineLinks` off, and the reason still holds — a
+  link into apidocs the plugin never generates could not resolve either way. What was false is the
+  claim beside it. `neoproj4j-epsg` and `neoproj4j-grids-us-legacy` contain no `.java` file at all,
+  and at this commit `maven-javadoc-plugin` attaches nothing for a module without sources — not an
+  empty jar, nothing. So the `attach-javadocs` execution ran and produced no artifact, twice per
+  build, in silence, and **both modules went to Central in 2.1.0 and 2.2.0 with a sources jar and no
+  javadoc jar** — six HEAD requests against repo1 say so, and they also say `grids-us-legacy` never
+  had one and `epsg`'s at 2.0.0 was a 317-byte manifest-only shell. Why that one release produced a
+  shell rather than nothing is unexplained and is recorded as unexplained in `HOWTORELEASE.txt`
+  rather than guessed at. Fixed here: each of the two poms attaches a `-javadoc` classifier jar through
+  `maven-jar-plugin` holding one page that says the artifact ships data files, names the resource
+  root it publishes under (`/proj4/` and `/proj4j-data/grids/`), and points at core's javadoc for
+  the API that reads them. Nothing else in the release plumbing changed — gpg and the publishing
+  plugin pick up attached artifacts on their own. The already-published 2.1.0 and 2.2.0 artifacts
+  are unaffected; a released version cannot gain a file.
 
 ---
 
