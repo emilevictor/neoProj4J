@@ -182,7 +182,10 @@ public class Proj4jExceptionStackTraceTest {
         CoordinateReferenceSystem nad27 = factory.createFromParameters("nad27",
                 "+proj=longlat +ellps=clrk66 +nadgrids=conus +no_defs");
         CoordinateReferenceSystem wgs84 = factory.createFromName("EPSG:4326");
-        CoordinateTransform t = new CoordinateTransformFactory().createTransform(nad27, wgs84);
+        // THROW explicitly: the 2.4.0 no-arg default (LEGACY_NO_SHIFT) passes a grid coverage
+        // miss through unshifted, and this test is about the refusal's message.
+        CoordinateTransform t = new CoordinateTransformFactory(DomainErrorPolicy.THROW)
+                .createTransform(nad27, wgs84);
 
         // Somewhere in the Indian Ocean: outside every US grid.
         ProjCoordinate in = new ProjCoordinate(70.0, -30.0);

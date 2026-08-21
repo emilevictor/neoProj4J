@@ -30,109 +30,42 @@ version: 1
 rules:
 
   # ---------------------------------------------------------------------------------------------
-  # ORDERED FIRST, DELIBERATELY. See the note at the end of this rule's `reason`: placed anywhere
-  # after FAILCLOSED-UNCHECKED-ISE-REPLACED it hands that rule 34 of these rows, which would record
-  # "1.4.3 threw an unchecked IllegalStateException and we now throw a Proj4jException" for a change
-  # that is actually a grid-coverage refusal. That is the laundering PARSE-NO-KEYWORD-ALLOWLIST
-  # committed against PARSE-R-DECLARES-SPHERE, and this file exists partly to prevent it.
-  - id: FAILCLOSED-NAD27-OUTSIDE-GRID-REPORTED
-    status: active
-    expires: 2027-06-30
-    # PINNED. Measured 2026-08-01 on a frozen /tmp A/B whose two trees differed in exactly the 14
-    # files this stream touched, of which Grid.java is the only one in core/src/main. The predicate
-    # was measured on the frozen report BEFORE the rule was written, not pasted from the gate's own
-    # count afterwards.
-    # RE-PINNED 2026-08-01 by the GRIDS-EPSG-SHIP-CONUS stream: proj4j-epsg now ships PROJ
-    # 9.8.1's `conus` at proj4/nad/conus, so the golden run resolves that grid for the first
-    # time (golden depends on proj4j-epsg and, unlike core's own tests and the conformance
-    # module, has no other copy on its classpath). Measured on a frozen /tmp A/B whose two
-    # trees differ in exactly one byte-bearing file, the grid itself. 1,104 rows that had no grid to be outside OF now find one and are shifted instead; they move to
-    # DATUM-NAD27-NADCON-SHIFT-APPLIED below.
-    expected_rows: 891
-    reason: |
-      datum/Grid.java's `shift` no longer returns the input coordinate when no grid in a non-empty
-      list can supply a value for it. It raises
-      CrsTransformException(ErrorCause.COORDINATE_OUTSIDE_GRID), which is the signal that method's
-      own comment already named and never sent.
-
-      THE DEFECT. The `else` branch was empty. The coordinate came back bit-identical to the input,
-      which is indistinguishable from "the shift was zero", and the transform reported success. That
-      is non-negotiable 3 -- a failure expressed as a plausible coordinate -- at 30 m to 110 m.
-
-      UPSTREAM, MEASURED, not inferred from the source. PROJ 9.8.1 (Rel. 9.8.1, April 10th, 2026)
-      reading the same ntv1_can.dat bytes proj4j-epsg ships, with PROJ_DATA pointed at a directory
-      holding only those files:
-
-        echo "1 -1" | cs2cs -f "%.10f" +proj=longlat +datum=WGS84 \
-             +to +proj=longlat +ellps=clrk66 +nadgrids=@conus,@alaska,@ntv2_0.gsb,@ntv1_can.dat
-          *  * inf
-
-      That is the exact +datum=NAD27 grid list, with EVERY grid present, refusing a point outside all
-      of them. proj4j answered `1, -1`. In source terms it is pj_hgrid_apply (grids.cpp:3517-3520):
-      findGrid returns nullptr and PROJ_ERR_COORD_TRANSFM_OUTSIDE_GRID is set. The second shape --
-      a grid contains the point but the interpolation cannot produce a value -- lands on the same
-      errno at :3534-3536.
-
-      WHY EVERY ROW IS NAD27, AND WHY THE PREDICATE IS `datums` RATHER THAN A STATUS GLOB. All 1,995
-      rows report the grid list `[ntv1_can.dat]`: proj4j-epsg ships exactly one of NAD27's four
-      @-optional grids, so outside 40N-84N / 142W-44W there is no coverage at all. `+datum=potsdam`
-      is the negative control and it did NOT move -- 17 proj4-epsg.csv rows reference a
-      datum=potsdam def, BETA2007.gsb is absent, its grid list therefore resolves EMPTY, and an
-      empty list is a no-op. "The grid file is not there" stays silent; only "outside a grid that
-      loaded" errors. Those are different questions and only the first is legitimately silent, which
-      is also why PROJ's @-optional wart is untouched by this change.
-
-      Scoping by `status_to` alone would have swept in 105 rows belonging to
-      FAILCLOSED-NO-INVERSE-FOR-FORWARD-ONLY (65) and FAILCLOSED-NO-INVERSE-FOR-NEW-FORWARD-ONLY
-      (40), which raise the same exception type for an entirely different reason. `datums: [NAD27]`
-      separates them completely: measured on the frozen tree, exactly 1,995 changed rows carry both
-      predicates and exactly 105 carry the status without the datum.
-
-      THE ROW SET, measured: REG 1,673 / CSV 148 / PAIR 144 / SYN 30. Baseline side: 1,949 OK, 34
-      java.lang.IllegalStateException, 8 UnsupportedParameterException, 2 InvalidValueException,
-      2 NumberFormatException. 202 of them were bit-identical to 1.4.3 before this change -- that
-      is, 1.4.3 and the current tree fail-opened in exactly the same way, which is why the golden
-      regime could not see them until now.
-
-      WHERE THESE ROWS CAME FROM, so the drop in five other rules' counts is accounted for rather
-      than merely noticed. 1,614 of them were claimed by another rule before this change and no
-      longer are, because a row that throws has no numeric movement left to attribute:
-      PROJ-TMERC-PODER-ENGSAGER-DEFAULT 14,724 -> 14,038 (-686), NUM-KARNEY-LATITUDE-CORE
-      20,191 -> 19,336 (-855), DATUM-ISEQUAL-SELF-COMPARISON 332 -> 284 (-48),
-      PARSE-VUNITS-ACCEPTED 964 -> 956 (-8), PROJ-POLYCONIC-KERNEL-CORRECTED 51 -> 43 (-8),
-      PROJ-AEA-SPHERICAL-INVERSE 164 -> 159 (-5), PROJ-POLYCONIC-INVERSE-CONVERGES 6 -> 4 (-2),
-      PARSE-DMS-PARAMETER-VALUE 10 -> 8 (-2). The four pinned ones are re-pinned in place with the
-      same note. The remaining 381 were already UNEXPLAINED.
-
-      FAILCLOSED-UNCHECKED-ISE-REPLACED is the one that moves the other way and it is why this rule
-      is ordered first: it would GROW from 55 to 71 by absorbing rows of this mechanism behind a
-      reason that says nothing about grids. With this rule ahead of it, it gives up all 34 of its
-      NAD27 grid rows and lands at 37. It is TBD-pinned, so that movement would otherwise have been
-      silent.
-
-      THE DELIBERATE DIVERGENCE IS KEPT. Grid.shift still falls through to the NEXT grid when the
-      grid it selected refuses to interpolate, where PROJ commits to findGrid's choice. That was a
-      recorded conscious decision and reversing it is a separate behavioural change with its own row
-      set; it is not smuggled in here. It is also orthogonal: the fall-through can only ever return a
-      value that some grid the caller listed produced for this point, whereas the `else` branch
-      invented one. Keeping it makes this change as small as it can be. Pinned by
-      grids/OutsideGridFailsClosedTest#interpolationFailureStillFallsThroughToTheNextGrid.
-
-      NOT A CORRECTNESS CLAIM, per this file's policy. At the CRS level with proj.db present,
-      cs2cs +to +proj=longlat +datum=NAD27 at (1, -1) returns the point unchanged, because PROJ's
-      operation factory sees the coordinate is outside NADCON's area of use and selects "Ballpark
-      geographic offset" (verified with PROJ_DEBUG=2) -- a DECLARED no-op, not a silent one.
-      proj4j's legacy +datum= path has no such factory; it is the operator path, and the operator
-      path errors. Reproducing the ballpark selection belongs to db/ and the strict API, and until
-      it exists this change is a behavioural break for any caller currently receiving a silent
-      no-op.
-    match:
-      datums: [NAD27]
-      status_to: "EXC:org.locationtech.proj4j.CrsTransformException"
-    expect:
-      allow_status_change: true
-      allow_inside_change: true
-      allow_nonfinite: true
+  # TOMBSTONE: FAILCLOSED-NAD27-OUTSIDE-GRID-REPORTED was removed in 2.4.0. Do not re-add it.
+  #
+  # It recorded that a NAD27 point outside every loaded grid began throwing
+  # CrsTransformException(COORDINATE_OUTSIDE_GRID) where 1.4.3 returned the coordinate unchanged.
+  # DomainErrorPolicy.LEGACY_NO_SHIFT reverted that decision FOR THE LEGACY DEFAULT ONLY, so the rule
+  # matched 0 rows and the gate reported it as a DEAD_RULE. Deleted rather than marked `pending`,
+  # because the change it describes has not been deferred -- it has been withdrawn.
+  #
+  # The rule's own reason predicted this, which is why the withdrawal is not the reversal of a bug
+  # fix: "proj4j's legacy +datum= path has no such factory; it is the operator path, and the operator
+  # path errors. Reproducing the ballpark selection belongs to db/ and the strict API, and until it
+  # exists this change is a behavioural break for any caller currently receiving a silent no-op."
+  # That break was then measured: 267 transforms which both cs2cs 9.8.1 and 1.4.3 complete, over
+  # 20,634 in-domain probes across 6,878 dictionary definitions. The engine still throws under
+  # DomainErrorPolicy.THROW -- pinned by core failopen/Nad27CoverageMissPassesThroughTest and
+  # grids/OutsideGridFailsClosedTest, both of which now name the strict policy explicitly.
+  #
+  # WHAT ITS 891 ROWS DID, accounted for rather than merely noticed. SIX rules return to EXACTLY the
+  # counts this rule's own reason recorded before it took their rows, which is the strongest
+  # available evidence that the withdrawal restores the prior behaviour precisely:
+  #   DATUM-ISEQUAL-SELF-COMPARISON        284 -> 332    (pre-fail-closed: 332)  exact
+  #   PARSE-VUNITS-ACCEPTED                956 -> 964    (pre-fail-closed: 964)  exact
+  #   PROJ-POLYCONIC-KERNEL-CORRECTED       43 -> 51     (pre-fail-closed: 51)   exact
+  #   PROJ-AEA-SPHERICAL-INVERSE           159 -> 164    (pre-fail-closed: 164)  exact
+  #   PROJ-POLYCONIC-INVERSE-CONVERGES       4 -> 6      (pre-fail-closed: 6)    exact
+  #   PARSE-DMS-PARAMETER-VALUE              8 -> 10     (pre-fail-closed: 10)   exact
+  #   FAILCLOSED-UNCHECKED-ISE-REPLACED     37 -> 55     (pre-fail-closed: 55)   exact
+  # Two do NOT return exactly, and the reason is known: `conus` now shifts rows that had no grid to
+  # be outside of when those figures were first taken, so some rows moved on to a different rule
+  # rather than back to this one.
+  #   PROJ-TMERC-PODER-ENGSAGER-DEFAULT  14038 -> 14378  (pre-fail-closed: 14724)
+  #   NUM-KARNEY-LATITUDE-CORE           19336 -> 19555  (pre-fail-closed: 20191)
+  # 137 rows became UNCHANGED -- bit-identical to the 1.4.3 baseline again, which is the point of the
+  # change. The residual 107 are claimed by DATUM-NAD27-COVERAGE-MISS-ANSWERS-AGAIN, last in this
+  # file.
+  # ---------------------------------------------------------------------------------------------
 
   # ---------------------------------------------------------------------------------------------
   # ORDERED SECOND, DELIBERATELY, and only because the rule above it cannot reach these rows: its
@@ -279,7 +212,8 @@ rules:
     # time (golden depends on proj4j-epsg and, unlike core's own tests and the conformance
     # module, has no other copy on its classpath). Measured on a frozen /tmp A/B whose two
     # trees differ in exactly one byte-bearing file, the grid itself. +6, the same mechanism: rows whose transform now completes have movement to attribute.
-    expected_rows: 962
+    # RE-PINNED 2026-08-21: LEGACY_NO_SHIFT returned NAD27 coverage-miss rows to this rule.
+    expected_rows: 964
     reason: |
       Proj4Keyword has no `vunits`, so Proj4Parser rejected the ENTIRE definition of any CRS carrying
       it with UnsupportedParameterException -- 158 registry defs, all of them unreachable. PROJ has no
@@ -395,7 +329,8 @@ rules:
     # excludes that outcome deliberately, so reordering the rules would NOT bring them here; the
     # predicate declines them whatever the order. Verified on the frozen report: nad83:5001 x5 plus
     # nad27:5001 probes 0, 2, 4.
-    expected_rows: 8
+    # RE-PINNED 2026-08-21: LEGACY_NO_SHIFT returned NAD27 coverage-miss rows to this rule.
+    expected_rows: 10
     reason: |
       1.4.3 read angular parameter values with Double.parseDouble and let the resulting
       java.lang.NumberFormatException escape -- NOT a Proj4jException, so it went through every
@@ -489,7 +424,8 @@ rules:
     # module, has no other copy on its classpath). Measured on a frozen /tmp A/B whose two
     # trees differ in exactly one byte-bearing file, the grid itself. -5, and they are enumerable: the five `SYN mod/aea/nadgrids_conus` probes, all of which lie in
     # Europe or Africa and now report COORDINATE_OUTSIDE_GRID. Claimed by GRIDS-EPSG-CONUS-SYN-REFUSED.
-    expected_rows: 154
+    # RE-PINNED 2026-08-21: LEGACY_NO_SHIFT returned NAD27 coverage-miss rows to this rule.
+    expected_rows: 164
     reason: |
       AlbersProjection.java:97-108 is the spherical inverse branch, and it is now right: the quantity
       PROJ names qs_div_2 is a local, `qsDiv2` (:103), asin is taken of that local (:104-105), and the
@@ -734,7 +670,8 @@ rules:
     # a guard added upstream of GeocentricConverter moves a row between exception buckets without
     # changing this total, while a guard that turns a throw back into a coordinate removes one.
     # Either way the gate now says so instead of absorbing it.
-    expected_rows: 37
+    # RE-PINNED 2026-08-21: LEGACY_NO_SHIFT returned NAD27 coverage-miss rows to this rule.
+    expected_rows: 55
     reason: |
       The BASELINE side of these rows is `EXC:java.lang.IllegalStateException`, which in 1.4.3 had
       exactly one source in this whole suite: datum/GeocentricConverter's out-of-range latitude
@@ -1068,7 +1005,8 @@ rules:
     # module, has no other copy on its classpath). Measured on a frozen /tmp A/B whose two
     # trees differ in exactly one byte-bearing file, the grid itself. +12 PAIR rows that previously threw on grid coverage now produce a coordinate, so they have
     # numeric movement for this rule to describe again.
-    expected_rows: 296
+    # RE-PINNED 2026-08-21: LEGACY_NO_SHIFT returned NAD27 coverage-miss rows to this rule.
+    expected_rows: 332
     reason: |
       datum/Datum.java:437 isEqual now compares the two datums' equator radii, :454 reading
       `ellipsoid.getEquatorRadius() != datum.ellipsoid.getEquatorRadius()`. The comment at :450-453
@@ -2354,7 +2292,8 @@ rules:
     # this rule states is unchanged and is still true of the 4 that remain; only the
     # population it applies to shrank. Verified on a frozen A/B, and the arithmetic is
     # itemised in that rule's reason.
-    expected_rows: 4
+    # RE-PINNED 2026-08-21: LEGACY_NO_SHIFT returned NAD27 coverage-miss rows to this rule.
+    expected_rows: 6
     reason: |
       `EXC:InvalidValueException: inv: Infinite longitude` -> `OK` on
       `epsg:5472`, `esri:102766`, `esri:65061`, `esri:65161`, `nad27:5400` and `SYN proj/poly`.
@@ -2415,7 +2354,8 @@ rules:
     # this rule states is unchanged and is still true of the 43 that remain; only the
     # population it applies to shrank. Verified on a frozen A/B, and the arithmetic is
     # itemised in that rule's reason.
-    expected_rows: 43
+    # RE-PINNED 2026-08-21: LEGACY_NO_SHIFT returned NAD27 coverage-miss rows to this rule.
+    expected_rows: 51
     reason: |
       The `OK -> OK` half of the polyconic fix whose inverse half is
       PROJ-POLYCONIC-INVERSE-CONVERGES above. Three defects, each carrying its own upstream
@@ -2493,7 +2433,8 @@ rules:
     # 5.0e6 m outside it because `+proj=tmerc +zone=31` no longer installs the UTM frame. It is
     # the second of the two things the note above says will move this rule -- a row crossing the
     # ceiling -- and it crossed outward, so this rule gives it up rather than gaining anything.
-    expected_rows: 14037
+    # RE-PINNED 2026-08-21: LEGACY_NO_SHIFT returned NAD27 coverage-miss rows to this rule.
+    expected_rows: 14378
     reason: |
       PROJ 9.8.1 RUNS PODER/ENGSAGER FOR `+proj=tmerc` AND `+proj=utm`; PROJ4J UP TO 1.4.3 ALWAYS
       RAN EVENDEN/SNYDER. This is the single largest behavioural change in the release and the
@@ -2839,7 +2780,8 @@ rules:
     # COUNT_MISMATCH for this rule at all; instead it listed `NUM-KARNEY-LATITUDE-CORE: 19309` among
     # its matched counts. A COUNT_MISMATCH is precisely what a wrong pin produces here, so its
     # absence is the confirmation, and 19309 is now a measured figure rather than an arithmetic one.
-    expected_rows: 19309
+    # RE-PINNED 2026-08-21: LEGACY_NO_SHIFT returned NAD27 coverage-miss rows to this rule.
+    expected_rows: 19555
     reason: |
       PROVISIONAL AND NOT OWNED BY THIS MODULE. Placeholder for the sub-microscopic movement caused by
       wiring in PROJ 9.4-9.6's Karney auxiliary-latitude core (9.8.1:src/latitudes.cpp, and the
@@ -2973,7 +2915,8 @@ rules:
     # module, has no other copy on its classpath). Measured on a frozen /tmp A/B whose two
     # trees differ in exactly one byte-bearing file, the grid itself. +1,074, the other side of FAILCLOSED-NAD27-OUTSIDE-GRID-REPORTED's -1,104. The two are one
     # migration; the 30-row difference is the rows that land in the three GRIDS-EPSG-CONUS-* rules.
-    expected_rows: 1926
+    # RE-PINNED 2026-08-21: LEGACY_NO_SHIFT returned NAD27 coverage-miss rows to this rule.
+    expected_rows: 1932
     reason: |
       NAD27 registry CRS now receive the NADCON grid shift. In the 1.4.3 baseline they receive none
       at all, so every one of these rows moves by the whole shift.
@@ -3033,105 +2976,26 @@ rules:
       allow_inside_change: true
       allow_nonfinite: false
       magnitude: {min: 1.0e-4, max: 1.0e4}
-
   # ---------------------------------------------------------------------------------------------
-  # proj4j-epsg now ships PROJ 9.8.1's `conus` (264,424 B, CTABLE V2, blob 44b4900f) at
-  # proj4/nad/conus. The three rules below claim the 38 rows that move because of it and nothing
-  # else. They are ordered LAST on purpose: every row they claim was UNEXPLAINED in the measured
-  # run, so no earlier rule can lose a row to them and the six counts re-pinned above are exactly
-  # what the frozen A/B measured.
+  # TOMBSTONE: GRIDS-EPSG-CONUS-SYN-REFUSED and GRIDS-EPSG-CONUS-SYN-TMERC-REFUSED were removed in
+  # 2.4.0, for the same reason as FAILCLOSED-NAD27-OUTSIDE-GRID-REPORTED at the top of this file.
+  # Do not re-add either.
   #
-  # KEYS AND PROBES ARE ENUMERATED, NEVER GLOBBED, and the probe filters are load bearing rather
-  # than decorative:
-  #   * `mod/tmerc/nadgrids_conus` probes 1-4 were ALREADY UNEXPLAINED before this change (they
-  #     belong to the transverse-Mercator stream, which rules.yaml states is awaiting a user
-  #     decision and whose rows nothing in this pass may claim). Only probe 0 is newly changed, so
-  #     GRIDS-EPSG-CONUS-SYN-TMERC-REFUSED takes probe 0 and leaves the other four where they are.
-  #   * The twelve PAIR keys have all five probes UNEXPLAINED, but only probe 1 is NEW -- the other
-  #     48 are pre-existing residue. A key-only rule would absorb 48 rows behind this reason, which
-  #     is the exact failure this file was built to prevent.
-  # Together they take UNEXPLAINED from 2,329 back to 2,291, the pre-change figure -- this stream
-  # adds no residue and removes none.
+  # Both recorded that a synthetic `+nadgrids=conus` definition handed a point outside CONUS began
+  # REFUSING rather than echoing the input back. DomainErrorPolicy.LEGACY_NO_SHIFT restored the echo
+  # on the legacy default, so both matched 0 rows and the gate reported them as DEAD_RULEs.
+  #
+  # Their 26 rows (25 + 1) did NOT become unexplained: they left the diff entirely, because echoing
+  # the input IS what the 1.4.3 baseline recorded. They are part of the 137 rows that moved from
+  # CHANGED to UNCHANGED, which is why the headline UNCHANGED figure rose by exactly that much.
+  #
+  # Note what these two got RIGHT, and keep citing them for it: they identified the trigger as a
+  # PACKAGING change rather than arithmetic -- proj4j-epsg began shipping `conus`, so a token that
+  # had resolved to nothing started resolving, and an empty grid list (always a silent no-op) became
+  # a non-empty one (a refusal). That is the same root cause as the 267-transform regression, found
+  # here first, on 26 synthetic rows, before it was found on 267 real ones.
+  # ---------------------------------------------------------------------------------------------
 
-  - id: GRIDS-EPSG-CONUS-SYN-REFUSED
-    status: active
-    expires: 2027-06-30
-    # PINNED at 25 = 5 keys x 5 probes, measured on the frozen A/B before the rule was written.
-    expected_rows: 25
-    reason: |
-      A CRS that declares `+nadgrids=conus` and is then handed a point in Europe or Africa now
-      REFUSES instead of quietly returning the point unshifted.
-
-      THE MECHANISM, and it is packaging rather than arithmetic. These synthetic definitions carry
-      `+nadgrids=conus`. Until now no `conus` existed anywhere on golden's classpath -- golden
-      depends on proj4j-epsg, which shipped only ntv1_can.dat -- so Grid.fromNadGrids resolved the
-      token to NOTHING and left the grid list EMPTY. Grid.shift's fail-closed throw fires when a
-      NON-empty list covers no grid for the point; an empty list is not that case, so the transform
-      returned the input coordinate and reported success. proj4j-epsg now ships conus, the list is
-      non-empty, and the refusal path is reachable for the first time.
-
-      WHY REFUSING IS THE CORRECT ANSWER HERE, and it is checkable from the probe file rather than
-      asserted. conus covers 131W-63W, 20N-50N. The five SYN probe points, decoded from
-      probes.tsv's hex, are (10, 45), (-11.21, 30), (31.21, 30), (-11.21, 60) and (31.21, 60) --
-      every one of them in Europe, Africa or the North Atlantic, between about 4,700 and 12,000 km
-      outside the grid. A definition that names a US grid and is then asked about Cairo has no
-      answer, and non-negotiable 3 says the failure must not be expressed as a plausible
-      coordinate. The old behaviour returned the input unchanged, which is precisely that.
-
-      NOT A REGRESSION AND NOT A WIDENING. The same run shows the CONUS points that ought to shift
-      now shifting to PROJ 9.8.1's values -- see core's ConusShipsInEpsgArtifactTest, which pins
-      San Francisco and Kansas against `cct +proj=hgridshift +grids=conus` and keeps Honolulu,
-      San Juan, Anchorage and the Gulf of Guinea throwing.
-
-      WHERE THESE ROWS CAME FROM. All 25 were INTENDED before this change, attributed to rules that
-      describe projection and latitude arithmetic -- PROJ-AEA-SPHERICAL-INVERSE (the 5 aea rows)
-      and NUM-KARNEY-LATITUDE-CORE (the lcc and longlat rows and their family). Those rules
-      described the numeric drift of a coordinate that should never have been produced. With the
-      coordinate withdrawn there is no drift left for them to describe, which is why both re-pin
-      downward by exactly 5 and 12 and why that arithmetic is quoted at each of them.
-    match:
-      sections: [SYN]
-      keys:
-        - "mod/aea/nadgrids_conus"
-        - "mod/lcc/nadgrids_conus"
-        - "mod/longlat/nadgrids_conus"
-        - "mod/merc/nadgrids_conus"
-        - "mod/utm/nadgrids_conus"
-      classifications: [CHANGED]
-      status_from: "OK"
-      status_to: "EXC:org.locationtech.proj4j.CrsTransformException"
-    expect:
-      allow_status_change: true
-      allow_inside_change: true
-      allow_nonfinite: true
-
-  - id: GRIDS-EPSG-CONUS-SYN-TMERC-REFUSED
-    status: active
-    expires: 2027-06-30
-    # PINNED at 1. `mod/tmerc/nadgrids_conus` probes 1-4 were UNEXPLAINED before this change and
-    # stay UNEXPLAINED: they are the transverse-Mercator stream's rows and this file says nothing
-    # in this pass claims any of them. Probe 0 was UNCHANGED before and is newly CHANGED, so it is
-    # this stream's row and only it is claimed. Separating one row into its own rule is deliberate:
-    # folding it into the rule above would have needed a key glob that also swept up the four.
-    expected_rows: 1
-    reason: |
-      The `+proj=tmerc` member of the GRIDS-EPSG-CONUS-SYN-REFUSED family, split out so that the
-      four probes belonging to another stream are not absorbed by this one. Same mechanism, same
-      evidence: `+nadgrids=conus` now resolves, the probe point is outside the grid, and the
-      transform reports COORDINATE_OUTSIDE_GRID instead of echoing the input back as a success.
-
-      Probe 0 is (10, 45) -- central Europe, roughly 4,700 km east of conus's eastern edge at 63W.
-    match:
-      sections: [SYN]
-      keys: ["mod/tmerc/nadgrids_conus"]
-      probes: [0]
-      classifications: [CHANGED]
-      status_from: "OK"
-      status_to: "EXC:org.locationtech.proj4j.CrsTransformException"
-    expect:
-      allow_status_change: true
-      allow_inside_change: true
-      allow_nonfinite: true
 
   - id: GRIDS-EPSG-CONUS-PAIR-NAD27-SHIFTED
     status: active
@@ -3451,7 +3315,8 @@ rules:
     # and this rule's whole effect on the run is INTENDED 39199 -> 39242 and
     # UNEXPLAINED 2287 -> 2244. Anyone reconciling this release's arithmetic should not look for
     # 43 rows arriving from the UNCHANGED side, because none did.
-    expected_rows: 43
+    # RE-PINNED 2026-08-21: LEGACY_NO_SHIFT returned NAD27 coverage-miss rows to this rule.
+    expected_rows: 45
     reason: |
       Eight `+proj=omerc` entries in the shipped ESRI dictionary declared EPSG method 9815, Hotine
       Oblique Mercator variant B, where PROJ 9.8.1's own definition of the same code declares
@@ -3807,3 +3672,83 @@ rules:
       allow_inside_change: false
       allow_nonfinite: false
       magnitude: {min: 1.0e-6, max: 1.0e4}
+
+  # ---------------------------------------------------------------------------------------------
+  # ORDERED LAST, DELIBERATELY, and scoped by KEY rather than by predicate. Read the reason before
+  # widening the match: a predicate-scoped version of this rule launders 70 unrelated rows.
+  - id: DATUM-NAD27-COVERAGE-MISS-ANSWERS-AGAIN
+    status: active
+    expires: 2027-06-30
+    # PINNED from a frozen A/B: the same tree with and without the LEGACY_NO_SHIFT default, both
+    # golden reports kept, and the UNEXPLAINED key sets differenced. That difference is exactly 107
+    # rows added and 0 removed, and the 54 distinct keys below are its key set. Measured
+    # 2026-08-21, before this rule was written -- not read back off the gate afterwards.
+    expected_rows: 107
+    reason: |
+      DomainErrorPolicy.LEGACY_NO_SHIFT restored 1.4.3's answer for a NAD27 point outside every grid
+      that loaded, which is the withdrawal recorded in the tombstone at the top of this file. Of the
+      891 rows the retired rule used to claim, 137 became UNCHANGED and most of the rest returned to
+      the rules that held them before the fail-closed change. These 107 are the residual, and all
+      107 carry +datum=NAD27 -- verified against the golden index, 70 as `NAD27` and 37 as
+      `NAD27,WGS84`.
+
+      THREE MECHANISMS, all consequences of the same one-line change, and none of them a new defect:
+
+        EXC:java.lang.IllegalStateException -> OK   15 rows. 1.4.3 threw an unchecked ISE from the
+        grid code; the coordinate now passes through and the transform completes. Strictly better
+        than both the 1.4.3 crash and the fail-closed refusal.
+
+        OK -> EXC:ProjectionException              32 rows. The FAILURE MOVED DOWNSTREAM AND CHANGED
+        TYPE. The grid used to refuse first, so the projection was never reached; now the unshifted
+        coordinate reaches the projection, which refuses it as out of its own domain. Same point,
+        same verdict of "cannot be transformed", different layer and therefore a different exception
+        class. Worth stating plainly because it looks like a new failure and is not.
+
+        OK -> OK                                   60 rows. Numeric movement only: these rows
+        answered in 1.4.3, answer now, and differ because the datum stage contributes nothing where
+        it previously contributed a refusal.
+
+      WHY `keys` AND NOT A PREDICATE, which is the load-bearing decision here. The obvious rule is
+      `datums: [NAD27]` plus these three status transitions. Measured, that matches 177 rows, not
+      107: there are 70 PRE-EXISTING unexplained NAD27 rows carrying the identical transitions, and
+      they are a DIFFERENT mechanism -- the grid SUCCEEDED for them and the projection then refused,
+      where for these 107 the grid MISSED. A status transition cannot separate the two. Claiming all
+      177 under this reason would attribute 70 rows of the standing backlog to a change that did not
+      cause them, which is precisely the laundering this file was written to prevent, and which its
+      own note about PARSE-NO-KEYWORD-ALLOWLIST against PARSE-R-DECLARES-SPHERE records happening
+      once already.
+
+      So the match is the 54 keys the frozen A/B named. It is verbose and it is exact, and if a
+      future change moves a different NAD27 row this rule will DECLINE it and the gate will say so,
+      which is the behaviour worth having. `keys` is used the same way by
+      PARSE-URMFPS-REQUIRES-N and FAILCLOSED-NUMBER-FORMAT-REPLACED.
+
+      NOT A CORRECTNESS CLAIM, per this file's policy. It is a claim about which rows moved and why.
+      Whether an unshifted answer is the RIGHT answer is measured elsewhere and is not uniformly
+      yes: on the 267-probe population that motivated the change, an unshifted answer agrees with
+      cs2cs 9.8.1 to within 1 mm on 218 and is up to 753 m out on the other 49, where PROJ found a
+      real shift from NADCON grids this library does not ship.
+    match:
+      datums: [NAD27]
+      keys: ["mod/tmerc/datum_NAD27", "proj4-epsg.csv:01901", "proj4-epsg.csv:01902",
+             "proj4-epsg.csv:02141", "proj4-epsg.csv:02142", "proj4-epsg.csv:02143",
+             "proj4-epsg.csv:03113", "proj4-epsg.csv:03114", "proj4-epsg.csv:03115",
+             "proj4-epsg.csv:03130", "proj4-epsg.csv:03131", "proj4-epsg.csv:03132",
+             "proj4-epsg.csv:03134", "proj4-epsg.csv:03135", "proj4-epsg.csv:03136",
+             "proj4-epsg.csv:03137", "proj4-epsg.csv:03138", "proj4-epsg.csv:03147",
+             "proj4-epsg.csv:03148", "proj4-epsg.csv:03151", "proj4-epsg.csv:03155",
+             "proj4-epsg.csv:03530", "proj4-epsg.csv:03531", "proj4-epsg.csv:03532",
+             "proj4-epsg.csv:03533", "proj4-epsg.csv:03534", "proj4-epsg.csv:03547",
+             "proj4-epsg.csv:03561", "proj4-epsg.csv:03573", "proj4-epsg.csv:03574",
+             "proj4-epsg.csv:03575", "proj4-epsg.csv:03576", "proj4-epsg.csv:03577",
+             "proj4-epsg.csv:03578", "proj4-epsg.csv:03579", "proj4-epsg.csv:03580",
+             "proj4-epsg.csv:03581", "proj4-epsg.csv:03582", "t14/epsg:4075>epsg:26716",
+             "t14/epsg:4152>epsg:26735", "t14/epsg:4173>epsg:26748", "t14/epsg:4283>epsg:26766",
+             "t14/epsg:4667>epsg:26795", "t14/epsg:4737>epsg:32007", "t24/epsg:4145>epsg:26735",
+             "t24/epsg:4155>epsg:26748", "t24/epsg:4168>epsg:26766", "t24/epsg:4207>epsg:26795",
+             "t24/epsg:4214>epsg:32007", "t34/epsg:4232>epsg:26735", "t34/epsg:4289>epsg:26748",
+             "t34/epsg:4322>epsg:26766", "t34/epsg:4691>epsg:26795", "t34/epsg:4817>epsg:32007"]
+    expect:
+      allow_status_change: true
+      allow_inside_change: true
+      allow_nonfinite: true

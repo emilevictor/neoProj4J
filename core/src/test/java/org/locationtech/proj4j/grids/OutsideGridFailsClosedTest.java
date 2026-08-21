@@ -31,6 +31,7 @@ import org.locationtech.proj4j.CRSFactory;
 import org.locationtech.proj4j.CoordinateReferenceSystem;
 import org.locationtech.proj4j.CoordinateTransform;
 import org.locationtech.proj4j.CoordinateTransformFactory;
+import org.locationtech.proj4j.DomainErrorPolicy;
 import org.locationtech.proj4j.CrsTransformException;
 import org.locationtech.proj4j.ErrorCause;
 import org.locationtech.proj4j.ProjCoordinate;
@@ -106,7 +107,13 @@ public class OutsideGridFailsClosedTest {
     private static final double DEG = Math.PI / 180.0;
 
     private static final CRSFactory CRS_FACTORY = new CRSFactory();
-    private static final CoordinateTransformFactory CT_FACTORY = new CoordinateTransformFactory();
+    // DomainErrorPolicy.THROW explicitly, not the no-arg default. Since 2.4.0 that default is
+    // LEGACY_NO_SHIFT, which passes a datum grid COVERAGE miss through unshifted -- exactly the
+    // behaviour every assertion in this file exists to rule out. Naming the strict policy keeps
+    // these tests measuring the engine, and turns them into the proof that the 2.4.0 default
+    // change did not weaken it.
+    private static final CoordinateTransformFactory CT_FACTORY =
+            new CoordinateTransformFactory(DomainErrorPolicy.THROW);
 
     private Path root;
 

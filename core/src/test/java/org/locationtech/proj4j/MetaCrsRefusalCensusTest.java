@@ -150,7 +150,7 @@ public class MetaCrsRefusalCensusTest {
     private static final int EXPECTED_ROWS = 4280;
 
     /** Proj4J returns a coordinate and {@code cs2cs} 9.8.1 returns a coordinate. */
-    private static final int EXPECTED_BOTH_ANSWER = 3869;
+    private static final int EXPECTED_BOTH_ANSWER = 4000;
 
     /**
      * Proj4J returns a coordinate and {@code cs2cs} 9.8.1 prints {@code * * inf}.
@@ -164,27 +164,46 @@ public class MetaCrsRefusalCensusTest {
     private static final int EXPECTED_PROJ4J_ANSWERS_PROJ_REFUSES = 0;
 
     /**
-     * Proj4J refuses and {@code cs2cs} 9.8.1 answers: the declared-ballpark divergence.
+     * Proj4J refuses and {@code cs2cs} 9.8.1 answers: <b>zero as of 2.4.0, and that is the headline
+     * of this class.</b>
      *
-     * <h4>The guard on the grid fix</h4>
+     * <h4>It was 131, and closing it is what this cell now guards</h4>
      *
-     * <p>Every one of these is {@code +datum=NAD27} and
-     * {@link ErrorCause#COORDINATE_OUTSIDE_GRID}; with the fail-open restored this cell measures
-     * 0.
+     * <p>All 131 were {@code +datum=NAD27} refused with {@link ErrorCause#COORDINATE_OUTSIDE_GRID}
+     * at a point no shipped grid covers, while PROJ's CRS layer answered via a declared ballpark.
+     * {@link org.locationtech.proj4j.DomainErrorPolicy#LEGACY_NO_SHIFT} made the legacy default do
+     * the same, so <b>Proj4J and {@code cs2cs} 9.8.1 now agree on the answer/refuse decision for
+     * every one of the 4,280 rows.</b>
+     *
+     * <p>The cell is still asserted rather than deleted, and its meaning has inverted: it used to
+     * pin a known divergence at 131, and now it forbids one. A non-zero reading here is a
+     * regression, in either direction of the fix.
      */
-    private static final int EXPECTED_PROJ4J_REFUSES_PROJ_ANSWERS = 131;
+    private static final int EXPECTED_PROJ4J_REFUSES_PROJ_ANSWERS = 0;
 
     /**
-     * Both refuse. Proj4J's reasons: 263 out-of-domain, plus the 17 outside-grid rows PROJ
-     * refuses too.
+     * Both refuse. Proj4J's reason for every one of them is now the projection's own domain guard.
+     *
+     * <p>The count did not change across the 2.4.0 fix -- 280 before and after -- but its
+     * composition did: it used to be 263 out-of-domain plus the 17 outside-grid rows PROJ also
+     * refuses, and those 17 are now attributed to the cause that was always the real one. See
+     * {@code MetaCRSTest}'s javadoc: the non-vacuity control had been reporting for some time that
+     * their {@code COORDINATE_OUTSIDE_GRID} verdict "is also satisfied by
+     * {@code COORDINATE_OUT_OF_DOMAIN}".
      */
     private static final int EXPECTED_BOTH_REFUSE = 280;
 
-    /** Refusals attributed to the grid guard closed in Stage 9. */
-    private static final int EXPECTED_OUTSIDE_GRID = 148;
+    /**
+     * Refusals attributed to the grid guard: <b>zero as of 2.4.0</b>.
+     *
+     * <p>Not because the guard is gone -- {@link org.locationtech.proj4j.DomainErrorPolicy#THROW}
+     * still raises it, which {@code failopen/Nad27CoverageMissPassesThroughTest} proves -- but
+     * because no row of this file reaches it under the default policy any more.
+     */
+    private static final int EXPECTED_OUTSIDE_GRID = 0;
 
     /** Refusals attributed to a projection's own domain guard. */
-    private static final int EXPECTED_OUT_OF_DOMAIN = 263;
+    private static final int EXPECTED_OUT_OF_DOMAIN = 280;
 
     /** The one source CRS every row uses. */
     private static final String SOURCE = "EPSG:4326";
@@ -377,19 +396,15 @@ public class MetaCrsRefusalCensusTest {
             fail(report(c, problems));
         }
 
-        // The 131 are a single, named phenomenon -- not an assorted 131. Checked by cause and by
-        // definition string, so a different row drifting into the cell cannot keep the count.
-        for (String row : c.cells.get(Cell.PROJ4J_REFUSES_PROJ_ANSWERS)) {
-            assertTrue("every row where Proj4J refuses and PROJ answers must be the NAD27 "
-                    + "declared-ballpark divergence, but this one is not: " + row,
-                    row.contains(ErrorCause.COORDINATE_OUTSIDE_GRID.name()));
-        }
-        assertEquals("all 131 must be +datum=NAD27",
-                EXPECTED_PROJ4J_REFUSES_PROJ_ANSWERS,
-                countWithDatumNad27(c.cells.get(Cell.PROJ4J_REFUSES_PROJ_ANSWERS)));
-        assertEquals("and so must the 17 in the both-refuse cell that came from the grid guard",
+        // The divergence cell is empty as of 2.4.0. Asserted as a list rather than only as a count,
+        // so that a row drifting in is named rather than merely counted.
+        assertTrue("Proj4J must not refuse anything cs2cs 9.8.1 answers, but it refused: "
+                        + c.cells.get(Cell.PROJ4J_REFUSES_PROJ_ANSWERS),
+                c.cells.get(Cell.PROJ4J_REFUSES_PROJ_ANSWERS).isEmpty());
+        assertEquals("nothing may be attributed to the grid guard under the default policy",
                 EXPECTED_OUTSIDE_GRID,
-                countWithDatumNad27(c.byCause.get(ErrorCause.COORDINATE_OUTSIDE_GRID)));
+                c.byCause.containsKey(ErrorCause.COORDINATE_OUTSIDE_GRID)
+                        ? c.byCause.get(ErrorCause.COORDINATE_OUTSIDE_GRID).size() : 0);
     }
 
     /**
@@ -485,15 +500,22 @@ public class MetaCrsRefusalCensusTest {
     public void theProj4jSideDiscriminatesRowByRow() throws IOException {
         Census c = census();
         assertOutcome(c, 3819, MetaCRSTestCase.Outcome.IN_TOLERANCE, null);
-        assertOutcome(c, 4267, MetaCRSTestCase.Outcome.REFUSED, ErrorCause.COORDINATE_OUTSIDE_GRID);
+        // EPSG:4267 is the row the 2.4.0 change is about. It used to sit in
+        // PROJ4J_REFUSES_PROJ_ANSWERS with COORDINATE_OUTSIDE_GRID; under the default policy it now
+        // answers, unshifted, agreeing with the ballpark PROJ's CRS layer selects. It is kept here
+        // rather than swapped out because it is the discriminator: if the fix regressed, this line
+        // is the one that says so by name.
+        assertOutcome(c, 4267, MetaCRSTestCase.Outcome.IN_TOLERANCE, null);
         assertOutcome(c, 2020, MetaCRSTestCase.Outcome.REFUSED,
                 ErrorCause.COORDINATE_OUT_OF_DOMAIN);
 
-        // ...and each of those three sits in the cell the pinned PROJ column puts it in.
+        // ...and each of those three sits in the cell the pinned PROJ column puts it in. Two of the
+        // three are BOTH_ANSWER now, so the third carries the discrimination on this leg -- which is
+        // why the outcome assertions above are per-row and not a set comparison.
         assertEquals("EPSG:3819 -- both answer",
                 Cell.BOTH_ANSWER, cellOf(c, 3819));
-        assertEquals("EPSG:4267 -- Proj4J refuses on the grid, PROJ ballparks it",
-                Cell.PROJ4J_REFUSES_PROJ_ANSWERS, cellOf(c, 4267));
+        assertEquals("EPSG:4267 -- both answer, since the legacy default stopped refusing it",
+                Cell.BOTH_ANSWER, cellOf(c, 4267));
         assertEquals("EPSG:2020 -- both refuse",
                 Cell.BOTH_REFUSE, cellOf(c, 2020));
     }

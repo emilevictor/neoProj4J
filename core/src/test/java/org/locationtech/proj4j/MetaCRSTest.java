@@ -82,24 +82,45 @@ public class MetaCRSTest {
      * <table>
      * <caption>proj4-epsg.csv after the 9.8.1 regeneration</caption>
      * <tr><th>rows</th><th>column 1</th><th>source of the expectation</th></tr>
-     * <tr><td>3,869</td><td>{@code passing}</td>
+     * <tr><td>4,000</td><td>{@code passing}</td>
      *     <td>898 coordinates re-pinned from {@code cs2cs} 9.8.1 fed the <em>dictionary strings</em>
-     *         Proj4J itself reads; the other 2,971 kept their original auto-generated values,
-     *         which still hold, and are therefore unmoved evidence rather than rewritten
-     *         evidence</td></tr>
-     * <tr><td>148</td><td>{@code refuses:COORDINATE_OUTSIDE_GRID}</td>
-     *     <td>all {@code +datum=NAD27}; {@code cs2cs} refuses all 148 at the operator layer
-     *         ({@code nadgrids=@conus,@alaska,@ntv2_0.gsb,@ntv1_can.dat}, verbatim from
-     *         {@code 9.8.1:src/datums.cpp}) with <i>"Coordinate to transform falls outside
-     *         grid"</i>; 17 of them PROJ also refuses at the CRS layer</td></tr>
-     * <tr><td>263</td><td>{@code refuses:COORDINATE_OUT_OF_DOMAIN}</td>
-     *     <td>{@code cs2cs} prints {@code * * inf} on all 263 at the CRS layer</td></tr>
+     *         Proj4J itself reads, plus 18 more in the 2.4.0 re-pin below; the rest kept their
+     *         original auto-generated values, which still hold, and are therefore unmoved evidence
+     *         rather than rewritten evidence</td></tr>
+     * <tr><td>280</td><td>{@code refuses:COORDINATE_OUT_OF_DOMAIN}</td>
+     *     <td>{@code cs2cs} prints {@code * * inf} on all 280 at the CRS layer</td></tr>
      * </table>
      *
-     * <p><b>No expectation in this file comes from Proj4J's own output.</b> Over all 3,869
-     * answering rows Proj4J and {@code cs2cs} 9.8.1 agree to 1e-12 relative or better, 4,515 of
-     * the 7,738 ordinates bit-for-bit &mdash; so the reference is a measurement, and the file
-     * would have caught a disagreement rather than absorbing it.
+     * <h4>The 2.4.0 re-pin: 148 rows left {@code refuses:COORDINATE_OUTSIDE_GRID} entirely</h4>
+     *
+     * <p>That verdict no longer appears in this file. Those 148 rows were all {@code +datum=NAD27},
+     * and the verdict was correct for the <em>operator</em> layer, which is where the legacy engine
+     * used to sit: {@code cs2cs} given an explicit non-{@code @} {@code nadgrids=} does refuse all
+     * 148. It was the wrong verdict for a <b>CRS-level</b> API, which is what
+     * {@link CoordinateTransformFactory} is, and PROJ's own CRS layer answers 131 of them via a
+     * declared ballpark. {@link DomainErrorPolicy#LEGACY_NO_SHIFT} made the legacy default match
+     * that, so the rows were re-adjudicated against {@code cs2cs} 9.8.1 on the dictionary strings:
+     *
+     * <ul>
+     *   <li><b>131 &rarr; {@code passing}.</b> {@code cs2cs} and Proj4J now agree on every one, to a
+     *       median of 3.2e-8&nbsp;m and a maximum of 9.5e-7&nbsp;m &mdash; sub-micron. 113 of the 131
+     *       matched their <em>existing</em> pinned coordinate and were left untouched as unmoved
+     *       evidence; only <b>18</b> needed a new coordinate.</li>
+     *   <li><b>17 &rarr; {@code refuses:COORDINATE_OUT_OF_DOMAIN}.</b> {@code cs2cs} refuses these at
+     *       the CRS layer too, and Proj4J's cause for them was never the grid: it is the projection
+     *       domain. That is also what {@link #everyRowAssertsSomethingThatCanFail()} was reporting
+     *       when it named 17 rows whose {@code COORDINATE_OUTSIDE_GRID} verdict "is also satisfied
+     *       by {@code COORDINATE_OUT_OF_DOMAIN}" &mdash; the cause was simply wrong, and the
+     *       non-vacuity control had been saying so.</li>
+     * </ul>
+     *
+     * <p>The cross-tab is exact: 148 rows, {@code cs2cs} answers 131 and refuses 17, Proj4J answers
+     * the same 131 and refuses the same 17. There is no cell where they disagree.
+     *
+     * <p><b>No expectation in this file comes from Proj4J's own output.</b> Over all 4,000
+     * answering rows Proj4J and {@code cs2cs} 9.8.1 agree to 1e-12 relative or better &mdash; so the
+     * reference is a measurement, and the file would have caught a disagreement rather than
+     * absorbing it.
      *
      * <p>{@link MetaCrsRefusalCensusTest} pins the 2&times;2 against PROJ independently, and
      * {@link #everyRowAssertsSomethingThatCanFail()} is this file's non-vacuity control.
@@ -148,8 +169,8 @@ public class MetaCRSTest {
 
     /** Rows in {@code proj4-epsg.csv}, and the split the regeneration produced. */
     private static final int EXPECTED_ROWS = 4280;
-    private static final int EXPECTED_ANSWERING_ROWS = 3869;
-    private static final int EXPECTED_REFUSAL_ROWS = 411;
+    private static final int EXPECTED_ANSWERING_ROWS = 4000;
+    private static final int EXPECTED_REFUSAL_ROWS = 280;
 
     /**
      * <b>Every one of the 4,280 rows is perturbed and must be noticed.</b>
@@ -338,7 +359,15 @@ public class MetaCRSTest {
     /** {@code EPSG:3819}: answers, and within the CSV's own expected coordinate and tolerance. */
     private static final String ANSWERS = "3819";
 
-    /** {@code EPSG:4267} is {@code +datum=NAD27}: no shipped grid reaches (1, -1). */
+    /**
+     * {@code EPSG:4267} is {@code +datum=NAD27}: no shipped grid reaches (1, -1).
+     *
+     * <p><b>Only refuses under {@link DomainErrorPolicy#THROW}.</b> Since 2.4.0 the default legacy
+     * policy is {@link DomainErrorPolicy#LEGACY_NO_SHIFT}, which passes this through unshifted — and
+     * that is why the row is now {@code passing} in the CSV. The controls below therefore evaluate it
+     * with the strict policy explicitly, which makes them a scope proof as well as a verdict proof:
+     * they fail if the engine ever stops refusing.
+     */
     private static final String REFUSES_OUTSIDE_GRID = "4267";
 
     /** {@code EPSG:2020} is a {@code tmerc} whose central meridian is 83.5&deg; away. */
@@ -363,6 +392,32 @@ public class MetaCRSTest {
         Assert.assertNotNull("a returned coordinate must not satisfy a refusal verdict", mismatch);
         Assert.assertTrue("and the report must say what came back instead: " + mismatch,
                 mismatch.contains("must refuse") && mismatch.contains("returned ("));
+    }
+
+    /**
+     * The {@code evaluate(CRSFactory, DomainErrorPolicy)} overload honours its argument, and passing
+     * {@code null} to it is the same as not passing it.
+     *
+     * <p>Both halves matter. The first is what makes
+     * {@link #aRefusalVerdictIsSatisfiedByTheRightRefusal()} a real measurement rather than two
+     * assertions about the same call — if the policy were ignored, the strict and lenient legs there
+     * would return identical outcomes and the test would be asserting a contradiction. The second is
+     * what lets every other caller in this file keep using the one-argument form and get the factory
+     * default, unchanged.
+     */
+    @Test
+    public void theEvaluateOverloadHonoursItsPolicyAndNullMeansDefault() {
+        MetaCRSTestCase row = probe(REFUSES_OUTSIDE_GRID, "passing");
+
+        MetaCRSTestCase.Outcome strict = row.evaluate(csFactory, DomainErrorPolicy.THROW).outcome();
+        MetaCRSTestCase.Outcome lenient =
+                row.evaluate(csFactory, DomainErrorPolicy.LEGACY_NO_SHIFT).outcome();
+        Assert.assertEquals(MetaCRSTestCase.Outcome.REFUSED, strict);
+        Assert.assertNotEquals("the policy argument must change the outcome, or it is being ignored",
+                strict, lenient);
+
+        Assert.assertEquals("null must mean 'use the factory default'",
+                row.evaluate(csFactory).outcome(), row.evaluate(csFactory, null).outcome());
     }
 
     /**
@@ -404,10 +459,16 @@ public class MetaCRSTest {
     @Test
     public void aRefusalVerdictIsSatisfiedByTheRightRefusal() {
         MetaCRSTestCase row = probe(REFUSES_OUTSIDE_GRID, "refuses:COORDINATE_OUTSIDE_GRID");
-        MetaCRSTestCase.Result result = row.evaluate(csFactory);
+        MetaCRSTestCase.Result result = row.evaluate(csFactory, DomainErrorPolicy.THROW);
         Assert.assertEquals(MetaCRSTestCase.Outcome.REFUSED, result.outcome());
         Assert.assertEquals(ErrorCause.COORDINATE_OUTSIDE_GRID, result.cause());
         Assert.assertNull(row.verdictMismatch(result));
+
+        // The scope proof: the same row under the DEFAULT policy answers instead, which is the whole
+        // of the 2.4.0 change. Both halves in one test, so neither can drift without the other.
+        MetaCRSTestCase.Result lenient = row.evaluate(csFactory, DomainErrorPolicy.LEGACY_NO_SHIFT);
+        Assert.assertNotEquals("LEGACY_NO_SHIFT must not refuse a grid coverage miss",
+                MetaCRSTestCase.Outcome.REFUSED, lenient.outcome());
 
         Assert.assertNull("'failing' accepts this refusal...",
                 MetaCRSTestCase.verdictMismatch("failing", result));
@@ -428,8 +489,11 @@ public class MetaCRSTest {
     @Test
     public void theThreeLegacyVerdictsKeepTheirExactMeaning() {
         MetaCRSTestCase.Result inTolerance = probe(ANSWERS, "passing").evaluate(csFactory);
+        // REFUSES_OUT_OF_DOMAIN rather than REFUSES_OUTSIDE_GRID: this test needs *a* refusal, and a
+        // projection-domain refusal is one under every DomainErrorPolicy. Coupling it to the grid
+        // case would make a table about verdict semantics depend on the 2.4.0 default.
         MetaCRSTestCase.Result refused =
-                probe(REFUSES_OUTSIDE_GRID, "passing").evaluate(csFactory);
+                probe(REFUSES_OUT_OF_DOMAIN, "passing").evaluate(csFactory);
         MetaCRSTestCase.Result outOfTolerance = new MetaCRSTestCase("probe", "passing",
                 "EPSG", "4326", "EPSG", ANSWERS, 1.0, -1.0, 0.0,
                 0.0, 0.0, 0.0, 0.000001, 0.000001, 0.000001, "", "", "", "")

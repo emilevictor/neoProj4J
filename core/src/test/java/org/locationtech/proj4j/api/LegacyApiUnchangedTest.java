@@ -146,11 +146,22 @@ public class LegacyApiUnchangedTest {
                 out.x < -1.3e7);
     }
 
-    /** The default {@link CoordinateTransformFactory} constructor's behaviour is unchanged. */
+    /**
+     * The default {@link CoordinateTransformFactory} constructor's behaviour is unchanged — and as
+     * of 2.4.0 that sentence finally means what it says.
+     *
+     * <p>The default policy is {@link org.locationtech.proj4j.DomainErrorPolicy#LEGACY_NO_SHIFT}
+     * rather than {@code THROW}. This test used to assert {@code THROW} and pass while the class it
+     * guards was quietly losing 267 transforms that 1.4.3 completed: pinning the *policy* is not the
+     * same as pinning the *behaviour*, and only the latter is what "unchanged" promises. The policy
+     * assertion is kept because it is cheap and catches an accidental flip; the behaviour it stands
+     * for is proved in {@code failopen/Nad27CoverageMissPassesThroughTest}.
+     */
     @Test
     public void theLegacyFactoryDefaultsAreUnchanged() {
         CoordinateTransformFactory f = new CoordinateTransformFactory();
-        assertEquals(org.locationtech.proj4j.DomainErrorPolicy.THROW, f.getDomainErrorPolicy());
+        assertEquals(org.locationtech.proj4j.DomainErrorPolicy.LEGACY_NO_SHIFT,
+                f.getDomainErrorPolicy());
         assertFalse("CoordinateTransformFactory must not be deprecated in 1.5.0: a deprecation "
                         + "warning on a class nobody needs to migrate away from is noise",
                 CoordinateTransformFactory.class.isAnnotationPresent(Deprecated.class));

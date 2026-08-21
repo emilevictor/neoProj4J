@@ -425,4 +425,10 @@
 # with no hit for COUNT_MISMATCH, DEAD_RULE, EXPIRED_RULE or PENDING_RULE_FIRED, and ProbesTest green
 # on the corrected dictionary counts. To be confirmed in the pinned container by
 # `./docker/run.sh golden --out /tmp/neoproj4j-out-230 --volume neoproj4j-m2-230`.
-golden diff: 11944 UNCHANGED, 41486 CHANGED, 20 ADDED, 0 REMOVED; 39423 INTENDED, 2083 UNEXPLAINED (baseline 53430 rows, current 53450 rows)
+# RE-PINNED 2026-08-21 by the NAD27 LEGACY_NO_SHIFT change. UNCHANGED 11944 -> 12081 and CHANGED
+# 41486 -> 41349: the same 137 rows, which stopped differing from the 1.4.3 baseline because the
+# legacy default answers them unshifted again, exactly as 1.4.3 did. UNEXPLAINED is UNCHANGED at
+# 2083 -- the change added 107 and DATUM-NAD27-COVERAGE-MISS-ANSWERS-AGAIN claims exactly those 107,
+# so the standing backlog neither grew nor shrank. INTENDED falls by 137 for the same reason
+# UNCHANGED rises by 137: those rows left the diff entirely.
+golden diff: 12081 UNCHANGED, 41349 CHANGED, 20 ADDED, 0 REMOVED; 39286 INTENDED, 2083 UNEXPLAINED (baseline 53430 rows, current 53450 rows)

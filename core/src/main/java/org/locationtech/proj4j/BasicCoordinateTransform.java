@@ -103,6 +103,13 @@ public class BasicCoordinateTransform implements CoordinateTransform, BulkCoordi
     private final DomainErrorPolicy domainErrorPolicy;
 
     /**
+     * {@code domainErrorPolicy == LEGACY_NO_SHIFT}, hoisted so the per-vertex path reads a final
+     * boolean instead of comparing enum references. See
+     * {@link #shiftOrPassThrough(Grid[], boolean, ProjCoordinate)}.
+     */
+    private final boolean suppressGridCoverageMiss;
+
+    /**
      * Whether the source projection can actually be inverted. Precomputed because it is a
      * property of the CRS pair, not of the coordinate, and {@link #transform} is called once per
      * row.
@@ -225,14 +232,24 @@ public class BasicCoordinateTransform implements CoordinateTransform, BulkCoordi
 
     /**
      * Creates a transformation from a source {@link CoordinateReferenceSystem}
-     * to a target one, failing closed on a per-coordinate error.
+     * to a target one, failing closed on a per-coordinate error <em>except</em> a datum grid
+     * coverage miss, which passes the coordinate through unshifted.
+     *
+     * <p>This constructor is 1.4.3-era API, so its policy is
+     * {@link DomainErrorPolicy#LEGACY_NO_SHIFT} rather than {@link DomainErrorPolicy#THROW} —
+     * changed in 2.4.0, because with {@code THROW} this constructor lost 267 measured transforms
+     * that 1.4.3 completed. Read that enum constant's javadoc before relying on either behaviour.
+     * Every other per-coordinate cause still throws.
+     *
+     * <p>Pass {@link DomainErrorPolicy#THROW} explicitly for a transform that refuses a coverage
+     * miss, or use {@link org.locationtech.proj4j.api.Proj}, whose defaults are strict throughout.
      *
      * @param srcCRS the source CRS to transform from
      * @param tgtCRS the target CRS to transform to
      */
     public BasicCoordinateTransform(CoordinateReferenceSystem srcCRS,
                                     CoordinateReferenceSystem tgtCRS) {
-        this(srcCRS, tgtCRS, DomainErrorPolicy.THROW);
+        this(srcCRS, tgtCRS, DomainErrorPolicy.LEGACY_NO_SHIFT);
     }
 
     /**
@@ -252,6 +269,8 @@ public class BasicCoordinateTransform implements CoordinateTransform, BulkCoordi
         this.tgtCRS = tgtCRS;
         this.domainErrorPolicy =
                 domainErrorPolicy == null ? DomainErrorPolicy.THROW : domainErrorPolicy;
+        this.suppressGridCoverageMiss =
+                this.domainErrorPolicy == DomainErrorPolicy.LEGACY_NO_SHIFT;
 
         // compute strategy for transformation at initialization time, to make transformation more efficient
         // this may include precomputing sets of parameters
@@ -422,7 +441,10 @@ public class BasicCoordinateTransform implements CoordinateTransform, BulkCoordi
     @Override
 	public ProjCoordinate transform(ProjCoordinate src, ProjCoordinate tgt)
             throws Proj4jException {
-        if (domainErrorPolicy == DomainErrorPolicy.THROW) {
+        // Tested against RETURN_NAN rather than for THROW: LEGACY_NO_SHIFT is a THROW at this level
+        // and applies its single concession deeper, at the grid-shift call site. Written as `!=` so a
+        // future policy that is not about NaN cannot silently acquire the NaN recovery by default.
+        if (domainErrorPolicy != DomainErrorPolicy.RETURN_NAN) {
             return transformClosed(src, tgt);
         }
         try {
@@ -571,7 +593,7 @@ public class BasicCoordinateTransform implements CoordinateTransform, BulkCoordi
         /*      coordinates.                                                    */
         /* -------------------------------------------------------------------- */
         if (srcCrsDatumTransformType == Datum.TYPE_GRIDSHIFT) {
-            srcCRS.getDatum().shift(pt);
+            datumShiftOrPassThrough(srcCRS.getDatum(), false, pt);
         }
 
         /* ==================================================================== */
@@ -604,7 +626,44 @@ public class BasicCoordinateTransform implements CoordinateTransform, BulkCoordi
         /*      Apply grid shift to destination if required.                    */
         /* -------------------------------------------------------------------- */
         if (tgtCrsDatumTransformType == Datum.TYPE_GRIDSHIFT) {
-            tgtCRS.getDatum().inverseShift(pt);
+            datumShiftOrPassThrough(tgtCRS.getDatum(), true, pt);
+        }
+    }
+
+    /**
+     * {@link Datum#shift(ProjCoordinate)} / {@link Datum#inverseShift(ProjCoordinate)} with
+     * {@link DomainErrorPolicy#LEGACY_NO_SHIFT}'s concession applied.
+     *
+     * <p>The single-point sibling of {@link #shiftOrPassThrough(Grid[], boolean, ProjCoordinate)}.
+     * Two helpers rather than one because the two paths reach the grids differently — this one
+     * resolves the list per call through {@code Datum}, the bulk one holds a {@code Grid[]} hoisted
+     * in the constructor — and because unifying them behind a lambda would allocate a capturing
+     * object per vertex.
+     *
+     * <p><b>Both must be patched or neither is.</b> Patching only the bulk path is a silent
+     * half-fix: the single-point path is the one the legacy API actually uses, and a frozen-probe
+     * A/B over 20,634 points showed exactly zero movement until this call site changed too.
+     */
+    private void datumShiftOrPassThrough(Datum datum, boolean inverse, ProjCoordinate pt) {
+        if (!suppressGridCoverageMiss) {
+            if (inverse) {
+                datum.inverseShift(pt);
+            } else {
+                datum.shift(pt);
+            }
+            return;
+        }
+        try {
+            if (inverse) {
+                datum.inverseShift(pt);
+            } else {
+                datum.shift(pt);
+            }
+        } catch (CrsTransformException e) {
+            if (!isSuppressibleGridMiss(e.cause())) {
+                throw e;
+            }
+            // Pass through unshifted: 1.4.3's answer, and PROJ's ballpark answer at the CRS layer.
         }
     }
 
@@ -908,7 +967,7 @@ public class BasicCoordinateTransform implements CoordinateTransform, BulkCoordi
             // Grid.shift(Grid[], ...) rather than srcDatum.shift(pt): same arithmetic, same
             // selection order, but the grid list was resolved once in the constructor. See
             // srcGrids.
-            Grid.shift(srcGrids, false, pt);
+            shiftOrPassThrough(srcGrids, false, pt);
         }
         if (transformViaGeocentric) {
             srcGeoConv.convertGeodeticToGeocentric(pt);
@@ -921,8 +980,92 @@ public class BasicCoordinateTransform implements CoordinateTransform, BulkCoordi
             tgtGeoConv.convertGeocentricToGeodetic(pt);
         }
         if (tgtGridShift) {
-            Grid.shift(tgtGrids, true, pt);
+            shiftOrPassThrough(tgtGrids, true, pt);
         }
+    }
+
+    /**
+     * {@link Grid#shift(Grid[], boolean, ProjCoordinate)}, with
+     * {@link DomainErrorPolicy#LEGACY_NO_SHIFT}'s single concession applied.
+     *
+     * <p>Under that policy a coverage miss leaves the coordinate alone and the transform continues.
+     * No state is involved and nothing is retried: {@code Grid.shift} already restores the input
+     * before it throws (its {@code restoreUnlessShifted} in a {@code finally}), so on entry to the
+     * catch {@code pt} <em>is</em> the unshifted coordinate and there is nothing to undo. That is
+     * what makes this a two-line change rather than a re-run of the pipeline with a flag threaded
+     * through it.
+     *
+     * <p>{@code suppressGridCoverageMiss} is final and set in the constructor, so this adds a
+     * predictable branch and no field write on a per-vertex path. A try block that does not throw
+     * costs nothing, which is why the guarded and unguarded forms are not split into two call sites.
+     *
+     * <p>Only {@link ErrorCause#COORDINATE_OUTSIDE_GRID} is swallowed. Everything else — a grid that
+     * would not load, a NaN interpolation, an API misuse — propagates, under every policy.
+     */
+    private void shiftOrPassThrough(Grid[] grids, boolean inverse, ProjCoordinate pt) {
+        if (!suppressGridCoverageMiss) {
+            Grid.shift(grids, inverse, pt);
+            return;
+        }
+        try {
+            Grid.shift(grids, inverse, pt);
+        } catch (CrsTransformException e) {
+            if (!isSuppressibleGridMiss(e.cause())) {
+                throw e;
+            }
+            // Pass through unshifted: 1.4.3's answer, and PROJ's ballpark answer at the CRS layer.
+        }
+    }
+
+    /**
+     * The one {@link ErrorCause} {@link DomainErrorPolicy#LEGACY_NO_SHIFT} passes through.
+     *
+     * <p><b>Defensive, and deliberately kept so.</b> The datum grid-shift path raises exactly one
+     * cause today: {@code Grid.shift}'s only {@code throw} is
+     * {@link ErrorCause#COORDINATE_OUTSIDE_GRID}, and it uses that same cause for both of PROJ's
+     * shapes — no grid contains the point, and a grid contains it but interpolation yields no value
+     * (which {@code applyOne} signals with a {@code NO_VALUE} return, not an exception). So no input
+     * can currently reach the {@code throw e} branch above, which means <b>no behavioural test can
+     * prove this predicate is narrow</b>: widening the catch to swallow everything leaves the whole
+     * suite green. That was measured, not assumed.
+     *
+     * <p>Extracted as a named predicate precisely so the narrowness is testable anyway —
+     * {@code failopen/Nad27CoverageMissPassesThroughTest} exhausts every {@link ErrorCause} against
+     * it. Removing the guard because "nothing reaches it" would make the next cause added to the grid
+     * path silently suppressible, which is the failure this library exists to prevent.
+     *
+     * @param cause the cause raised by the grid shift
+     * @return true only for {@link ErrorCause#COORDINATE_OUTSIDE_GRID}
+     */
+    static boolean isSuppressibleGridMiss(ErrorCause cause) {
+        return cause == ErrorCause.COORDINATE_OUTSIDE_GRID;
+    }
+
+    /**
+     * Whether this transform can return a coordinate whose datum shift was <em>not</em> applied.
+     *
+     * <p>True iff a datum grid shift is in the path <em>and</em> the policy is
+     * {@link DomainErrorPolicy#LEGACY_NO_SHIFT}. It is a <b>planning-time possibility flag, not a
+     * per-coordinate verdict</b>, and the distinction is the whole point: a per-point answer would
+     * need a mutable field written once per vertex, which this class does not have and will not
+     * grow. It says "some coordinates from this transform may be unshifted, by up to the size of the
+     * datum shift"; it does not say which.
+     *
+     * <p>Measured on the population that motivated the policy — 267 NAD27 probes outside every
+     * shipped grid — an unshifted answer agrees with {@code cs2cs} 9.8.1 to within 1&nbsp;mm on 218
+     * of them and is up to 753&nbsp;m out on the other 49. So a {@code true} here is worth acting on
+     * when metre accuracy matters.
+     *
+     * <p>A caller who needs the per-coordinate verdict has two documented routes, both of which cost
+     * this policy: {@link DomainErrorPolicy#THROW} with a {@code catch}, or the bulk API under
+     * {@code THROW}, whose status array reports
+     * {@link org.locationtech.proj4j.bulk.TransformStatus#ERR_OUTSIDE_GRID_EXTENT} per point.
+     *
+     * @return true if an unshifted coordinate is reachable from this transform
+     * @since 2.4.0
+     */
+    public boolean mayReturnUnshiftedCoordinates() {
+        return suppressGridCoverageMiss && (srcGridShift || tgtGridShift);
     }
 
     /**
@@ -937,7 +1080,9 @@ public class BasicCoordinateTransform implements CoordinateTransform, BulkCoordi
      * @return true if a per-coordinate failure should abandon the batch with an exception
      */
     private boolean failFast(byte[] status) {
-        return status == null && domainErrorPolicy == DomainErrorPolicy.THROW;
+        // `!= RETURN_NAN`, not `== THROW`: LEGACY_NO_SHIFT still fails fast for every cause it does
+        // not suppress, and it suppresses at the grid-shift call site rather than here.
+        return status == null && domainErrorPolicy != DomainErrorPolicy.RETURN_NAN;
     }
 
     /**
