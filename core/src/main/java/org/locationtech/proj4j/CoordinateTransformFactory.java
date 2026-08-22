@@ -23,11 +23,16 @@ package org.locationtech.proj4j;
  * inherits the factory's policy, so an application that has one factory has one switch:
  *
  * <pre>{@code
- * // fail closed -- the default, and the only mode under which the CrsTransformException
- * // contract holds
- * CoordinateTransformFactory strict = new CoordinateTransformFactory();
+ * // the default: fails closed on every per-coordinate cause EXCEPT a datum grid coverage
+ * // miss, which passes the coordinate through unshifted, as 1.4.3 did
+ * CoordinateTransformFactory compatible = new CoordinateTransformFactory();
  *
- * // documented escape for a caller that was relying on 1.4.3's silence
+ * // fully fail-closed; the only mode under which the CrsTransformException contract holds
+ * // for every cause
+ * CoordinateTransformFactory strict =
+ *         new CoordinateTransformFactory(DomainErrorPolicy.THROW);
+ *
+ * // documented escape for a caller that was relying on 1.4.3's silence everywhere
  * CoordinateTransformFactory lenient =
  *         new CoordinateTransformFactory(DomainErrorPolicy.RETURN_NAN);
  * }</pre>
@@ -46,8 +51,19 @@ package org.locationtech.proj4j;
  *
  * <ul>
  * <li>This class's selection behaviour is <b>unchanged</b>. The transform it returns is the same
- * {@link BasicCoordinateTransform} it has always returned, and an unreachable
- * {@code @}-optional grid is still skipped silently, exactly as in 1.4.3.</li>
+ * {@link BasicCoordinateTransform} it has always returned, an unreachable {@code @}-optional grid is
+ * still skipped silently, and &mdash; since 2.4.0 &mdash; a point outside every grid that
+ * <em>did</em> load is passed through unshifted, both exactly as in 1.4.3.
+ *
+ * <p><b>That second clause was a promise this class broke between 2.0.0 and 2.3.0, and the fix is
+ * why the default policy is now {@link DomainErrorPolicy#LEGACY_NO_SHIFT}.</b> The two cases read
+ * alike and are not: "the grid file is absent" resolves to an empty list and has always been a
+ * silent no-op, while "the point is outside a grid that loaded" began throwing
+ * {@link ErrorCause#COORDINATE_OUTSIDE_GRID}. Shipping {@code conus} in {@code proj4j-epsg} turned
+ * the rare case into the common one, because {@code +datum=NAD27}'s list stopped resolving empty.
+ * Measured over 20,634 in-domain probes, this class lost <b>267</b> transforms that both
+ * {@code cs2cs} 9.8.1 and 1.4.3 complete. A frozen class cannot lose 267 transforms to a
+ * data-shipping decision, so it does not.</li>
  * <li>It is <b>not deprecated</b>, in 1.5.0 or later. Java 8 has no
  * {@code @Deprecated(forRemoval=)}, so the promise is stated in prose instead: <b>this class will
  * not be removed</b>. Nobody should plan a migration they do not need.</li>
@@ -60,7 +76,10 @@ package org.locationtech.proj4j;
  * <p>What <em>did</em> change in 1.5.0, and applies here too, is per-coordinate honesty: a
  * computation failure is reported as an exception rather than as a plausible coordinate. That is a
  * bug fix, it is governed by {@link DomainErrorPolicy}, and the escape hatch is
- * {@link DomainErrorPolicy#RETURN_NAN}.
+ * {@link DomainErrorPolicy#RETURN_NAN}. The one cause carved back out of it in 2.4.0 is a datum grid
+ * <em>coverage</em> miss, for the reason above; see
+ * {@link BasicCoordinateTransform#mayReturnUnshiftedCoordinates()} for how to tell whether a given
+ * transform can produce one.
  *
  * @author mbdavis
  * @see DomainErrorPolicy
@@ -72,11 +91,16 @@ public class CoordinateTransformFactory {
     private final DomainErrorPolicy domainErrorPolicy;
 
     /**
-     * A factory whose transforms fail closed, throwing {@link CrsTransformException} on a
-     * per-coordinate error.
+     * A factory whose transforms fail closed on a per-coordinate error, throwing
+     * {@link CrsTransformException} &mdash; <em>except</em> a datum grid coverage miss, which passes
+     * the coordinate through unshifted as 1.4.3 did.
+     *
+     * <p>The policy is {@link DomainErrorPolicy#LEGACY_NO_SHIFT}, changed from
+     * {@link DomainErrorPolicy#THROW} in 2.4.0. Pass {@code THROW} explicitly for a factory that
+     * refuses a coverage miss too.
      */
     public CoordinateTransformFactory() {
-        this(DomainErrorPolicy.THROW);
+        this(DomainErrorPolicy.LEGACY_NO_SHIFT);
     }
 
     /**

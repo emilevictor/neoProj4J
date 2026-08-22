@@ -5,6 +5,78 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`CoordinateTransformFactory` stopped losing 267 transforms that 1.4.3 completed.** A
+  `+datum=NAD27` point outside every grid that loaded now passes through **unshifted** on the legacy
+  API instead of raising `COORDINATE_OUTSIDE_GRID`, which is what 1.4.3 did and what PROJ's CRS layer
+  arrives at via a declared *Ballpark geographic offset*.
+
+  The class's javadoc has promised since 1.5.0 that *"an unreachable `@`-optional grid is still
+  skipped silently, exactly as in 1.4.3"*, and that promise quietly broke when `proj4j-epsg` began
+  shipping `conus`: `+datum=NAD27`'s `@`-optional list stopped resolving **empty** (always a silent
+  no-op) and started resolving **non-empty**, which is the case `Grid.shift` refuses. The two read
+  alike and are not the same question. Measured over **20,634 in-domain probes across 6,878
+  byte-identical dictionary definitions**, the legacy path refused **267** transforms that both
+  `cs2cs` 9.8.1 **and** proj4j 1.4.3 complete. After the fix that number is **0**, and the 20,055
+  probes that already answered are **bit-identical** — the change adds answers and moves nothing.
+
+  **The engine is unchanged.** `Grid.shift` still throws, the operator layer still fails closed, and
+  the gie/GIGS corpus is untouched at **7,915 / 7,922, regressed 0**. What changed is one default.
+
+  Honest about the cost: on those 267 probes an unshifted answer agrees with `cs2cs` to within
+  **1 mm on 218 (81.6%)** and is up to **753 m** out on the other **49**, where PROJ found a real
+  shift from NADCON grids this library does not ship. Overall p99 moves 15.2 m → 33.1 m and the worst
+  case 558 m → 753 m. `BasicCoordinateTransform.mayReturnUnshiftedCoordinates()` is how a caller
+  learns those 49 are possible.
+
+### Added
+
+- **`DomainErrorPolicy.LEGACY_NO_SHIFT`.** Behaves as `THROW` for every cause except
+  `COORDINATE_OUTSIDE_GRID` from a datum grid shift, which passes the coordinate through unshifted.
+  It is now the default for `new CoordinateTransformFactory()` and
+  `new BasicCoordinateTransform(src, tgt)` — both 1.4.3-era API that promise 1.4.3 behaviour.
+  `THROW` remains the default everywhere else, including all of `api.Proj`, and **an explicit
+  `null` still normalises to `THROW`**: passing `null` is a caller who reached for the policy
+  argument, so the strict reading is the safer one, whereas not passing one is legacy code that
+  predates the argument.
+- **`BasicCoordinateTransform.mayReturnUnshiftedCoordinates()`.** True iff a datum grid shift is in
+  the path *and* the policy is `LEGACY_NO_SHIFT`. A **planning-time possibility flag, not a
+  per-coordinate verdict** — a per-point answer would need a mutable field written once per vertex,
+  which this class does not have and will not grow. A caller who needs the per-coordinate verdict
+  wants `THROW`, or the bulk API under `THROW`, whose status array reports
+  `ERR_OUTSIDE_GRID_EXTENT`.
+
+### Changed
+
+- **`proj4-epsg.csv`: the `refuses:COORDINATE_OUTSIDE_GRID` verdict is gone from the file.** Its 148
+  rows were re-adjudicated against `cs2cs` 9.8.1 on the dictionary strings — **131 → `passing`**,
+  **17 → `refuses:COORDINATE_OUT_OF_DOMAIN`**. The cross-tab is exact: `cs2cs` answers 131 and
+  refuses 17, Proj4J answers the same 131 and refuses the same 17, with no cell where they disagree.
+  On the 131 the two agree to a median of **3.2e-8 m** and a maximum of **9.5e-7 m**. Only **18**
+  coordinates needed re-pinning; the other 113 matched their existing values and were left as unmoved
+  evidence. The 17 are the rows `MetaCRSTest`'s own non-vacuity control had been reporting for some
+  time as having an unpinnable cause — their cause was always the projection domain, not the grid.
+- **`MetaCrsRefusalCensusTest`'s divergence cell is now zero and its meaning has inverted.** It used
+  to pin "Proj4J refuses, `cs2cs` answers" at **131**; it now forbids that cell entirely. Proj4J and
+  `cs2cs` 9.8.1 agree on the answer/refuse decision for **all 4,280 rows**.
+- **Golden: three rules retired, eleven re-pinned, backlog unchanged.**
+  `FAILCLOSED-NAD27-OUTSIDE-GRID-REPORTED`, `GRIDS-EPSG-CONUS-SYN-REFUSED` and
+  `GRIDS-EPSG-CONUS-SYN-TMERC-REFUSED` all matched 0 rows and are deleted with tombstones that say
+  why and forbid re-adding them. **Six rules return to *exactly* the counts the retired rule's own
+  `reason` recorded before it took their rows** — `DATUM-ISEQUAL-SELF-COMPARISON` 332,
+  `PARSE-VUNITS-ACCEPTED` 964, `PROJ-POLYCONIC-KERNEL-CORRECTED` 51, `PROJ-AEA-SPHERICAL-INVERSE`
+  164, `PROJ-POLYCONIC-INVERSE-CONVERGES` 6, `PARSE-DMS-PARAMETER-VALUE` 10 — which is the strongest
+  available evidence that the withdrawal restores the prior behaviour precisely rather than
+  approximately. **UNEXPLAINED is unchanged at 2,083**: the change added 107 rows and
+  `DATUM-NAD27-COVERAGE-MISS-ANSWERS-AGAIN` claims exactly those 107. That rule is scoped by
+  **`keys`, not by predicate**, deliberately: the obvious `datums: [NAD27]` + status-transition
+  version matches **177** rows, because 70 pre-existing backlog rows share the transition while
+  having a different mechanism (their grid *succeeded*, then the projection refused). Claiming them
+  would be laundering.
+
 ## [2.3.0] - 2026-08-18
 
 ### Added

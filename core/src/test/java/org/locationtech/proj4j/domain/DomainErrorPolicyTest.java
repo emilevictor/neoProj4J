@@ -59,12 +59,25 @@ public class DomainErrorPolicyTest {
 
     // ------------------------------------------------------------------------- defaults
 
-    /** Strict by default, on both the factory and the transform. */
+    /**
+     * The defaults, and the one asymmetry in them.
+     *
+     * <p><b>The no-argument constructors default to {@link DomainErrorPolicy#LEGACY_NO_SHIFT}, not
+     * {@link DomainErrorPolicy#THROW}</b> — changed in 2.4.0. Both are 1.4.3-era API that promises
+     * 1.4.3 behaviour, and with {@code THROW} they lost 267 measured transforms that both
+     * {@code cs2cs} 9.8.1 and 1.4.3 complete, because {@code proj4j-epsg} began shipping
+     * {@code conus} and so {@code +datum=NAD27}'s {@code @}-optional list stopped resolving empty.
+     *
+     * <p><b>An explicit null still normalises to {@code THROW}</b>, and that difference is
+     * deliberate: passing {@code null} is a caller who reached for the policy argument, so the strict
+     * value is the safer reading of the intent, whereas not passing one at all is legacy code that
+     * predates the argument's existence.
+     */
     @Test
-    public void throwIsTheDefaultEverywhere() {
-        assertSame(DomainErrorPolicy.THROW,
+    public void theNoArgDefaultIsLegacyAndAnExplicitNullIsStrict() {
+        assertSame(DomainErrorPolicy.LEGACY_NO_SHIFT,
                 new CoordinateTransformFactory().getDomainErrorPolicy());
-        assertSame(DomainErrorPolicy.THROW,
+        assertSame(DomainErrorPolicy.LEGACY_NO_SHIFT,
                 new BasicCoordinateTransform(wgs84(), merc()).getDomainErrorPolicy());
         // A null policy is normalised rather than stored, so getDomainErrorPolicy() never returns
         // null and no call site needs a null check.

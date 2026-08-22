@@ -364,8 +364,35 @@ public class MetaCRSTestCase {
      * @return the outcome; never null, never throwing {@link Proj4jException}
      */
     public Result evaluate(CRSFactory csFactory) {
+        return evaluate(csFactory, null);
+    }
+
+    /**
+     * {@link #evaluate(CRSFactory)} under a chosen {@link DomainErrorPolicy}.
+     *
+     * <p>Exists because the default legacy policy is
+     * {@link DomainErrorPolicy#LEGACY_NO_SHIFT} as of 2.4.0, which passes a datum grid
+     * <em>coverage</em> miss through unshifted instead of refusing. The CSV records what the default
+     * factory does, so it must keep using the default — but the verdict-semantics controls in
+     * {@code MetaCRSTest} need a row that genuinely refuses with
+     * {@link ErrorCause#COORDINATE_OUTSIDE_GRID}, and passing {@link DomainErrorPolicy#THROW} here
+     * gets them one from a real transform rather than a fabricated {@link Result}.
+     *
+     * <p>That has a second use, and it is the more important one: those controls now double as the
+     * proof that the 2.4.0 change is <b>scoped to the default</b> and did not weaken the engine. If
+     * the strict policy ever stopped refusing, they would fail.
+     *
+     * @param csFactory the factory used to resolve both CRSs
+     * @param policy    the per-coordinate policy, or null for the factory default
+     * @return the outcome; never null, never throwing {@link Proj4jException}
+     * @since 2.4.0
+     */
+    public Result evaluate(CRSFactory csFactory, DomainErrorPolicy policy) {
         try {
-            boolean inTolerance = execute(csFactory);
+            srcCS = createCS(csFactory, srcCrsAuth, srcCrs);
+            tgtCS = createCS(csFactory, tgtCrsAuth, tgtCrs);
+            boolean inTolerance = executeTransform(srcCS, tgtCS,
+                    policy == null ? ctFactory : new CoordinateTransformFactory(policy));
             return Result.answered(inTolerance, resultPt.x, resultPt.y);
         } catch (Proj4jException ex) {
             return Result.refused(ex);
@@ -486,13 +513,20 @@ public class MetaCRSTestCase {
     private boolean executeTransform(
             CoordinateReferenceSystem srcCS,
             CoordinateReferenceSystem tgtCS) {
+        return executeTransform(srcCS, tgtCS, ctFactory);
+    }
+
+    private boolean executeTransform(
+            CoordinateReferenceSystem srcCS,
+            CoordinateReferenceSystem tgtCS,
+            CoordinateTransformFactory factory) {
         srcPt.x = srcOrd1;
         srcPt.y = srcOrd2;
         // Testing: flip axis order to test SS sample file
         //srcPt.x = srcOrd2;
         //srcPt.y = srcOrd1;
 
-        CoordinateTransform trans = ctFactory.createTransform(srcCS, tgtCS);
+        CoordinateTransform trans = factory.createTransform(srcCS, tgtCS);
 
         trans.transform(srcPt, resultPt);
 

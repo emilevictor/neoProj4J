@@ -258,7 +258,16 @@ public class ConusShipsInEpsgArtifactTest {
         Class<?> coordType = cl.loadClass("org.locationtech.proj4j.ProjCoordinate");
 
         Object crsFactory = crsFactoryType.getDeclaredConstructor().newInstance();
-        Object ctFactory = ctFactoryType.getDeclaredConstructor().newInstance();
+
+        // DomainErrorPolicy.THROW explicitly, reflectively, because the no-arg constructor defaults
+        // to LEGACY_NO_SHIFT as of 2.4.0 and would pass a coverage miss through unshifted -- which is
+        // the outcome pointsOutsideEveryShippedGridStillFailClosed exists to rule out. Loaded through
+        // `cl` like everything else here: the enum constant must come from the same loader as the
+        // constructor's parameter type or the invoke fails with IllegalArgumentException.
+        Class<?> policyType = cl.loadClass("org.locationtech.proj4j.DomainErrorPolicy");
+        Object throwPolicy = policyType.getField("THROW").get(null);
+        Object ctFactory =
+                ctFactoryType.getDeclaredConstructor(policyType).newInstance(throwPolicy);
 
         Method createFromName = crsFactoryType.getMethod("createFromName", String.class);
         Object src = createFromName.invoke(crsFactory, "EPSG:4267");

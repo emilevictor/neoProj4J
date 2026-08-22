@@ -175,6 +175,76 @@ ProjCoordinate result = new ProjCoordinate();
 wgsToUtm.transform(new ProjCoordinate(lon, lat), result);
 ```
 
+##### What happens when a coordinate cannot be transformed
+
+`DomainErrorPolicy` decides, and every transform a factory creates inherits the factory's setting, so
+an application with one factory has one switch:
+
+```Java
+// The default. Throws CrsTransformException on a per-coordinate failure -- EXCEPT a datum grid
+// coverage miss, which passes the coordinate through unshifted, as proj4j 1.4.3 did.
+new CoordinateTransformFactory();
+
+// Fully fail-closed: the only mode under which the CrsTransformException contract holds for
+// every cause. What new code should use if it is not bound by 1.4.3 compatibility.
+new CoordinateTransformFactory(DomainErrorPolicy.THROW);
+
+// NaN in every ordinate instead of an exception, for a caller that cannot use exceptions for
+// control flow. The reason is lost; prefer THROW and catch.
+new CoordinateTransformFactory(DomainErrorPolicy.RETURN_NAN);
+```
+
+The carve-out in the default exists because `+datum=NAD27` declares four `@`-optional NADCON grids
+and this library ships two of them, so a point outside CONUS and Canada has no grid to be shifted by.
+Refusing those cost **267** transforms that both `cs2cs` 9.8.1 and proj4j 1.4.3 complete, measured
+over 20,634 in-domain probes — so the legacy default answers them, unshifted, which is also where
+PROJ's CRS layer lands via a declared *Ballpark geographic offset*.
+
+That answer is right four times in five and not always: against `cs2cs` it agrees to within 1 mm on
+218 of the 267 and is up to 753 m out on the other 49. If metre accuracy matters, ask:
+
+```Java
+BasicCoordinateTransform t = new BasicCoordinateTransform(WGS84, NAD27);
+if (t.mayReturnUnshiftedCoordinates()) {
+    // a datum grid shift is in the path and some points may come back unshifted
+}
+```
+
+It is a **planning-time possibility flag, not a per-coordinate verdict**. For a per-point answer use
+`DomainErrorPolicy.THROW` and catch, or the bulk API under `THROW`, whose `byte[] status` reports
+`TransformStatus.ERR_OUTSIDE_GRID_EXTENT` for the individual points that missed.
+
+##### If you need NAD27 in Alaska, add the grid pack
+
+`+datum=NAD27` declares four `@`-optional NADCON grids —
+`@conus,@alaska,@ntv2_0.gsb,@ntv1_can.dat` — and `neoproj4j-epsg` carries `conus` and
+`ntv1_can.dat`. **`alaska` ships separately, in the optional `neoproj4j-grids-us-legacy`
+artifact**, because it is 1,053,928 bytes that most deployments do not need:
+
+```xml
+<dependency>
+  <groupId>io.github.emilevictor.neoproj4j</groupId>
+  <artifactId>neoproj4j-grids-us-legacy</artifactId>
+</dependency>
+```
+
+Nothing else changes — no code, no configuration. The pack lands at
+`proj4j-data/grids/alaska`, which is one of the resource prefixes `ResourceResolvers` already
+searches.
+
+Measured over the same 20,634 in-domain probes, on the 267 NAD27 transforms that fall outside every
+grid `neoproj4j-epsg` ships:
+
+| classpath | median error vs `cs2cs` 9.8.1 | worst | within 1 mm | worse than 1 m |
+|---|---:|---:|---:|---:|
+| `neoproj4j` + `neoproj4j-epsg` | 8.5e-6 m | 753 m | 218 / 267 | **49** |
+| **+ `neoproj4j-grids-us-legacy`** | 3.8e-6 m | **315 m** | **243 / 267** | **24** |
+
+**27 rows change, all 27 get closer to PROJ, none regress.** The remaining 24 lie outside all four
+declared grids; the production Canadian NTv2 grid is not redistributed here, and this repository's
+copy of `ntv2_0.gsb` is PROJ's *downsampled test fixture* under that name — see
+`conformance/src/test/resources/NOTICE-gie.md`. Do not ship it as a datum-shift grid.
+
 ## Building and testing
 
 ```
